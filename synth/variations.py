@@ -90,11 +90,16 @@ def generate(topic: str, description: str, *, n_messages: int = 5, n_variations:
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is not set (see .env.example)")
     model = os.environ.get("GEMINI_LLM_MODEL") or DEFAULT_LLM_MODEL
-    resp = genai.Client(api_key=api_key).models.generate_content(
-        model=model,
-        contents=PROMPT.format(description=description, n_messages=n_messages, n_variations=n_variations),
-        config=types.GenerateContentConfig(response_mime_type="application/json", temperature=1.0),
-    )
+    # Keep the client in a `with`: a temporary Client is garbage-collected (and its HTTP
+    # session closed) while the request is still running.
+    with genai.Client(api_key=api_key) as client:
+        resp = client.models.generate_content(
+            model=model,
+            contents=PROMPT.format(description=description, n_messages=n_messages, n_variations=n_variations),
+            config=types.GenerateContentConfig(response_mime_type="application/json", temperature=1.0),
+        )
+    if not resp.text:
+        raise RuntimeError(f"{model} returned no text (blocked or empty response)")
     messages = []
     for k, raw in enumerate(json.loads(resp.text)["messages"]):
         texts = list(dict.fromkeys(t.strip() for t in raw["variations"] if t.strip()))
