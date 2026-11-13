@@ -1,0 +1,55 @@
+{
+ "topic": "helsinki-tram-fares",
+ "description": "Helsinki tram fare increase (placeholder set copied from synth/fixture_gen.py SWARM_WAVES)",
+ "source": "handwritten",
+ "messages": [
+  {
+   "claim": "The fare hike is a scam for politicians' pet projects",
+   "held_out": false,
+   "variations": [
+    "The fare hike is a scam to fund politicians' pet projects. Share before they delete this!",
+    "This fare increase is a scam to pay for politicians' pet projects. Share before it's deleted!",
+    "Fare hike = scam funding the politicians' pet projects. Share this before they delete it!",
+    "The tram fare hike is just a scam for politicians' pet projects. Share before deletion!",
+    "Fare increase is a scam to fund pet projects of politicians. Share before they remove it!",
+    "The fare hike is a scam funding politicians' pet projects. Share it before they delete this!"
+   ]
+  },
+  {
+   "claim": "Ordinary families can't afford trams, the city doesn't care",
+   "held_out": false,
+   "variations": [
+    "Ordinary Helsinki families can't afford trams anymore. The city doesn't care about us.",
+    "Normal Helsinki families can no longer afford the tram. The city does not care about us.",
+    "Ordinary families in Helsinki can't afford trams any more. City hall doesn't care about us.",
+    "Helsinki's ordinary families can't afford the trams anymore. The city does not care.",
+    "Regular Helsinki families can't afford trams now. The city doesn't care about us at all.",
+    "Ordinary Helsinki families cannot afford trams anymore. The city doesn't care about us."
+   ]
+  },
+  {
+   "claim": "Boycott the trams on Friday",
+   "held_out": false,
+   "variations": [
+    "Boycott the trams on Friday! Show them we won't pay more. #StopTheFareHike",
+    "Boycott trams this Friday! Show them we will not pay more. #StopTheFareHike",
+    "Friday tram boycott! Let's show them we won't pay more. #StopTheFareHike",
+    "Boycott the trams Friday — show them we won't pay any more! #StopTheFareHike",
+    "Join the Friday tram boycott! Show them we refuse to pay more. #StopTheFareHike",
+    "Boycott the trams on Friday and show them we won't pay more! #StopTheFareHike"
+   ]
+  },
+  {
+   "claim": "Leaked memo: fares will double, media is hiding it",
+   "held_out": false,
+   "variations": [
+    "Leaked memo: fares will double next year. Mainstream media is hiding it.",
+    "Leaked memo says fares will double next year. The mainstream media is hiding this.",
+    "A leaked memo shows fares doubling next year. Mainstream media hides it.",
+    "Leaked memo: tram fares to double next year. Media is hiding it from you.",
+    "According to a leaked memo, fares double next year. Mainstream media keeps it hidden.",
+    "Leaked memo: fares will double next year and the mainstream media is hiding it."
+   ]
+  }
+ ]
+}
