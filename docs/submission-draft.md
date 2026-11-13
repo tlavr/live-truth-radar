@@ -19,7 +19,7 @@ Propaganda campaigns behave like a spread-spectrum signal: each bot account is t
 
 **Source Code:** ссылка на GitHub-репо (можно пустой)
 
-**Tech Challenges (отметить сейчас, можно поменять):** Best Use of Context.dev: Fully Structured Web · Best agentic usecase of Oxylabs Web API · Best Use of Gemini API · Best Use of Codex
+**Tech Challenges (отметить сейчас, можно поменять):** Best Use of Context.dev: Fully Structured Web · Best agentic usecase of Oxylabs Web API · Best Use of Gemini API *(Codex: возможно позже, пока не отмечаем)*
 
 ---
 
@@ -73,7 +73,7 @@ Docker on a Hostinger VPS with a public domain. Models via Hostinger AI Router. 
 - **Gemma**: low-cost technique classification and embeddings.
 - **NVIDIA Nemotron**: reads screenshots and memes.
 - **[Modal / Verda]**: GPU for embeddings and classifiers.
-- **OpenAI Codex**: used throughout development.
+- **[OpenAI Codex]**: *(only if we use it later)* used in development.
 
 ## What's next
 OFDM-style "pilot" facts to estimate how each outlet distorts information, delay-Doppler maps of how narratives spread, and a browser extension.
@@ -116,7 +116,7 @@ OFDM-style "pilot" facts to estimate how each outlet distorts information, delay
 | ✅ Context.dev | ≥1 эндпоинт в ядре + заметка «какие и зачем» (в описании) | Ядро |
 | ✅ Oxylabs | Живой `/search` или `/scrape` + URL источников. ⚠️ Отменить подписку после | Ядро |
 | ✅ Gemini | Почему важен (в описании) | Ядро |
-| ✅ Codex | Скрины и лог в README | Легко |
+| ◐ Codex | Возможно позже: пока код пишем с Claude. Если возьмём, нужны скрины и лог | Если сделали |
 | ◐ Gemma | Если классификатор/эмбеддинги на Gemma | Если сделали |
 | ◐ Nemotron | Отдельный текст в форме | Если сделали |
 | ◐ Modal **или** Verda | Modal: живой эндпоинт; Verda: саммари в Discord | Выбрать одно |
