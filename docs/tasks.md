@@ -63,7 +63,7 @@
 ### T4 · P1 · сб 01:00
 **Цель:** скелет сервисов, который поднимается одной командой.
 **Вход/выход:** `infra/docker-compose.yml` (caddy, api, worker, db=Postgres), `infra/Caddyfile`, `infra/schema.sql` (таблицы `actors`, `items`, `findings`, `labels`; без pgvector), `api/main.py` с `GET /health` → `{"status":"ok"}`, заглушка `ingest/worker.py`.
-**Готово, когда:** `docker compose -f infra/docker-compose.yml up` локально → `curl localhost/health` = 200 (через caddy, порт 80), схема применилась (таблицы видны в `psql`); `./eval` смонтирован в api read-only, `cache/` — volume.
+**Готово, когда:** `docker compose -f infra/docker-compose.yml up` локально → `curl localhost/health` = 200 (через caddy, порт 80), схема применилась (таблицы видны в `psql`, включая `inject_requests`). Пути в compose считаются от `infra/`: build context `..`, mounts `../eval:/app/eval:ro` и `../cache:/app/cache`.
 **Тесты:** нет новых (схема БД → ревью вторым агентом, это рискованное).
 **Зависит от:** T1
 
@@ -90,7 +90,7 @@
 
 ### T8 · P1 · сб 11:00
 **Цель:** API, на котором можно строить дашборд, до готовности детектора.
-**Вход/выход:** `api/mock_detect.py` с той же сигнатурой, что `detect.pipeline.detect`, отдаёт `fixtures/findings.json`; worker сохраняет findings в БД; `GET /api/alerts` → `AlertsResponse`, `GET /api/metrics` → `MetricsReport` (пока заглушка с `None`), `POST /api/inject` → кладёт синтетические items в БД и сразу запускает детектор по теме. ⚙ правила инжекта — HANDOFF §5 (окно 15 мин до «сейчас», новые `campaign_id`/id на каждый инжект); до T9 берёт синтетику из `fixtures/items.json`, после T9 — `synth.campaign.make_campaign(...)`; `/api/metrics` читает `eval/report.json` (смонтирован read-only), если он есть. Плюс `ingest/export_sample.py`: последние N часов `items` → `fixtures/items_live_sample.json` с псевдонимами (для P2, обновлять на каждом синке).
+**Вход/выход:** `api/mock_detect.py` с той же сигнатурой, что `detect.pipeline.detect`, отдаёт `fixtures/findings.json`; worker сохраняет findings в БД; `GET /api/alerts` → `AlertsResponse`, `GET /api/metrics` → `MetricsReport` (пока заглушка с `None`), `POST /api/inject` → кладёт синтетические items в БД и строку в `inject_requests` (worker подхватывает за ~10 с); `GET /api/items?ids=…` → `list[Item]` для карточки; пока mock — `fixtures/items.json` загружен в БД. ⚙ правила инжекта — HANDOFF §5 (окно 15 мин до «сейчас», новые `campaign_id`/id на каждый инжект); до T9 берёт синтетику из `fixtures/items.json`, после T9 — `synth.campaign.make_campaign(...)`; `/api/metrics` читает `eval/report.json` (смонтирован read-only), если он есть. Плюс `ingest/export_sample.py`: последние N часов `items` → `fixtures/items_live_sample.json` с псевдонимами (для P2, обновлять на каждом синке).
 **Готово, когда:** на VPS `/api/alerts` и `/api/metrics` проходят валидацию моделей; два `POST /api/inject` подряд оба добавляют новые items с `synthetic=true`; `fixtures/items_live_sample.json` закоммичен; `make smoke` зелёный.
 **Тесты:** `tests/smoke.py` расширить на `/api/metrics`.
 **Зависит от:** T6
@@ -112,7 +112,7 @@
 
 ### I1 · оба · сб 15:00
 **Цель:** настоящий детектор на живых данных на VPS.
-**Вход/выход:** в `ingest/worker.py` импорт `api.mock_detect` → `detect.pipeline.detect`; эмбеддинги Gemini с кэшем `cache/embeddings/` (volume) в worker; `POST /api/inject` → `synth.campaign.make_campaign` + немедленный `detect()` по теме.
+**Вход/выход:** в `ingest/worker.py` импорт `api.mock_detect` → `detect.pipeline.detect`; эмбеддинги Gemini с кэшем `cache/embeddings/` (volume) в worker; `POST /api/inject` → `synth.campaign.make_campaign`; worker видит `inject_requests` и сразу гоняет `detect()` по теме.
 **Готово, когда:** на VPS после инжекта в течение минуты в `/api/alerts` появляется `coordinated` с `synthetic=true` (второй инжект тоже срабатывает); живые темы дают findings без падений; mock удалён из пути worker; `make smoke` зелёный.
 **Тесты:** `make test` + `make smoke`.
 **Зависит от:** T8, T10
@@ -126,21 +126,21 @@
 
 ### T12 · P1 · сб 19:00
 **Цель:** одна страница для судей и видео.
-**Вход/выход:** `web/index.html` + `web/app.js` (Chart.js): лента алертов из `/api/alerts`, карточка вердикта (посты, heatmap `correlation` с `lag_sec` в подсказке, SNR дБ, SPRT-трасса с порогами `sprt_upper`/`sprt_lower`, приём + цитата); `web/metrics.html` из `/api/metrics` (ROC, рабочая точка, precision/FPR, `failure_examples`), отдаётся по пути `/metrics`; вердикт `watching` подписан «keep watching / не уверены»; в шапке «обновлено N мин назад» из `last_poll_at`; SNR в карточке «`snr_db_single` → `snr_db` дБ»; кнопка «inject test campaign» → `POST /api/inject`. Отдаёт FastAPI.
+**Вход/выход:** `web/index.html` + `web/app.js` (Chart.js): лента алертов из `/api/alerts`, карточка вердикта (посты, heatmap `correlation` с `lag_sec` в подсказке, SNR дБ, SPRT-трасса с порогами `sprt_upper`/`sprt_lower`, приём + цитата); `web/metrics.html` из `/api/metrics` (ROC, рабочая точка, precision/FPR, `failure_examples`), отдаётся по пути `/metrics`; вердикт `watching` подписан «keep watching / не уверены»; тексты постов из `/api/items`; хэндлы реальных аккаунтов маскируются (`@ab***`); в шапке «обновлено N мин назад» из `last_poll_at`; SNR в карточке «`snr_db_single` → `snr_db` дБ»; кнопка «inject test campaign» → `POST /api/inject`. Отдаёт FastAPI.
 **Готово, когда:** на `https://<домен>` всё видно без консольных ошибок; инжект → алерт появляется в ленте (обновление поллингом); работает на телефоне.
 **Тесты:** нет (UI не тестируем), `make smoke`.
 **Зависит от:** T8 (данные mock), I1, T11
 
 ### T13 · P2 · сб 19:00
 **Цель:** честные цифры для 40% оценки.
-**Вход/выход:** `eval/run.py`: многократная инжекция `make_campaign` в фон из живого сэмпла/фикстур → прогон `detect` при разных порогах → ROC (pfa, pd), detection rate, рабочая `operating_pfa`, `mean_posts_to_decision`, `mean_seconds_to_decision` → `eval/report.json` (`MetricsReport`, в git; запуск `make eval`); инжектируются только **отложенные** сообщения, которых нет в банке шаблонов; `failure_examples` — 3–5 реальных промахов/ложных тревог; `live_fpr`/`live_precision`/`n_labelled` — из разметки T14 (⚙ `eval/labels.csv`); после T14 отчёт пересчитать (может и P1: `make eval` читает только `labels.csv` и фикстуры).
+**Вход/выход:** `eval/run.py`: многократная инжекция `make_campaign` в фон из живого сэмпла/фикстур → прогон `detect` при разных порогах → ROC (pfa, pd), detection rate, рабочая `operating_pfa`, `mean_posts_to_decision`, `mean_seconds_to_decision` → `eval/report.json` (`MetricsReport`, в git; запуск `make eval` с `LTR_EMBEDDER=gemini` и кэшем, сеть разрешена; `embedder` пишется в отчёт, на `hash` — только с `--dev`); инжектируются только **отложенные** сообщения, которых нет в банке шаблонов; `failure_examples` — 3–5 реальных промахов/ложных тревог; `live_fpr`/`live_precision`/`n_labelled` — из разметки T14 (⚙ `eval/labels.csv`); после T14 отчёт пересчитать (может и P1: `make eval` читает только `labels.csv` и фикстуры).
 **Готово, когда:** `make eval` офлайн на фикстурах пишет валидный `MetricsReport`; после коммита и `make deploy` `/api/metrics` на VPS его отдаёт.
 **Тесты:** 1 тест: отчёт валиден, ROC монотонна, значения в [0,1].
 **Зависит от:** T9, T10
 
 ### T14 · оба · сб 20:30
 **Цель:** live precision и live FPR на реальных людях.
-**Вход/выход:** рубрика (15 мин) органика / подозрительно / непонятно; `ingest/label_sample.py` (P1, заранее) делает скелет `eval/labels.csv` (`account, topic, alerted, label, note`; `account` — псевдоним): ~25 аккаунтов из алертов + ~25 случайных без алерта из тех же тем, **синтетика исключена**; если реальных алертов < 25 — добираем из `watching` с наибольшим LLR и честно пишем n. Размечаем по реальным хэндлам в БД/дашборде, в файл пишется только псевдоним. До 20:00 разметка, 20:00–20:30 `make eval` + коммит + `make deploy`.
+**Вход/выход:** рубрика (15 мин) органика / подозрительно / непонятно; `ingest/label_sample.py` (P1, заранее) делает скелет `eval/labels.csv` (`account, topic, alerted, label, note`; `account` — псевдоним; соответствие `псевдоним,хэндл` → `cache/label_handles.csv`, git-ignored): ~25 аккаунтов из алертов + ~25 случайных без алерта из тех же тем, **синтетика исключена**; если реальных алертов < 25 — добираем из `watching` с наибольшим LLR и честно пишем n. Размечаем по реальным хэндлам в БД/дашборде, в файл пишется только псевдоним. До 20:00 разметка, 20:00–20:30 `make eval` + коммит + `make deploy`.
 **Готово, когда:** размечено ≥ 40 аккаунтов, `/api/metrics` показывает `live_precision`, `live_fpr`, `n_labelled`.
 **Тесты:** нет.
 **Зависит от:** I1 (живые алерты), T13

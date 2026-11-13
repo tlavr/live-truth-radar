@@ -14,7 +14,7 @@ tests/                   test_contracts.py (shared), test_detect_*.py (P2), smok
 docs/                    plan and workflow (Russian)
 ```
 Detector entry point: `detect.pipeline.detect(items, *, alpha=0.02, beta=0.1) -> list[Finding]`.
-API: `GET /health`, `GET /api/alerts`, `GET /api/metrics` (reads `eval/report.json`), `POST /api/inject` (calls `synth.campaign.make_campaign`), S1 only: `GET /api/source/{domain}`. Worker: `ingest/worker.py`.
+API: `GET /health`, `GET /api/alerts`, `GET /api/metrics` (reads `eval/report.json`), `POST /api/inject` (calls `synth.campaign.make_campaign`; worker runs detect), `GET /api/items?ids=`, S1 only: `GET /api/source/{domain}`. Worker: `ingest/worker.py`.
 Interfaces outside the contract: docs/HANDOFF.md §5.
 
 ## Commands
@@ -24,7 +24,7 @@ Interfaces outside the contract: docs/HANDOFF.md §5.
 ## Rules
 1. Start every task by reading its card in `docs/tasks.md`. Then plan (files, functions, test, how to verify) before writing code; wait for human OK on the plan.
 2. Touch only your owner's dirs. Never edit the other person's dirs or `contracts/` without explicit agreement.
-3. Until I1, P1 uses the mock detector (fixtures/findings.json). P2 has no DB; network only to build committed caches (embeddings, synth variations), never in tests.
+3. Until I1, P1 uses the mock detector (fixtures/findings.json). P2 has no DB; network only for committed synth variations, the embedding cache in `cache/` (ignored) and `make eval`; never in tests.
 4. Secrets only in `.env` (git-ignored); see `.env.example`. Never print or commit keys. Real account handles never go into git: use `contracts.pseudonym()`; raw API responses live in `cache/` (ignored).
 5. No network calls in `make test`. Tests: detect/ math on synthetic data, contract parsing, smoke. No UI tests, no coverage goals.
 6. Small PRs to main every 1–2 h. Branches: `p1/<task-id>-slug`, `p2/<task-id>-slug`.

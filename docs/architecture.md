@@ -23,7 +23,7 @@
           ┌──────────────── Hostinger VPS (Docker Compose, публичный HTTPS-домен) ───────────┐
  ВЕБ      │                                                                                   │
  новости ─┼─► worker: поллинг Context.dev каждые N мин ──► db: Postgres            │
- соцсети  │   (news search + social scrape)                  (items, actors, embeddings,     │
+ соцсети  │   (news search + social scrape)                  (items, actors, inject_req.,    │
           │                                                   findings, labels)              │
           │   worker: эмбеддинги Gemini → matched filter → корреляция аккаунтов              │
           │           → CFAR → SPRT → вердикт → объяснение Gemini (приём + цитата)           │
@@ -40,7 +40,7 @@
 | 0 | **Live Ingest** | MUST | P1 | `ingest/` | Каждые 2–5 мин тянет свежие статьи и посты по 3–5 темам, сохраняет текст, автора, время, URL как `Item` | Context.dev news search + social scrape |
 | 1 | **Swarm Detector** | MUST | P2 | `detect/` | Matched filter (банк шаблонов нарративов по эмбеддингам) → кросс-корреляция активности аккаунтов → CFAR (всплеск) → SPRT (решение) + SNR в дБ → `Finding` | Gemini embeddings + numpy/scipy (возможно, Codex) |
 | 2 | **Explain / Technique** | MUST | P1 | `ingest/explain.py` (в worker) | Для `Finding`: приём манипуляции + цитата-доказательство + уверенность + объяснение простыми словами → `Explanation` | Gemini structured output; AI Router запасной |
-| S | **Synthetic Swarm** | MUST | P2 | `synth/` | ~30 вариаций одного месседжа, фейковые аккаунты с лагами, `synthetic = true`, `campaign_id` | Gemini |
+| S | **Synthetic Swarm** | MUST | P2 | `synth/` | ~30 вариаций для нескольких месседжей (часть отложена для eval), фейковые аккаунты с лагами, `synthetic = true`, `campaign_id` | Gemini |
 | E | **Eval Harness** | MUST | P2 | `eval/` | ROC (Pd vs Pfa), доля найденных, постов/секунд до решения → `MetricsReport`; live FPR / precision по разметке | numpy |
 | UI | **Radar Dashboard** | MUST | P1 | `web/` | Лента алертов, карточка вердикта (посты, heatmap корреляции, SNR, SPRT-трасса, приём), `/metrics`, кнопка «инжектировать тестовую кампанию» | Статический HTML + JS + Chart.js, отдаёт FastAPI |
 | Ops | **Deploy** | MUST | P1 | `infra/` | Docker Compose, caddy HTTPS, Hostinger VPS, `tests/smoke.py` | Hostinger |
@@ -89,14 +89,14 @@ P2 работает офлайн на `fixtures/` (без сети и БД), P1 
 ## Данные для метрик (40% оценки!)
 | Уровень | Набор | Для чего |
 |---|---|---|
-| MUST | **Синтетический рой:** LLM пишет ~30 вариаций одного месседжа, разносим по фейковым аккаунтам с лагами, прячем в реальные посты (`synthetic = true`) | ROC и время до решения для Swarm Detector |
+| MUST | **Синтетический рой:** LLM пишет ~30 вариаций для нескольких месседжей (часть отложена: их нет в банке шаблонов), разносим по фейковым аккаунтам с лагами, прячем в реальные посты (`synthetic = true`) | ROC и время до решения для Swarm Detector |
 | MUST | **Ручная разметка ~50 живых аккаунтов (T14, оба):** рубрика 15 мин, единица — аккаунт, классы «органика / подозрительно / не понятно»; **~25 из алертов** (→ live precision) + **~25 случайных без алерта** из тех же тем (→ live FPR) | Precision и FPR на реальных людях, отдельно от синтетики |
 | CUT | SemEval-2020 Task 11 (корпус приёмов) | Вдвоём не успеем; приёмы показываем объяснением с цитатой, без отдельной метрики |
 | CUT | TwiBot-20/22, Cresci-2017 | Доступ по запросу, не успеем |
 
 ## Демо-сценарий на 2 минуты
 1. Открываем `https://<домен Hostinger>`: лента живых алертов по 3–5 темам (обновляется поллингом).
-2. Нажимаем «инжектировать тестовую кампанию» → через несколько минут/постов появляется алерт «🐝 Рой: [N] аккаунтов, SNR из [−x] до [+y] дБ» (числа — реальные, из демо).
+2. Нажимаем «инжектировать тестовую кампанию» → в течение минуты появляется алерт «🐝 Рой: [N] аккаунтов, SNR из [−x] до [+y] дБ» (числа — реальные, из демо).
 3. Карточка: посты, heatmap корреляции аккаунтов, SPRT-трасса («решение на [k]-м посте»), приём «🎭 Fear appeal» с подсветкой фраз и объяснением.
 4. (SHOULD S1) «🔗 Источник: …» — кто стоит за доменом, от Context.dev brand/company.
 5. Страница `/metrics`: ROC, рабочая точка, precision/FPR, примеры ошибок.

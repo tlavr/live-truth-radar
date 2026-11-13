@@ -129,3 +129,4 @@ class MetricsReport(BaseModel):
     live_precision: float | None = None
     n_labelled: int = 0
     failure_examples: list[FailureExample] = []
+    embedder: str | None = None  # embedder used for this report; must match production ("gemini"), not "hash"

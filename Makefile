@@ -1,3 +1,6 @@
+-include .env
+export
+
 URL ?= http://localhost
 VPS ?= root@your-vps
 REMOTE_DIR ?= live-truth-radar
@@ -17,8 +20,8 @@ smoke:  ## after every deploy: make smoke URL=https://<domain>
 fixtures:  ## regenerate fixtures/items.json + findings.json (never hand-edit them)
 	python synth/fixture_gen.py
 
-eval:  ## P2 (or P1 after T14): writes eval/report.json; commit it, then make deploy
-	python -m eval.run
+eval:  ## P2 (or P1 after T14): Gemini embedder + cache, writes eval/report.json; commit it, then make deploy
+	LTR_EMBEDDER=gemini python -m eval.run
 
 deploy:  ## P1: pull main on the VPS and rebuild (eval/ is mounted read-only, no rebuild needed for report.json)
 	ssh $(VPS) 'cd $(REMOTE_DIR) && git pull --ff-only && $(COMPOSE) up -d --build'

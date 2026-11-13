@@ -28,7 +28,7 @@ Propaganda campaigns behave like a spread-spectrum signal: each bot account is t
 
 # ФИНАЛЬНАЯ ВЕРСИЯ (до вс 10:00)
 
-## Description (~4601/5000 с пометками [SHOULD] / [ONLY IF TRUE], markdown), заменить короткую на эту
+## Description (~4599/5000 с пометками [SHOULD] / [ONLY IF TRUE], markdown), заменить короткую на эту
 *`[скобки]` заменить реальными цифрами, ничего не выдумывать. Строку или фрагмент с пометкой `[SHOULD]` (Source Trust, S1) / `[ONLY IF TRUE]` (Codex) удалить, если это не работает вживую; иначе убрать саму пометку. Замена `[ALT]` — сразу под блоком.*
 ```markdown
 ## The idea: propaganda is a signal hidden in noise
@@ -55,7 +55,7 @@ We report detection the way radar engineers do:
 Current results: **detection [X]% of injected campaigns at [Pfa]%; live FPR [Z], precision [P]** on the labelled set. Known failure cases are listed on the metrics page. When evidence is weak, the verdict stays *"keep watching"* instead of accusing a real person. Injected test messages are never in the detector's template bank, so the scores are not circular.
 
 ## Explainable verdicts
-Each alert shows the evidence a human can check in seconds: the correlated accounts and their timing, the reworded posts that matched, the highlighted phrases, the source data, the SNR and the SPRT trace showing when the decision was made.
+Each alert shows the evidence a human can check in seconds: the correlated accounts and their timing, the reworded posts that matched, the quoted key phrase, the source data, the SNR and the SPRT trace showing when the decision was made.
 
 ## Deployed live on Hostinger
 Docker Compose on a Hostinger VPS with a public HTTPS domain: FastAPI, a detector worker and Postgres. The worker polls Context.dev every few minutes, so alerts follow the live web. Gemini is the main model, with Hostinger AI Router as a fallback. Public dashboard and REST API.
