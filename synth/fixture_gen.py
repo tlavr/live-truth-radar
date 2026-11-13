@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from contracts.models import Finding, Item, finding_id  # noqa: E402
+from contracts.models import AmbiguityMap, Finding, Item, finding_id  # noqa: E402
 
 SEED = 2026
 TOPIC = "helsinki-tram-fares"
@@ -159,6 +159,33 @@ UPPER = round(math.log((1 - BETA) / ALPHA), 4)
 LOWER = round(math.log(BETA / (1 - ALPHA)), 4)
 
 
+LAG_EDGES = [float(x) for x in range(0, 601, 30)]  # |lag| bins, tau_max = 10 min, 30 s step
+MISMATCH_EDGES = [round(0.1 * k, 1) for k in range(11)]  # 1 - cos bins
+
+
+def _ambiguity(items: list[Item], accounts: list[str], *, seed: int) -> AmbiguityMap:
+    """Mock ambiguity map: real lags from the items, hand-shaped semantic mismatch (no embeddings here)."""
+    rng = np.random.default_rng(seed)
+    rows, cols = len(MISMATCH_EDGES) - 1, len(LAG_EDGES) - 1
+    counts = [[0] * cols for _ in range(rows)]
+    background = [[0] * cols for _ in range(rows)]
+    group = set(accounts)
+    ordered = sorted(items, key=lambda it: it.published_at)
+    for i, p in enumerate(ordered):
+        for q in ordered[i + 1:]:
+            lag = (q.published_at - p.published_at).total_seconds()
+            if lag >= LAG_EDGES[-1]:
+                break
+            if p.author == q.author:
+                continue
+            inside = p.author in group and q.author in group
+            same_campaign = p.campaign_id is not None and p.campaign_id == q.campaign_id
+            lo, hi = (0.03, 0.2) if same_campaign else (0.5, 1.0)
+            m = min(int(rng.uniform(lo, hi) * rows), rows - 1)
+            (counts if inside else background)[m][int(lag // 30)] += 1
+    return AmbiguityMap(lag_edges_sec=LAG_EDGES, mismatch_edges=MISMATCH_EDGES, counts=counts, background=background)
+
+
 def _finding(items: list[Item], accounts: list[str], *, verdict: str, llr_steps: list[float],
              corr_level: float, snr_db: float, snr_db_single: float, explanation: dict | None,
              seed: int) -> Finding:
@@ -189,6 +216,7 @@ def _finding(items: list[Item], accounts: list[str], *, verdict: str, llr_steps:
         first_seen=acc_items[0].published_at, last_seen=last_seen,
         correlation=corr, lag_sec=lag, explanation=explanation,
         synthetic=any(it.synthetic for it in acc_items),
+        ambiguity=_ambiguity(items, accounts, seed=seed),
     )
 
 
@@ -201,7 +229,7 @@ def mock_findings(items: list[Item]) -> list[Finding]:
     coordinated = _finding(
         items, SWARM_ACCOUNTS, verdict="coordinated",
         llr_steps=[0.4, 0.5, 0.3, 0.6, 0.5, 0.4, 0.7, 0.6, 0.5, 0.4, 0.5, 0.6],
-        corr_level=0.87, snr_db=14.2, snr_db_single=-1.4, seed=1,
+        corr_level=0.87, snr_db=17.8, snr_db_single=6.0, seed=1,  # 15 pairs: +11.8 dB
         explanation=dict(
             technique="Fear appeal + call to action",
             quote=swarm_quote.split(".")[0].split("!")[0],
@@ -213,7 +241,7 @@ def mock_findings(items: list[Item]) -> list[Finding]:
     watching = _finding(
         items, ORGANIC_ACCOUNTS[:3], verdict="watching",
         llr_steps=[-0.3, 0.2, -0.4, -0.2, 0.1, -0.3, -0.2],
-        corr_level=0.1, snr_db=1.3, snr_db_single=0.4, seed=2, explanation=None,
+        corr_level=0.1, snr_db=1.3, snr_db_single=-3.5, seed=2, explanation=None,  # 3 pairs: +4.8 dB
     )
     return [coordinated, watching]
 

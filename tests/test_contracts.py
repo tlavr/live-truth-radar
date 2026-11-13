@@ -58,3 +58,24 @@ def test_finding_ids_are_stable():
     for f in raw:
         assert f["id"] == finding_id(f["topic"], f["accounts"])
         assert f["id"] == finding_id(f["topic"], list(reversed(f["accounts"])))
+
+
+def test_ambiguity_map_shape_is_validated():
+    from contracts.models import AmbiguityMap
+
+    ok = AmbiguityMap(lag_edges_sec=[0, 30, 60], mismatch_edges=[0, 0.5, 1], counts=[[1, 0], [0, 2]])
+    assert ok.background is None
+    with pytest.raises(ValueError):
+        AmbiguityMap(lag_edges_sec=[0, 30, 60], mismatch_edges=[0, 0.5, 1], counts=[[1, 0, 3], [0, 2, 0]])
+
+
+def test_mock_findings_follow_agreed_snr_definition():
+    """snr_db - snr_db_single == 10*log10(M), M = N(N-1)/2 account pairs (docs/signal-processing.md 3.6)."""
+    import math
+
+    raw = json.loads((FIX / "findings.json").read_text(encoding="utf-8"))
+    for f in raw:
+        n = len(f["accounts"])
+        gain = 10 * math.log10(n * (n - 1) / 2)
+        assert abs(f["snr_db"] - f["snr_db_single"] - gain) < 0.1
+        assert f["ambiguity"] is not None

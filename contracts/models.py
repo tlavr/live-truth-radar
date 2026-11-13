@@ -54,6 +54,33 @@ def pseudonym(author: str, salt: str) -> str:
     return "acct-" + hashlib.sha1((salt + "|" + author).encode("utf-8")).hexdigest()[:10]
 
 
+class AmbiguityMap(BaseModel):
+    """2D histogram of cross-account post pairs: |lag| (x) vs semantic mismatch 1 - cos (y).
+
+    A coordinated group shows a sharp peak near the origin; organic pairs form a flat carpet.
+    counts[m][l] = pairs with mismatch in [mismatch_edges[m], mismatch_edges[m+1]) and
+    |lag| in [lag_edges_sec[l], lag_edges_sec[l+1]).
+    """
+
+    lag_edges_sec: list[float]
+    mismatch_edges: list[float]
+    counts: list[list[int]]  # pairs inside the finding's group
+    background: list[list[int]] | None = None  # all other pairs of the topic window, same grid
+
+    @model_validator(mode="after")
+    def _grid_shape(self) -> AmbiguityMap:
+        rows, cols = len(self.mismatch_edges) - 1, len(self.lag_edges_sec) - 1
+        if rows < 1 or cols < 1:
+            raise ValueError("need at least two edges per axis")
+        for name in ("counts", "background"):
+            m = getattr(self, name)
+            if m is None:
+                continue
+            if len(m) != rows or any(len(row) != cols for row in m):
+                raise ValueError(f"{name} must be {rows}x{cols} (mismatch bins x lag bins)")
+        return self
+
+
 class Finding(BaseModel):
     """A detector decision about a group of accounts within a topic."""
 
@@ -64,8 +91,8 @@ class Finding(BaseModel):
     accounts: list[str]
     item_ids: list[str]
     llr: float
-    snr_db: float  # SNR of the coherently combined cluster ("despread")
-    snr_db_single: float | None = None  # mean per-account SNR (before despreading), for "−x dB -> +y dB"
+    snr_db: float  # 20*log10(Z): all account pairs of the cluster coherently combined ("despread")
+    snr_db_single: float | None = None  # 20*log10(mean pair z): same statistic before combining, for "x dB -> y dB"
     # sprt_trace[k] = cumulative LLR after item_ids[k] (time order); may stop at the decision,
     # so len(sprt_trace) <= len(item_ids).
     sprt_trace: list[float]
@@ -78,6 +105,8 @@ class Finding(BaseModel):
     lag_sec: list[list[float]] | None = None  # same shape: lag (s) at the correlation peak
     explanation: Explanation | None = None
     synthetic: bool = False  # true if it contains injected items
+    ambiguity: AmbiguityMap | None = None  # main-screen map: lag x semantic mismatch
+    note: str | None = None  # detector remark, e.g. "news echo: <headline>" (such a finding is never "coordinated")
 
     @model_validator(mode="after")
     def _square_correlation(self) -> Finding:
@@ -130,3 +159,6 @@ class MetricsReport(BaseModel):
     n_labelled: int = 0
     failure_examples: list[FailureExample] = []
     embedder: str | None = None  # embedder used for this report; must match production ("gemini"), not "hash"
+    pd_by_size: list[tuple[int, float]] = []  # (accounts in the injected swarm, pd) at operating_pfa
+    swarm_purity: float | None = None  # synthetic runs: share of accounts in a detected group that are truly injected
+    live_precision_ci: tuple[float, float] | None = None  # Wilson 95% interval for live_precision

@@ -39,6 +39,7 @@ Coordinated campaigns work the same way. Each bot posts too little to flag alone
 ## The receiver chain
 `Antenna (live web) → front-end (embeddings + activity time series) → filters → detector → explained verdict`
 
+- 📡 **Beamforming on a topic**: each watched topic is a beam. The Context.dev query steers the antenna, and a steering vector in embedding space keeps on-topic posts in the main lobe and suppresses off-topic sidelobes. Several topics run as parallel beams, each with its own noise floor.
 - 🎯 **Matched filtering in meaning space**: every post is correlated with every other post in embedding space, after whitening out the topic's common background (clutter rejection), so a message is found even when reworded, with no pre-built template bank.
 - 🐝 **CDMA despreading (Spot the swarm)**: each account is a vector signal in time × meaning. Organic users behave like independent random codes; a coordinated group shows a cross-correlation peak at a common lag. Coherently combining the M account pairs of a cluster gives a processing gain of 10·log10(M) dB, shown as SNR before and after.
 - 📈 **CFAR alerting**: like radar, the alarm threshold adapts to each topic's own background (median and spread over all account pairs, an order-statistic CFAR), keeping the false-alarm rate constant for busy and quiet topics alike.
@@ -98,7 +99,7 @@ Fact-checking with source fusion, cross-country geo echo, change watch for silen
 | Время | Кадр |
 |---|---|
 | 0:00–0:15 | «Боты шепчут ниже уровня шума»: поодиночке аккаунты не видны |
-| 0:15–0:50 | Инжекция тестовой кампании в живой поток → heatmap корреляции загорается → SNR из [−x] дБ в [+y] дБ (реальные числа из демо) |
+| 0:15–0:50 | Инжекция тестовой кампании в живой поток → на карте «задержка × смысловая расстройка» вырастает острый пик → SNR из [x] дБ (одна пара) в [y] дБ (весь рой) (реальные числа из демо) |
 | 0:50–1:10 | SPRT-трасса: решение «coordinated» на [k]-м посте |
 | 1:10–1:30 | Карточка: приём манипуляции с подсветкой фраз (+ источник, если S1 сделан) |
 | 1:30–1:50 | ROC-кривая и рабочая точка |
