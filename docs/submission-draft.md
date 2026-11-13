@@ -77,7 +77,7 @@ Fact-checking with source fusion, cross-country geo echo, change watch for silen
 *Team The Kerfufflers · Junction 2026*
 ```
 
-**[ALT] для Context.dev, если на T2 у social scrape нет автора или времени:** заменить в пункте Context.dev предложение «Social scrape gives … define each narrative.» на *"News search gives fresh articles with authors and timestamps, which become the activity codes for despreading."* И добавить в «Honest, measurable detection»: *"Swarm detection is demonstrated on injected synthetic accounts; in the live stream, 'accounts' are news authors and domains."*
+**[ALT] для Context.dev, если на T2 у social scrape нет автора или времени:** заменить в пункте Context.dev предложение «Social scrape gives … breaking news.» на *"News search gives fresh articles with authors and timestamps, which become the activity codes for despreading."* И добавить в «Honest, measurable detection»: *"Swarm detection is demonstrated on injected synthetic accounts; in the live stream, 'accounts' are news authors and domains."*
 
 ## Как текст закрывает критерии Hostinger
 | Критерий | Вес | Где |
