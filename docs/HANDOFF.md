@@ -6,7 +6,7 @@
 **Live Truth Radar** — «радар» для онлайн-манипуляций: смотрит на живой веб, находит координированные бот-кампании и приёмы пропаганды и объясняет каждый вердикт с источниками и честными метриками ложных срабатываний. Подход взят из обработки сигналов (matched filter, CDMA-деспрединг, CFAR, SPRT).
 
 - **Основной челлендж:** Decode the Noise (Hostinger) → [challenge-decode-the-noise.md](challenge-decode-the-noise.md)
-- **Тех-челленджи:** Context.dev (ядро), Gemini; Codex — только если на T0 решили, что P2 реально пишет им `detect/`; Oxylabs — CUT → [tech-challenges.md](tech-challenges.md)
+- **Тех-челленджи:** Context.dev (ядро), Gemini; Codex — пока не используем (код пишем с Claude), возможно позже; Oxylabs — CUT → [tech-challenges.md](tech-challenges.md)
 - **Подход:** [signal-processing.md](signal-processing.md) · **Архитектура:** [architecture.md](architecture.md)
 - **Текст сабмита:** [submission-draft.md](submission-draft.md)
 - **Как работаем (агенты, ветки, тесты):** [workflow.md](workflow.md) · **Карточки задач:** [tasks.md](tasks.md) · **Инструкции агентам:** [`CLAUDE.md`](../CLAUDE.md) · **Контракт:** [`contracts/models.py`](../contracts/models.py)
@@ -32,7 +32,7 @@
 - Живой **публичный URL на Hostinger VPS** к концу хакатона. Деплоим с первого часа (T5 к Сб 03:00), а не в конце; `make smoke URL=...` после каждого деплоя.
 - **Метрики** (precision, FPR, ROC) на размеченных данных: это 40% оценки Hostinger.
 - Для Context.dev: заметка «какие эндпоинты и зачем» (README, T17); проверять флаг `success`; ответы кэшировать.
-- Для Codex: только если на T0 решили, что P2 реально пишет им `detect/`; лог в `docs/codex-log.md` по ходу, задним числом не пишем. Иначе снимаем галочку (в том числе в preliminary).
+- Codex пока не используем (код пишем с Claude), в preliminary не отмечаем. Если подключим позже — с этого момента ведём `docs/codex-log.md`, задним числом не пишем.
 - Oxylabs — CUT: не активируем, не отмечаем, отменять нечего.
 - `contracts/models.py` меняем **только вдвоём**; остальное — каждый в своих папках.
 - Коды и ключи **не коммитим**: они в Junction Hackerpack и в `.env` (git-ignored).
@@ -42,11 +42,11 @@
 
 **Роли:**
 - **P1 «Труба»** — Context.dev ingest, Postgres, Docker Compose + деплой на Hostinger (caddy, HTTPS), FastAPI, объяснения Gemini, дашборд, smoke. Папки: `ingest/`, `api/`, `web/`, `infra/`. Работает в Claude Code.
-- **P2 «Мозг»** — эмбеддинги Gemini, matched filter, корреляция аккаунтов, CFAR, SPRT, генератор синтетического роя, eval (ROC, метрики), preliminary и финальный текст. Папки: `detect/`, `synth/`, `eval/`. `detect/` может писать в Codex (решение на T0).
+- **P2 «Мозг»** — эмбеддинги Gemini, matched filter, корреляция аккаунтов, CFAR, SPRT, генератор синтетического роя, eval (ROC, метрики), preliminary и финальный текст. Папки: `detect/`, `synth/`, `eval/`. Пишет с Claude (Codex — возможно позже).
 
 | ID | Задача | Кто | Дедлайн |
 |---|---|---|---|
-| T0 | **Кикофф 45 мин:** контракт + fixtures, `CLAUDE.md`, 3–5 тем, решение по Codex, тиммейт в GitHub; имена в роли (§6) | оба | Пт 22:00 |
+| T0 | **Кикофф 45 мин:** контракт + fixtures, `CLAUDE.md`, 3–5 тем, тиммейт в GitHub; имена в роли (§6) | оба | Пт 22:00 |
 | T1 | Ключи: Context.dev, Gemini (AI Studio, 18+), Hostinger VPS + домен, AI Router → `.env` | оба | Пт 22:30 |
 | T2 | **Проба Context.dev:** отдают ли news search / social scrape автора и время? Реальный пример → `fixtures/`, вывод → §6 | P1 | Пт 23:15 |
 | T3 | **Preliminary submission:** блок из [submission-draft.md](submission-draft.md) | P2 | **Пт 23:59** |
@@ -100,7 +100,7 @@
 *Заполняем на T0 и T2.*
 - Роли: P1 «Труба» = ?, P2 «Мозг» = ?
 - Темы для поллинга (3–5): ?
-- Codex: P2 пишет им `detect/` (да / нет)? Если нет — снимаем Codex из тех-челленджей, в том числе в preliminary.
+- Codex: пока нет (код пишем с Claude). Подключаем ли позже — решить не позже Сб 11:00; иначе в сабмит не идёт.
 - Результат T2: что реально отдают news search и social scrape Context.dev (автор? время?): ?
 
 ## 7. Промпт для нового AI-ассистента
@@ -108,7 +108,7 @@
 Мы команда "The Kerfufflers" на Junction 2026 (Espoo, 13–15.11.2026), проект Live Truth Radar. Нас двое: P1 «Труба» (ingest, БД, деплой, API, дашборд) и P2 «Мозг» (детектор, синтетика, eval).
 Прочитай CLAUDE.md, затем docs/workflow.md (как работаем) и карточку своей задачи в docs/tasks.md. Контракт: contracts/models.py (меняем только вдвоём).
 Шире контекст — только если нужно: docs/HANDOFF.md (план и сроки), docs/architecture.md (MUST/SHOULD/CUT), docs/signal-processing.md, docs/submission-draft.md.
-Основной челлендж: Decode the Noise (Hostinger). Тех: Context.dev (ядро), Gemini; Codex — только если реально используем.
+Основной челлендж: Decode the Noise (Hostinger). Тех: Context.dev (ядро), Gemini; Codex пока не используем (возможно позже).
 Финальный сабмит: воскресенье 10:00 (Хельсинки).
 Отвечай по-русски: коротко, точно, с примерами, дружелюбно.
 Я — <P1/P2>. Текущая задача: <ID из docs/tasks.md>.

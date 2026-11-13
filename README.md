@@ -6,7 +6,7 @@
 
 ## Challenges
 - **Main:** Decode the Noise (Hostinger)
-- **Tech:** Context.dev (core: live news search + social scrape), Gemini (embeddings, explanations, synthetic test campaigns); OpenAI Codex only if we genuinely build the detectors with it
+- **Tech:** Context.dev (core: live news search + social scrape), Gemini (embeddings, explanations, synthetic test campaigns); OpenAI Codex not used for now (code is written with Claude); maybe later, only if we genuinely build with it
 
 ## The idea
 Coordinated propaganda behaves like a spread-spectrum (CDMA) signal: each bot account is too weak to flag alone, but together they carry one "code". Live Truth Radar applies radar and signal-processing math to the live web:

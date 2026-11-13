@@ -1,5 +1,5 @@
 # Драфт сабмита v4 · Live Truth Radar · The Kerfufflers
-## Основной: Decode the Noise (Hostinger) · тех: Context.dev, Gemini (+ Codex, только если реально используем) · идея: обработка сигналов
+## Основной: Decode the Noise (Hostinger) · тех: Context.dev, Gemini (Codex: возможно позже, пока не используем) · идея: обработка сигналов
 
 *Объём урезан до ядра, см. [architecture.md](architecture.md). Нас двое; preliminary (T3) и финальный текст (T17) ведёт P2 «Мозг». Правило: в финальном тексте только то, что реально работает в демо.*
 
@@ -21,8 +21,8 @@ Propaganda campaigns behave like a spread-spectrum signal: each bot account is t
 
 **Source Code:** ссылка на GitHub-репо (можно пустой)
 
-**Tech Challenges (отметить сейчас, можно поменять до вс 10:00):** Best Use of Context.dev: Fully Structured Web · Best Use of Gemini API · [Best Use of Codex — только если на T0 = да]
-*Codex отмечаем, только если на T0 решили, что P2 реально пишет им `detect/`. Oxylabs не отмечаем (CUT).*
+**Tech Challenges (отметить сейчас, можно поменять до вс 10:00):** Best Use of Context.dev: Fully Structured Web · Best Use of Gemini API
+*Codex пока не отмечаем: код пишем с Claude; отметим, только если подключим позже и будет лог. Oxylabs не отмечаем (CUT).*
 
 ---
 
@@ -112,5 +112,5 @@ Fact-checking with source fusion, cross-country geo echo, change watch for silen
 |---|---|---|
 | ✅ Context.dev | ≥1 эндпоинт в ядре + заметка «какие и зачем» (в описании + README-раздел, T17) | MUST, ядро |
 | ✅ Gemini | Почему важен (в описании) | MUST |
-| ◐ Codex | Ссылки на задачи/PR, скрины, `docs/codex-log.md` (ведёт P2 по ходу) | Только если на T0 = да и P2 реально писал им `detect/` |
+| ◐ Codex | Ссылки на задачи/PR, скрины, `docs/codex-log.md` (ведёт P2 по ходу) | Возможно позже: пока код пишем с Claude; отмечаем только при реальном использовании |
 | ❌ Oxylabs, Gemma, Nemotron, Modal / Verda, Aiven, CRACI | — | CUT (см. [architecture.md](architecture.md#объём-must--should--cut)) |
