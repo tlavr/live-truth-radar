@@ -1,78 +1,113 @@
 # Архитектура Live Truth Radar
 
-## Как работает (для ребёнка)
-Представь **дежурного детектива**, который сидит на Hostinger и **круглосуточно смотрит в интернет** через бинокль Context.dev.
-1. Как только по теме появляются новые статьи или посты, он их собирает.
-2. Замечает, что **20 аккаунтов за 10 минут написали почти одно и то же** → «рой!».
-3. Читает текст и говорит: «Тут **запугивание**: „если не сделаете X, завтра будет катастрофа“, без фактов».
-4. Проверяет, **кто за этим стоит**: домену 9 дней, текст скопирован с другого сайта, лого чужого бренда.
-5. Сверяет утверждение с надёжными источниками → «❌ не подтверждается, вот 3 ссылки».
-6. Пишет отчёт и **честно говорит, насколько уверен**.
+*Урезанный объём под хакатон: делаем ядро глубоко, а не всё поверхностно. Нас двое: P1 «Труба» и P2 «Мозг». План, сроки и чекпоинты: [HANDOFF.md](HANDOFF.md#5-план-по-задачам), карточки задач: [tasks.md](tasks.md).*
 
-## Архитектура
+## Как работает (для ребёнка)
+Представь **дежурного детектива**, который сидит на Hostinger и **каждые несколько минут смотрит в интернет** через бинокль Context.dev.
+1. Собирает новые статьи и посты по нескольким темам.
+2. Замечает, что **17 аккаунтов за 10 минут написали почти одно и то же** → «рой!».
+3. Читает тексты и говорит: «Тут **запугивание**: „если не сделаете X, завтра будет катастрофа“, без фактов».
+4. Честно говорит, **насколько уверен**, и показывает, как часто он ошибается (метрики).
+
+## Объём: MUST / SHOULD / CUT
+| Уровень | Что | Когда |
+|---|---|---|
+| **MUST** | Ingest (Context.dev news search + social scrape, поллинг каждые 2–5 мин, 3–5 тем), Swarm Detector (эмбеддинги → matched filter → корреляция → CFAR → SPRT, SNR в дБ), объяснение вердикта Gemini (приём + цитата + уверенность), Eval (инжекция синтетического роя + ~50 размеченных живых аккаунтов), дашборд на одну страницу + `/metrics` + кнопка инжекции, деплой на Hostinger | К Сб 19:00–20:30 (T0–T14, I1) |
+| **SHOULD** | Только **S1** — Source Trust через Context.dev brand/company (P1) | Только если весь MUST, кроме T14, готов к Сб 20:00; дедлайн Вс 01:00; отдельный `GET /api/source/{domain}` |
+| **CUT** | Oxylabs (целиком, включая гео-`/search`); SemEval; Context.dev scrape полного текста, monitors/webhooks (заменены поллингом), research, structured extraction; Fact-check, Change Watch; Gemma, Nemotron, Modal / Verda, Aiven, CRACI; спектрограммы, delay-Doppler, MMSE-фьюжн; бот-датасеты TwiBot/Cresci | Только в слайд «что дальше» |
+
+*Это канонический список уровней: остальные файлы на него ссылаются.*
+
+## Схема (MUST)
 ```
-          ┌──────────────── Hostinger VPS (Docker, публичный домен) ─────────────────┐
- ВЕБ      │                                                                          │
- новости ─┼─► Context.dev: news search, scrape, crawl, social, brand/company,        │
- соцсети  │   monitors ──вебхук──► INGEST ──► БАЗА (события во времени + векторы)    │
- сайты    │   (+ Oxylabs: /search, /scrape, ответы ChatGPT/Perplexity)               │
- логи ────┼─► (опц.) access-логи сайта                     │                        │
-          │                                                ▼                        │
-          │   АНАЛИЗ:  1 Swarm  2 Technique  3 Source Trust  4 Fact-check  5 Change │
-          │                                                │                        │
-          │   ВЕРДИКТ + объяснение + источники + уверенность │──► Дашборд / API / алерты│
-          │   EVAL: precision · recall · FPR на размеченных данных ──► страница метрик│
-          └──────────────────────────────────────────────────────────────────────────┘
-                  AI Router Hostinger / Gemini = модели
+          ┌──────────────── Hostinger VPS (Docker Compose, публичный HTTPS-домен) ───────────┐
+ ВЕБ      │                                                                                   │
+ новости ─┼─► worker: поллинг Context.dev каждые N мин ──► db: Postgres            │
+ соцсети  │   (news search + social scrape)                  (items, actors, inject_req.,    │
+          │                                                   findings, labels)              │
+          │   worker: эмбеддинги Gemini → matched filter → корреляция аккаунтов              │
+          │           → CFAR → SPRT → вердикт → объяснение Gemini (приём + цитата)           │
+          │                                                                                   │
+          │   api: FastAPI (REST + отдаёт дашборд)  ──►  дашборд: алерты, карточка, метрики │
+          │   eval: синтетический рой в живом потоке → ROC, precision, FPR, время до решения │
+          └───────────────────────────────────────────────────────────────────────────────────┘
+             LLM: Gemini (основной) · Hostinger AI Router (запасной, клиент `openai`, модель из `HOSTINGER_AI_ROUTER_MODEL`)
 ```
 
 ## Модули
-| # | Модуль | Что делает | Данные (откуда) | Для Hostinger | Для Context.dev |
-|---|---|---|---|---|---|
-| 0 | **Live Ingest** | Собирает посты/статьи по теме или списку источников, принимает вебхуки об изменениях | Context.dev news + social + monitors, Oxylabs | Основа | **Real-timeness** |
-| 1 | **Swarm Detector** | Кластеры аккаунтов: синхронность, похожесть текстов (эмбеддинги), одинаковые ссылки | Посты + время + авторы | Spot the swarm | Комбинация источников |
-| 2 | **Technique Classifier** | Классифицирует приёмы манипуляции, объясняет простыми словами | Текст | Name the technique | — |
-| 3 | **Source Trust** | Скоринг источника: возраст домена, клон-контент, AI-текст, бренд-несоответствие, сети ссылок | Context.dev brand + company + scrape | Trust the source | **Entities endpoints** |
-| 4 | **Fact-check** | Достаёт утверждения → ищет подтверждения в надёжных источниках → вердикт с цитатами | Context.dev search/research, Oxylabs | Объяснимость | **Truth at Internet Speed** |
-| 5 | **Change Watch** | Ловит тихие правки статей («новость переписали через 2 часа»), всплески по теме | Monitors + история версий | Bad-actor поведение | **The Web, Watched** |
-| E | **Eval Harness** | Метрики на размеченных наборах, порог «не уверен» | Открытые датасеты + наша разметка | **40% оценки** | Точность |
-| UI | **Radar Dashboard** | Лента алертов, карточка вердикта, граф роя, таймлайн, страница метрик | — | Демо | Полнота демо |
+| # | Модуль | Уровень | Кто | Папка | Что делает | Тулы |
+|---|---|---|---|---|---|---|
+| 0 | **Live Ingest** | MUST | P1 | `ingest/` | Каждые 2–5 мин тянет свежие статьи и посты по 3–5 темам, сохраняет текст, автора, время, URL как `Item` | Context.dev news search + social scrape |
+| 1 | **Swarm Detector** | MUST | P2 | `detect/` | Matched filter (банк шаблонов нарративов по эмбеддингам) → кросс-корреляция активности аккаунтов → CFAR (всплеск) → SPRT (решение) + SNR в дБ → `Finding` | Gemini embeddings + numpy/scipy (возможно, Codex) |
+| 2 | **Explain / Technique** | MUST | P1 | `ingest/explain.py` (в worker) | Для `Finding`: приём манипуляции + цитата-доказательство + уверенность + объяснение простыми словами → `Explanation` | Gemini structured output; AI Router запасной |
+| S | **Synthetic Swarm** | MUST | P2 | `synth/` | ~30 вариаций для нескольких месседжей (часть отложена для eval), фейковые аккаунты с лагами, `synthetic = true`, `campaign_id` | Gemini |
+| E | **Eval Harness** | MUST | P2 | `eval/` | ROC (Pd vs Pfa), доля найденных, постов/секунд до решения → `MetricsReport`; live FPR / precision по разметке | numpy |
+| UI | **Radar Dashboard** | MUST | P1 | `web/` | Лента алертов, карточка вердикта (посты, heatmap корреляции, SNR, SPRT-трасса, приём), `/metrics`, кнопка «инжектировать тестовую кампанию» | Статический HTML + JS + Chart.js, отдаёт FastAPI |
+| Ops | **Deploy** | MUST | P1 | `infra/` | Docker Compose, caddy HTTPS, Hostinger VPS, `tests/smoke.py` | Hostinger |
+| 3 | **Source Trust** | SHOULD (S1) | P1 | `ingest/` | Кто стоит за доменом: компания, возраст, чужое лого | Context.dev brand + company |
+| — | Geo Echo (Oxylabs), Fact-check, Change Watch | CUT | — | — | — | — |
 
-## Хранилище
-**Postgres + pgvector** в Docker на том же VPS. Таблицы: `sources`, `actors`, `items` (пост/статья + время), `versions` (история изменений), `embeddings`, `findings`, `labels`.
+## Репо и контракт
+```
+CLAUDE.md                 общее: инструкции агентам
+contracts/models.py       ОБЩЕЕ — меняем только вдвоём
+fixtures/items.json       тестовые данные (генерирует `make fixtures`, руками не править)
+fixtures/items_live_sample.json  реальный сэмпл из БД (T2, обновляется на синках), авторы псевдонимизированы
+fixtures/findings.json    пример находок (их отдаёт мок-детектор P1 до I1)
+ingest/  api/  web/  infra/      P1
+detect/  synth/  eval/           P2
+tests/                    test_contracts.py (общий), test_detect_*.py (P2), smoke.py (P1)
+docs/                     план и workflow
+Makefile                  `make test` (pytest, без сети, <5 с), `make smoke URL=...`
+```
+Слои связаны **одним контрактом** — pydantic v2 в [`contracts/models.py`](../contracts/models.py) (источник истины, здесь только кратко):
+- `Item` — пост/статья: `source` (`context_social` / `context_news` / `synthetic`), `author`, `published_at` (UTC), `text`, `url`, `topic`, `synthetic`, `campaign_id` (ground truth только у синтетики).
+- `Finding` — вердикт (`coordinated` / `organic` / `watching`), `accounts`, `item_ids`, `llr`, `snr_db`, `sprt_trace`, `sprt_upper` / `sprt_lower` (пороги для графика), `decided_at_item`, `first_seen` / `last_seen`, `correlation` и `lag_sec` (квадратные матрицы в порядке `accounts`, для heatmap), `id` = `finding_id(topic, accounts)` (стабильный), `snr_db` (кластер) и `snr_db_single` (один аккаунт: «−x → +y дБ»), `explanation: Explanation | None` (`technique`, `quote`, `confidence`, `summary`), `synthetic`.
+- `AlertsResponse` (+ `last_poll_at`: «обновлено N мин назад»), `MetricsReport` (ROC, detection rate, рабочая Pfa, постов/секунд до решения, live FPR / precision, `n_labelled`, `failure_examples`).
+- Вход детектора (P2): `detect.pipeline.detect(items, *, alpha=0.02, beta=0.1) -> list[Finding]`.
+- API (P1): `GET /health`, `GET /api/alerts` → `AlertsResponse`, `GET /api/metrics` → `MetricsReport`, `GET /api/items?ids=…` → `list[Item]` (тексты для карточки), `POST /api/inject` (кнопка демо; детектор запускает worker через `inject_requests`).
+
+Интерфейсы вне контракта (генератор для `/api/inject`, `eval/report.json`, `eval/labels.csv`, `/api/source/{domain}`, расположение worker): [HANDOFF.md §5](HANDOFF.md#5-план-по-задачам).
+
+P2 работает офлайн на `fixtures/` (без сети и БД), P1 — с мок-детектором до интеграции **I1 (Сб 15:00)**. Подробнее: [workflow.md](workflow.md).
 
 ## Стек на VPS (Docker Compose)
 | Сервис | Что внутри |
 |---|---|
-| `api` | FastAPI: REST для дашборда + приём вебхуков Context.dev |
-| `worker` | Ingest и детекторы (matched filter, корреляция, CFAR, SPRT), вызовы Gemini |
-| `db` | Postgres + pgvector |
-| `web` | Дашборд: алерты, граф роя, карточка вердикта, страница метрик |
+| `caddy` | Reverse proxy + автоматический HTTPS для домена Hostinger |
+| `api` | Python, FastAPI: REST для дашборда, отдаёт статический дашборд |
+| `worker` | Python (`ingest/worker.py`): поллинг Context.dev, `detect()` (numpy/scipy), объяснения Gemini. Eval гоняет P2 отдельно (`python -m eval.run` → `eval/report.json`) |
+| `db` | Postgres |
 
-## Демо-сценарий на 2 минуты
-1. Открываем `live-truth-radar.<домен Hostinger>`.
-2. Вводим горячую тему (или включён постоянный мониторинг 3–5 тем) → лента живых алертов обновляется **на глазах** (вебхуки Context.dev).
-3. Кликаем алерт «🐝 Рой: 17 аккаунтов, 92% похожий текст, 11 минут» → граф аккаунтов + примеры постов.
-4. Карточка поста: «🎭 Fear appeal + fabricated authority» с подсветкой фраз и объяснением.
-5. «🔗 Источник: домену 9 дней, лого скопировано с СМИ X» (brand-данные Context.dev).
-6. «✅/❌ Fact-check»: 3 ссылки на надёжные источники.
-7. Страница **Метрики:** precision 0.87, FPR 4% на тестовом наборе, примеры ошибок и как мы их обрабатываем.
+Фронт без сборки (HTML + JS + Chart.js), чтобы не тратить время на тулчейн. Это решение по умолчанию: если в команде есть человек, который быстро делает React, можно поменять, не трогая остальное.
 
-## Тулы по модулям
-| Модуль | Тулы |
-|---|---|
-| Live Ingest | Context.dev news search + monitors/webhooks + social scrape |
-| Swarm Detector | Gemini эмбеддинги + наша корреляция/CFAR/SPRT; Oxylabs гео-`/search` |
-| Technique Classifier | Gemini (structured output) |
-| Source Trust | Context.dev brand + company enrichment |
-| Fact-check | Context.dev research + scrape; Oxylabs `/scrape` и ответы AI-ассистентов |
-| Change Watch | Context.dev monitors + наша история версий |
-| LLM запасной | Hostinger AI Router |
-
-Подробно, зачем каждый тул и что нужно для приза: [tech-challenges.md](tech-challenges.md).
+## Хранилище
+Эмбеддинги кэшируются на диске (`cache/`, volume, в git не попадает); векторный поиск в БД не нужен, поэтому pgvector не берём.
+Таблицы: `actors` (аккаунт/автор), `items` (пост/статья: текст, автор, время, URL, источник, флаг `synthetic`), `findings` (вердикт, LLR, SNR, объяснение), `labels` (ручная разметка).
+Ответы Context.dev кэшируем у себя (повторный запрос стоит тех же кредитов). Схема БД — P1 (T4), но поля `items` / `findings` повторяют контракт.
 
 ## Данные для метрик (40% оценки!)
-- **Приёмы пропаганды:** открытые датасеты вида SemEval-2020 Task 11 (Propaganda Techniques Corpus) — проверить доступность и лицензию.
-- **Боты:** открытые бот-датасеты (TwiBot-20/22, Cresci-2017 и т. п.) — проверить доступность.
-- **Своя мини-разметка:** 100–200 живых примеров, собранных через Context.dev, размечаем вручную в команде (2 часа работы) → честный «live test set».
-- **Синтетический рой:** генерируем координированную кампанию (LLM пишет 30 вариантов одного месседжа) и прячем среди реальных постов → проверяем, что Swarm Detector её находит, а реальных людей не трогает.
+| Уровень | Набор | Для чего |
+|---|---|---|
+| MUST | **Синтетический рой:** LLM пишет ~30 вариаций для нескольких месседжей (часть отложена: их нет в банке шаблонов), разносим по фейковым аккаунтам с лагами, прячем в реальные посты (`synthetic = true`) | ROC и время до решения для Swarm Detector |
+| MUST | **Ручная разметка ~50 живых аккаунтов (T14, оба):** рубрика 15 мин, единица — аккаунт, классы «органика / подозрительно / не понятно»; **~25 из алертов** (→ live precision) + **~25 случайных без алерта** из тех же тем (→ live FPR) | Precision и FPR на реальных людях, отдельно от синтетики |
+| CUT | SemEval-2020 Task 11 (корпус приёмов) | Вдвоём не успеем; приёмы показываем объяснением с цитатой, без отдельной метрики |
+| CUT | TwiBot-20/22, Cresci-2017 | Доступ по запросу, не успеем |
+
+## Демо-сценарий на 2 минуты
+1. Открываем `https://<домен Hostinger>`: лента живых алертов по 3–5 темам (обновляется поллингом).
+2. Нажимаем «инжектировать тестовую кампанию» → в течение минуты появляется алерт «🐝 Рой: [N] аккаунтов, SNR из [−x] до [+y] дБ» (числа — реальные, из демо).
+3. Карточка: посты, heatmap корреляции аккаунтов, SPRT-трасса («решение на [k]-м посте»), приём «🎭 Fear appeal» с подсветкой фраз и объяснением.
+4. (SHOULD S1) «🔗 Источник: …» — кто стоит за доменом, от Context.dev brand/company.
+5. Страница `/metrics`: ROC, рабочая точка, precision/FPR, примеры ошибок.
+
+## Главные риски
+| Риск | Что делаем |
+|---|---|
+| Social scrape Context.dev не отдаёт автора или время | **Проверить первым делом (T2, P1, Пт 23:15).** Запасной вариант: news search + синтетический рой; авторы = домены/авторы статей |
+| Мало реальных роёв за выходные | Инжекция тестовой цели: это и метрика, и демо |
+| Лимиты Gemini | Hostinger AI Router как запасной LLM; эмбеддинги кэшируем |
+| Деплой ломается в последний момент | Деплой скелета к Сб 03:00 (T5), smoke после каждого деплоя, фича-фриз кода (F) в Вс 02:00 |
+| Детектор не готов к интеграции | Чекпоинт T10 Сб 14:00: P1 работает на моке, при отставании S1 не делаем, P1 помогает P2 |
+
+Зачем каждый тул и условия призов: [tech-challenges.md](tech-challenges.md).
