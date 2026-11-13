@@ -65,7 +65,7 @@ Makefile                  `make test` (pytest, без сети, <5 с), `make sm
 - `Finding` — вердикт (`coordinated` / `organic` / `watching`), `accounts`, `item_ids`, `llr`, `snr_db`, `sprt_trace`, `sprt_upper` / `sprt_lower` (пороги для графика), `decided_at_item`, `first_seen` / `last_seen`, `correlation` и `lag_sec` (квадратные матрицы в порядке `accounts`, для heatmap), `id` = `finding_id(topic, accounts)` (стабильный), `snr_db` (кластер) и `snr_db_single` (один аккаунт: «−x → +y дБ»), `explanation: Explanation | None` (`technique`, `quote`, `confidence`, `summary`), `synthetic`.
 - `AlertsResponse` (+ `last_poll_at`: «обновлено N мин назад»), `MetricsReport` (ROC, detection rate, рабочая Pfa, постов/секунд до решения, live FPR / precision, `n_labelled`, `failure_examples`).
 - Вход детектора (P2): `detect.pipeline.detect(items, *, alpha=0.02, beta=0.1) -> list[Finding]`.
-- API (P1): `GET /health`, `GET /api/alerts` → `AlertsResponse`, `GET /api/metrics` → `MetricsReport`, `POST /api/inject` (кнопка демо).
+- API (P1): `GET /health`, `GET /api/alerts` → `AlertsResponse`, `GET /api/metrics` → `MetricsReport`, `GET /api/items?ids=…` → `list[Item]` (тексты для карточки), `POST /api/inject` (кнопка демо; детектор запускает worker через `inject_requests`).
 
 Интерфейсы вне контракта (генератор для `/api/inject`, `eval/report.json`, `eval/labels.csv`, `/api/source/{domain}`, расположение worker): [HANDOFF.md §5](HANDOFF.md#5-план-по-задачам).
 

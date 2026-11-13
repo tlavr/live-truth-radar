@@ -62,7 +62,7 @@
 
 ### T4 · P1 · сб 01:00
 **Цель:** скелет сервисов, который поднимается одной командой.
-**Вход/выход:** `infra/docker-compose.yml` (caddy, api, worker, db=Postgres), `infra/Caddyfile`, `infra/schema.sql` (таблицы `actors`, `items`, `findings`, `labels`; без pgvector), `api/main.py` с `GET /health` → `{"status":"ok"}`, заглушка `ingest/worker.py`.
+**Вход/выход:** `infra/docker-compose.yml` (caddy, api, worker, db=Postgres), `infra/Caddyfile`, `infra/schema.sql` (таблицы `actors`, `items`, `findings`, `labels`, `inject_requests`; без pgvector), `api/main.py` с `GET /health` → `{"status":"ok"}`, заглушка `ingest/worker.py`.
 **Готово, когда:** `docker compose -f infra/docker-compose.yml up` локально → `curl localhost/health` = 200 (через caddy, порт 80), схема применилась (таблицы видны в `psql`, включая `inject_requests`). Пути в compose считаются от `infra/`: build context `..`, mounts `../eval:/app/eval:ro` и `../cache:/app/cache`.
 **Тесты:** нет новых (схема БД → ревью вторым агентом, это рискованное).
 **Зависит от:** T1
