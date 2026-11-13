@@ -174,7 +174,7 @@ def _ambiguity(items: list[Item], accounts: list[str], *, seed: int) -> Ambiguit
     for i, p in enumerate(ordered):
         for q in ordered[i + 1:]:
             lag = (q.published_at - p.published_at).total_seconds()
-            if lag >= LAG_EDGES[-1]:
+            if lag > LAG_EDGES[-1]:
                 break
             if p.author == q.author:
                 continue
@@ -182,7 +182,7 @@ def _ambiguity(items: list[Item], accounts: list[str], *, seed: int) -> Ambiguit
             same_campaign = p.campaign_id is not None and p.campaign_id == q.campaign_id
             lo, hi = (0.03, 0.2) if same_campaign else (0.5, 1.0)
             m = min(int(rng.uniform(lo, hi) * rows), rows - 1)
-            (counts if inside else background)[m][int(lag // 30)] += 1
+            (counts if inside else background)[m][min(int(lag // 30), cols - 1)] += 1
     return AmbiguityMap(lag_edges_sec=LAG_EDGES, mismatch_edges=MISMATCH_EDGES, counts=counts, background=background)
 
 
@@ -198,10 +198,14 @@ def _finding(items: list[Item], accounts: list[str], *, verdict: str, llr_steps:
              for j in range(n)] for i in range(n)]
     corr = [[corr[min(i, j)][max(i, j)] for j in range(n)] for i in range(n)]  # symmetric
     coordinated = verdict == "coordinated"
-    lag = [[round((first[b] - first[a]).total_seconds(), 1) if coordinated else 0.0 for b in accounts]
-           for a in accounts]
+    # coordinated: lag between first posts; otherwise a small arbitrary lag inside tau_max
+    off = {a: float(rng.integers(0, 300)) for a in accounts}
+    lag = [[round((first[b] - first[a]).total_seconds(), 1) if coordinated else off[b] - off[a]
+            for b in accounts] for a in accounts]
     trace, total, decided = [], 0.0, None
-    for k, step in enumerate(llr_steps[: len(acc_items)]):
+    # after a decision the trace stops; while watching it covers every item (steps repeat)
+    for k in range(len(acc_items)):
+        step = llr_steps[k % len(llr_steps)]
         total = round(total + step, 2)
         trace.append(total)
         if decided is None and (total >= UPPER or total <= LOWER):
@@ -229,7 +233,7 @@ def mock_findings(items: list[Item]) -> list[Finding]:
     coordinated = _finding(
         items, SWARM_ACCOUNTS, verdict="coordinated",
         llr_steps=[0.4, 0.5, 0.3, 0.6, 0.5, 0.4, 0.7, 0.6, 0.5, 0.4, 0.5, 0.6],
-        corr_level=0.87, snr_db=17.8, snr_db_single=6.0, seed=1,  # 15 pairs: +11.8 dB
+        corr_level=0.5, snr_db=23.8, snr_db_single=12.0, seed=1,  # mean pair z = 4 (> CFAR k = 3); 15 pairs: +11.8 dB
         explanation=dict(
             technique="Fear appeal + call to action",
             quote=swarm_quote.split(".")[0].split("!")[0],
@@ -240,8 +244,8 @@ def mock_findings(items: list[Item]) -> list[Finding]:
     )
     watching = _finding(
         items, ORGANIC_ACCOUNTS[:3], verdict="watching",
-        llr_steps=[-0.3, 0.2, -0.4, -0.2, 0.1, -0.3, -0.2],
-        corr_level=0.1, snr_db=1.3, snr_db_single=-3.5, seed=2, explanation=None,  # 3 pairs: +4.8 dB
+        llr_steps=[-0.3, 0.2, -0.4, 0.3, 0.1, -0.3, 0.3],
+        corr_level=0.3, snr_db=15.7, snr_db_single=10.9, seed=2, explanation=None,  # mean pair z = 3.5; 3 pairs: +4.8 dB
     )
     return [coordinated, watching]
 
