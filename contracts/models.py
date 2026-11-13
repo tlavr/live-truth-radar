@@ -113,6 +113,8 @@ class TopicStatus(BaseModel):
     n_items: int = 0
     n_accounts: int = 0
     n_coordinated: int = 0
+    window_hours: float | None = None  # detector window (DETECT_WINDOW_HOURS), for "in the last N hours"
+    poll_interval_sec: int | None = None  # for "we scan every N minutes"
     note: str | None = None  # e.g. "social search returned no authors; using news only"
 
 

@@ -79,7 +79,7 @@
 - `eval/labels.csv` (`account,topic,alerted,label,note`) — общая разметка T14; `account` — псевдоним `contracts.pseudonym(author, LTR_HASH_SALT)`, реальные хэндлы в публичный репо **не попадают**. Скелет файла делает `ingest/label_sample.py` (P1).
 - `fixtures/items_live_sample.json` — живой сэмпл из БД для офлайн-работы P2 (`ingest/export_sample.py`, P1; авторы псевдонимизированы); обновляется на каждом синке.
 - `GET /api/items?ids=a,b,c` (id через запятую; P1, T8) → `list[Item]`: тексты постов для карточки вердикта. Пока работает mock, T8 загружает `fixtures/items.json` в БД, чтобы id из `fixtures/findings.json` находились.
-- Публичный дашборд маскирует хэндлы реальных (не синтетических) аккаунтов (`@ab***`); полные хэндлы видны только локально для разметки T14. `ingest/label_sample.py` пишет соответствие `псевдоним,хэндл` в `cache/label_handles.csv` (git-ignored).
+- Хэндлы реальных (не синтетических) аккаунтов маскирует **API** (`@ab***`) в `/api/alerts` и `/api/items` — полные хэндлы наружу не уходят, дашборд маскирует повторно для страховки; полные хэндлы видны только локально для разметки T14. `ingest/label_sample.py` пишет соответствие `псевдоним,хэндл` в `cache/label_handles.csv` (git-ignored).
 - Метрики считаются тем же эмбеддером, что работает вживую: `make eval` идёт с `LTR_EMBEDDER=gemini` и кэшем `cache/embeddings/`; `MetricsReport.embedder` фиксирует, каким; `eval.run` отказывается писать отчёт на `hash` без `--dev`.
 - `GET /api/source/{domain}` (S1) — Source Trust отдельным эндпоинтом, контракт `Finding` не меняем.
 - Worker: `ingest/worker.py`; объяснение Gemini: `ingest/explain.py`; схема БД: `infra/schema.sql` (всё P1).

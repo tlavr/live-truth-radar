@@ -22,9 +22,11 @@ from contracts.models import (  # noqa: E402
     Finding,
     Item,
     MetricsReport,
+    TopicStatus,
 )
 
 OUT = Path(__file__).resolve().parent / "mock-data.js"
+POLL_INTERVAL_SEC = 180
 
 
 def build() -> dict:
@@ -34,9 +36,42 @@ def build() -> dict:
     generated_at = max(f.created_at for f in findings) + timedelta(minutes=1)
     alerts = AlertsResponse(
         generated_at=generated_at,
-        last_poll_at=generated_at - timedelta(minutes=3),
+        last_poll_at=generated_at - timedelta(seconds=60),
         findings=findings,
     )
+
+    # Topics the page pretends to watch. Only the fixture topic has data; the others show the calm
+    # "nothing coordinated" state. Poll times are relative to generated_at (the mock clock starts there).
+    fixture_topic = findings[0].topic
+    topic_items = [i for i in items if i.topic == fixture_topic]
+
+    def topic(slug: str, query: str, age_min: int, last_ago: int, n_items: int, n_accounts: int, n_coord: int) -> TopicStatus:
+        last = generated_at - timedelta(seconds=last_ago)
+        return TopicStatus(
+            topic=slug,
+            query=query,
+            status="watching",
+            created_at=generated_at - timedelta(minutes=age_min),
+            last_poll_at=last,
+            next_poll_at=last + timedelta(seconds=POLL_INTERVAL_SEC),
+            n_items=n_items,
+            n_accounts=n_accounts,
+            n_coordinated=n_coord,
+        )
+
+    topics = [
+        topic(
+            fixture_topic,
+            "Helsinki tram fares",
+            175,
+            60,
+            len(topic_items),
+            len({i.author for i in topic_items}),
+            sum(1 for f in findings if f.topic == fixture_topic and f.verdict == "coordinated"),
+        ),
+        topic("nordic-electricity-prices", "Nordic electricity prices", 140, 95, 214, 163, 0),
+        topic("finland-school-meals", "Finland school meals", 65, 130, 57, 49, 0),
+    ]
 
     by_id = {i.id: i for i in items}
     missing = [iid for f in findings for iid in f.item_ids if iid not in by_id]
@@ -91,6 +126,7 @@ def build() -> dict:
     )
 
     return {
+        "topics": [t.model_dump(mode="json") for t in topics],
         "alerts": alerts.model_dump(mode="json"),
         "items": {i.id: i.model_dump(mode="json") for i in items},
         "metrics": metrics.model_dump(mode="json"),
@@ -101,6 +137,9 @@ def main() -> None:
     mock = build()
     # Round-trip check: what we ship must parse with the contract.
     AlertsResponse.model_validate(mock["alerts"])
+    slugs = [TopicStatus.model_validate(raw).topic for raw in mock["topics"]]
+    assert len(slugs) == len(set(slugs)), "mock topics must be unique"
+    assert {f["topic"] for f in mock["alerts"]["findings"]} <= set(slugs), "every finding needs a watched topic"
     for raw in mock["items"].values():
         Item.model_validate(raw)
     report = MetricsReport.model_validate(mock["metrics"])
@@ -115,7 +154,7 @@ def main() -> None:
         f"window.LTR_MOCK = {body};\n",
         encoding="utf-8",
     )
-    print(f"wrote {OUT.relative_to(ROOT)}: {len(mock['alerts']['findings'])} findings, {len(mock['items'])} items")
+    print(f"wrote {OUT.relative_to(ROOT)}: {len(mock['topics'])} topics, {len(mock['alerts']['findings'])} findings, {len(mock['items'])} items")
 
 
 if __name__ == "__main__":
