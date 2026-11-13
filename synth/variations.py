@@ -100,11 +100,14 @@ def generate(topic: str, description: str, *, n_messages: int = 5, n_variations:
         )
     if not resp.text:
         raise RuntimeError(f"{model} returned no text (blocked or empty response)")
+    raw_messages = json.loads(resp.text)["messages"]
     messages = []
-    for k, raw in enumerate(json.loads(resp.text)["messages"]):
+    for k, raw in enumerate(raw_messages):
         texts = list(dict.fromkeys(t.strip() for t in raw["variations"] if t.strip()))
-        # the last n_held_out messages are kept away from any tuning
-        messages.append(Message(claim=raw["claim"].strip(), variations=texts, held_out=k >= n_messages - n_held_out))
+        # the last n_held_out messages are kept away from any tuning (count what the model
+        # actually returned, not what we asked for)
+        messages.append(Message(claim=raw["claim"].strip(), variations=texts,
+                                held_out=k >= len(raw_messages) - n_held_out))
     return VariationSet(topic=check_slug(topic), description=description, source=model, messages=messages)
 
 
