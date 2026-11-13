@@ -75,7 +75,9 @@ class Finding(BaseModel):
     first_seen: datetime  # earliest published_at among item_ids
     last_seen: datetime  # latest published_at among item_ids
     correlation: list[list[float]]  # square, row/col order == accounts (heatmap): peak normalized xcorr
-    lag_sec: list[list[float]] | None = None  # same shape: lag (s) at the correlation peak
+    # same shape: lag_sec[i][j] = seconds account j posts after account i at the correlation peak
+    # (positive = j follows i; antisymmetric)
+    lag_sec: list[list[float]] | None = None
     explanation: Explanation | None = None
     synthetic: bool = False  # true if it contains injected items
 

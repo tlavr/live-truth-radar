@@ -125,7 +125,7 @@
 **Зависит от:** I1 (можно начать на mock findings после T8)
 
 ### T12 · P1 · сб 19:00
-**Цель:** одна страница для судей и видео.
+**Цель:** одна страница для судей и видео. **Прототип уже есть** в `web/` (на моках, `python web/build_mock.py`): подключить к живому API, а не переписывать. FastAPI отдаёт `web/` с корня (`/`, `/metrics`, `/style.css`, `/app.js`).
 **Вход/выход:** `web/index.html` + `web/app.js` (Chart.js): лента алертов из `/api/alerts`, карточка вердикта (посты, heatmap `correlation` с `lag_sec` в подсказке, SNR дБ, SPRT-трасса с порогами `sprt_upper`/`sprt_lower`, приём + цитата); `web/metrics.html` из `/api/metrics` (ROC, рабочая точка, precision/FPR, `failure_examples`), отдаётся по пути `/metrics`; вердикт `watching` подписан «keep watching / не уверены»; тексты постов из `/api/items`; хэндлы реальных аккаунтов маскируются (`@ab***`); в шапке «обновлено N мин назад» из `last_poll_at`; SNR в карточке «`snr_db_single` → `snr_db` дБ»; кнопка «inject test campaign» → `POST /api/inject`. Отдаёт FastAPI.
 **Готово, когда:** на `https://<домен>` всё видно без консольных ошибок; инжект → алерт появляется в ленте (обновление поллингом); работает на телефоне.
 **Тесты:** нет (UI не тестируем), `make smoke`.

@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Live Truth Radar</title>
+<meta name="description" content="Radar-style detector of coordinated narrative campaigns in live news and social streams.">
+<!-- API base for app.js: "auto" = same origin when served at / or /metrics, otherwise demo data.
+     Set to "" (same origin) or "https://host" to force the live API, "none" for demo data only; add ?mock=1 to force demo data. -->
+<meta name="ltr-api-base" content="auto">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="brand">
+      <svg class="scope" viewBox="0 0 40 40" aria-hidden="true">
+        <circle cx="20" cy="20" r="18"/><circle cx="20" cy="20" r="11"/><circle cx="20" cy="20" r="4"/>
+        <line x1="20" y1="20" x2="33" y2="7"/>
+        <circle class="blip" cx="28" cy="15" r="2.2"/>
+      </svg>
+      <div>
+        <h1>Live Truth Radar</h1>
+        <p class="tagline">Spots groups of accounts pushing one message in step, and shows the evidence.</p>
+      </div>
+    </div>
+    <nav class="views" aria-label="Views">
+      <a href="#radar" data-view="radar">Radar</a>
+      <a href="#metrics" data-view="metrics">Accuracy</a>
+    </nav>
+    <div class="status">
+      <span id="demo-badge" class="badge badge-demo" hidden title="The live API is not reachable from this page, so it shows bundled demo data.">Demo data</span>
+      <span id="updated" class="updated">Loading…</span>
+      <button id="inject-btn" type="button" class="btn">Inject test campaign</button>
+    </div>
+    <div class="watch">
+      <span class="eyebrow">Watching</span>
+      <span id="topics" class="topics"></span>
+    </div>
+    <p id="inject-msg" class="inline-msg" role="status" hidden></p>
+  </header>
+
+  <main id="view-radar" class="radar">
+    <section class="feed" aria-labelledby="feed-h">
+      <div class="sec-head">
+        <h2 id="feed-h">Alerts</h2>
+        <span id="feed-count" class="muted"></span>
+      </div>
+      <ul id="feed" class="feed-list"></ul>
+      <p class="caption">Each row is a group of accounts the detector looked at. Only the red verdict means we are confident; everything else is still open.</p>
+    </section>
+    <section id="card" class="card" aria-label="Verdict details"></section>
+  </main>
+
+  <div id="view-metrics" class="metrics" hidden></div>
+
+  <footer class="foot">
+    <p>Junction 2026 · Decode the Noise. Real account handles are masked; accounts marked “synthetic” are our own test accounts.</p>
+  </footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="mock-data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
