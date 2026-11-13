@@ -14,7 +14,7 @@ tests/                   test_contracts.py (shared), test_detect_*.py (P2), smok
 docs/                    plan and workflow (Russian)
 ```
 Detector entry point: `detect.pipeline.detect(items, *, alpha=0.02, beta=0.1) -> list[Finding]`.
-API: `GET /health`, `GET /api/alerts`, `GET /api/metrics` (reads `eval/report.json`), `POST /api/inject` (calls `synth.campaign.make_campaign`; worker runs detect), `GET /api/items?ids=`, S1 only: `GET /api/source/{domain}`. Worker: `ingest/worker.py`.
+API: `GET /health`, `GET /api/alerts`, `GET /api/metrics` (reads `eval/report.json`), `POST /api/inject` (calls `synth.campaign.make_campaign`; worker runs detect), `GET /api/items?ids=`, `POST|GET /api/topics` (user topic search → `TopicStatus`), S1 only: `GET /api/source/{domain}`. Worker: `ingest/worker.py`.
 Interfaces outside the contract: docs/HANDOFF.md §5.
 
 ## Commands

@@ -9,4 +9,5 @@ from contracts.models import (  # noqa: F401
     MetricsReport,
     finding_id,
     pseudonym,
+    TopicStatus,
 )

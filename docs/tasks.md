@@ -62,7 +62,7 @@
 
 ### T4 · P1 · сб 01:00
 **Цель:** скелет сервисов, который поднимается одной командой.
-**Вход/выход:** `infra/docker-compose.yml` (caddy, api, worker, db=Postgres), `infra/Caddyfile`, `infra/schema.sql` (таблицы `actors`, `items`, `findings`, `labels`, `inject_requests`; без pgvector), `api/main.py` с `GET /health` → `{"status":"ok"}`, заглушка `ingest/worker.py`.
+**Вход/выход:** `infra/docker-compose.yml` (caddy, api, worker, db=Postgres), `infra/Caddyfile`, `infra/schema.sql` (таблицы `actors`, `items`, `findings`, `labels`, `topics`, `inject_requests`; без pgvector), `api/main.py` с `GET /health` → `{"status":"ok"}`, заглушка `ingest/worker.py`.
 **Готово, когда:** `docker compose -f infra/docker-compose.yml up` локально → `curl localhost/health` = 200 (через caddy, порт 80), схема применилась (таблицы видны в `psql`, включая `inject_requests`). Пути в compose считаются от `infra/`: build context `..`, mounts `../eval:/app/eval:ro` и `../cache:/app/cache`.
 **Тесты:** нет новых (схема БД → ревью вторым агентом, это рискованное).
 **Зависит от:** T1
@@ -76,7 +76,7 @@
 
 ### T6 · P1 · сб 04:30
 **Цель:** живой поток данных в БД.
-**Вход/выход:** `ingest/contextdev.py` (news search + social scrape, кэш ответов), `ingest/worker.py`: каждые 2–5 мин по 3–5 темам из `.env` → нормализация в `Item` → upsert в `items`/`actors` (дедуп по `id`) → запоминает `last_poll_at`. Детектор (пока mock) вызывается на окне `DETECT_WINDOW_HOURS` по теме, findings темы заменяются атомарно.
+**Вход/выход:** `ingest/contextdev.py` (news search + social scrape, кэш ответов), `ingest/worker.py`: темы из таблицы `topics` (новая тема → сразу бэкфилл за окно; затем каждые 2–5 мин; `DEFAULT_TOPICS` из `.env` засеваются при старте; лимит `MAX_ACTIVE_TOPICS`, TTL `TOPIC_TTL_HOURS`) → нормализация в `Item` → upsert в `items`/`actors` (дедуп по `id`) → запоминает `last_poll_at`. Детектор (пока mock) вызывается на окне `DETECT_WINDOW_HOURS` по теме, findings темы заменяются атомарно.
 **Готово, когда:** на VPS worker крутится ≥ 2 циклов, в `items` растёт число строк по всем темам, повторный цикл не дублирует; кэш не дёргает API на одинаковый запрос.
 **Тесты:** нет (сеть). Нормализация проверяется парсингом в `Item`.
 **Зависит от:** T2, T5
@@ -90,7 +90,7 @@
 
 ### T8 · P1 · сб 11:00
 **Цель:** API, на котором можно строить дашборд, до готовности детектора.
-**Вход/выход:** `api/mock_detect.py` с той же сигнатурой, что `detect.pipeline.detect`, отдаёт `fixtures/findings.json`; worker сохраняет findings в БД; `GET /api/alerts` → `AlertsResponse`, `GET /api/metrics` → `MetricsReport` (пока заглушка с `None`), `POST /api/inject` → кладёт синтетические items в БД и строку в `inject_requests` (worker подхватывает за ~10 с); `GET /api/items?ids=…` → `list[Item]` для карточки; пока mock — `fixtures/items.json` загружен в БД. ⚙ правила инжекта — HANDOFF §5 (окно 15 мин до «сейчас», новые `campaign_id`/id на каждый инжект); до T9 берёт синтетику из `fixtures/items.json`, после T9 — `synth.campaign.make_campaign(...)`; `/api/metrics` читает `eval/report.json` (смонтирован read-only), если он есть. Плюс `ingest/export_sample.py`: последние N часов `items` → `fixtures/items_live_sample.json` с псевдонимами (для P2, обновлять на каждом синке).
+**Вход/выход:** `api/mock_detect.py` с той же сигнатурой, что `detect.pipeline.detect`, отдаёт `fixtures/findings.json`; worker сохраняет findings в БД; `GET /api/alerts` → `AlertsResponse`, `GET /api/metrics` → `MetricsReport` (пока заглушка с `None`), `POST /api/inject` → кладёт синтетические items в БД и строку в `inject_requests` (worker подхватывает за ~10 с); `GET /api/items?ids=…` → `list[Item]` для карточки; `POST /api/topics` / `GET /api/topics` → `TopicStatus` (поиск темы на главной), `GET /api/alerts?topic=`; пока mock — `fixtures/items.json` загружен в БД. ⚙ правила инжекта — HANDOFF §5 (окно 15 мин до «сейчас», новые `campaign_id`/id на каждый инжект); до T9 берёт синтетику из `fixtures/items.json`, после T9 — `synth.campaign.make_campaign(...)`; `/api/metrics` читает `eval/report.json` (смонтирован read-only), если он есть. Плюс `ingest/export_sample.py`: последние N часов `items` → `fixtures/items_live_sample.json` с псевдонимами (для P2, обновлять на каждом синке).
 **Готово, когда:** на VPS `/api/alerts` и `/api/metrics` проходят валидацию моделей; два `POST /api/inject` подряд оба добавляют новые items с `synthetic=true`; `fixtures/items_live_sample.json` закоммичен; `make smoke` зелёный.
 **Тесты:** `tests/smoke.py` расширить на `/api/metrics`.
 **Зависит от:** T6
@@ -125,7 +125,7 @@
 **Зависит от:** I1 (можно начать на mock findings после T8)
 
 ### T12 · P1 · сб 19:00
-**Цель:** одна страница для судей и видео. **Прототип уже есть** в `web/` (на моках, `python web/build_mock.py`): подключить к живому API, а не переписывать. FastAPI отдаёт `web/` с корня (`/`, `/metrics`, `/style.css`, `/app.js`).
+**Цель:** одна страница для судей и видео. **Прототип уже есть** в `web/` (поиск темы в центре, живой статус скана, группы с постами как доказательство, математика под раскрытием) (на моках, `python web/build_mock.py`): подключить к живому API, а не переписывать. FastAPI отдаёт `web/` с корня (`/`, `/metrics`, `/style.css`, `/app.js`).
 **Вход/выход:** `web/index.html` + `web/app.js` (Chart.js): лента алертов из `/api/alerts`, карточка вердикта (посты, heatmap `correlation` с `lag_sec` в подсказке, SNR дБ, SPRT-трасса с порогами `sprt_upper`/`sprt_lower`, приём + цитата); `web/metrics.html` из `/api/metrics` (ROC, рабочая точка, precision/FPR, `failure_examples`), отдаётся по пути `/metrics`; вердикт `watching` подписан «keep watching / не уверены»; тексты постов из `/api/items`; хэндлы реальных аккаунтов маскируются (`@ab***`); в шапке «обновлено N мин назад» из `last_poll_at`; SNR в карточке «`snr_db_single` → `snr_db` дБ»; кнопка «inject test campaign» → `POST /api/inject`. Отдаёт FastAPI.
 **Готово, когда:** на `https://<домен>` всё видно без консольных ошибок; инжект → алерт появляется в ленте (обновление поллингом); работает на телефоне.
 **Тесты:** нет (UI не тестируем), `make smoke`.

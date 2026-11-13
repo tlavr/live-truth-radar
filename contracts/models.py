@@ -101,6 +101,21 @@ class Finding(BaseModel):
         return self
 
 
+class TopicStatus(BaseModel):
+    """A topic the user asked us to watch (POST /api/topics); GET /api/topics returns these."""
+
+    topic: str  # slug, equals Item.topic / Finding.topic
+    query: str  # what the user typed
+    status: Literal["scanning", "watching", "expired", "error"]  # scanning = first backfill running
+    created_at: datetime
+    last_poll_at: datetime | None = None
+    next_poll_at: datetime | None = None
+    n_items: int = 0
+    n_accounts: int = 0
+    n_coordinated: int = 0
+    note: str | None = None  # e.g. "social search returned no authors; using news only"
+
+
 class AlertsResponse(BaseModel):
     """GET /api/alerts payload."""
 
