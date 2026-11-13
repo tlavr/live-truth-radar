@@ -1,7 +1,7 @@
 [
  {
-  "id": "fx-0000",
-  "source": "synthetic",
+  "id": "fx-e50db8af9b",
+  "source": "context_social",
   "platform": "x",
   "author": "helsinki_rider",
   "published_at": "2026-11-13T18:02:18Z",
@@ -12,8 +12,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0001",
-  "source": "synthetic",
+  "id": "fx-cb93a95986",
+  "source": "context_social",
   "platform": "x",
   "author": "aino_k",
   "published_at": "2026-11-13T18:04:45Z",
@@ -24,8 +24,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0002",
-  "source": "synthetic",
+  "id": "fx-0d2e8f46b6",
+  "source": "context_social",
   "platform": "x",
   "author": "kallio_local",
   "published_at": "2026-11-13T18:10:45Z",
@@ -36,8 +36,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0003",
-  "source": "synthetic",
+  "id": "fx-ff0e07fb45",
+  "source": "context_social",
   "platform": "x",
   "author": "urban_otto",
   "published_at": "2026-11-13T18:12:11Z",
@@ -48,8 +48,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0004",
-  "source": "synthetic",
+  "id": "fx-25573412c8",
+  "source": "context_social",
   "platform": "x",
   "author": "tiina.m",
   "published_at": "2026-11-13T18:13:57Z",
@@ -60,8 +60,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0005",
-  "source": "synthetic",
+  "id": "fx-78462bb39d",
+  "source": "context_social",
   "platform": "x",
   "author": "aino_k",
   "published_at": "2026-11-13T18:14:22Z",
@@ -72,8 +72,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0006",
-  "source": "synthetic",
+  "id": "fx-22c4342e0a",
+  "source": "context_social",
   "platform": "x",
   "author": "kallio_local",
   "published_at": "2026-11-13T18:15:30Z",
@@ -84,8 +84,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0007",
-  "source": "synthetic",
+  "id": "fx-ddefbf1ffc",
+  "source": "context_social",
   "platform": "x",
   "author": "sanna_writes",
   "published_at": "2026-11-13T18:16:49Z",
@@ -96,8 +96,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0008",
-  "source": "synthetic",
+  "id": "fx-bda929e683",
+  "source": "context_social",
   "platform": "x",
   "author": "kallio_local",
   "published_at": "2026-11-13T18:18:22Z",
@@ -108,8 +108,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0009",
-  "source": "synthetic",
+  "id": "fx-52405f29d5",
+  "source": "context_social",
   "platform": "x",
   "author": "mikko.v",
   "published_at": "2026-11-13T18:21:14Z",
@@ -120,8 +120,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0010",
-  "source": "synthetic",
+  "id": "fx-911e3fe96a",
+  "source": "context_social",
   "platform": "x",
   "author": "helsinki_rider",
   "published_at": "2026-11-13T18:29:44Z",
@@ -132,7 +132,7 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0011",
+  "id": "fx-905b90687c",
   "source": "synthetic",
   "platform": "x",
   "author": "realvoice_fi",
@@ -144,7 +144,7 @@
   "campaign_id": "swarm-001"
  },
  {
-  "id": "fx-0012",
+  "id": "fx-233c5c78cb",
   "source": "synthetic",
   "platform": "x",
   "author": "nordic_patriot7",
@@ -156,7 +156,7 @@
   "campaign_id": "swarm-001"
  },
  {
-  "id": "fx-0013",
+  "id": "fx-e5e264e9be",
   "source": "synthetic",
   "platform": "x",
   "author": "truthfinland_01",
@@ -168,7 +168,7 @@
   "campaign_id": "swarm-001"
  },
  {
-  "id": "fx-0014",
+  "id": "fx-38338e0b60",
   "source": "synthetic",
   "platform": "x",
   "author": "helsinki_truth9",
@@ -180,7 +180,7 @@
   "campaign_id": "swarm-001"
  },
  {
-  "id": "fx-0015",
+  "id": "fx-88aff5f1f0",
   "source": "synthetic",
   "platform": "x",
   "author": "citizen_watch22",
@@ -192,7 +192,7 @@
   "campaign_id": "swarm-001"
  },
  {
-  "id": "fx-0016",
+  "id": "fx-420c1e84fa",
   "source": "synthetic",
   "platform": "x",
   "author": "fair_fares_now",
@@ -204,8 +204,8 @@
   "campaign_id": "swarm-001"
  },
  {
-  "id": "fx-0017",
-  "source": "synthetic",
+  "id": "fx-8cb54ddc58",
+  "source": "context_social",
   "platform": "x",
   "author": "aino_k",
   "published_at": "2026-11-13T18:32:12Z",
@@ -216,8 +216,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0018",
-  "source": "synthetic",
+  "id": "fx-8486e30ba3",
+  "source": "context_social",
   "platform": "x",
   "author": "petri_h",
   "published_at": "2026-11-13T18:34:14Z",
@@ -228,8 +228,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0019",
-  "source": "synthetic",
+  "id": "fx-d03128a0c1",
+  "source": "context_social",
   "platform": "x",
   "author": "tiina.m",
   "published_at": "2026-11-13T18:44:03Z",
@@ -240,8 +240,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0020",
-  "source": "synthetic",
+  "id": "fx-1ad4625be2",
+  "source": "context_social",
   "platform": "x",
   "author": "kallio_local",
   "published_at": "2026-11-13T18:50:41Z",
@@ -252,8 +252,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0021",
-  "source": "synthetic",
+  "id": "fx-6318925807",
+  "source": "context_social",
   "platform": "x",
   "author": "urban_otto",
   "published_at": "2026-11-13T18:51:11Z",
@@ -264,8 +264,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0022",
-  "source": "synthetic",
+  "id": "fx-a567311322",
+  "source": "context_social",
   "platform": "x",
   "author": "sanna_writes",
   "published_at": "2026-11-13T18:54:38Z",
@@ -276,8 +276,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0023",
-  "source": "synthetic",
+  "id": "fx-5b3dc5f590",
+  "source": "context_social",
   "platform": "x",
   "author": "sanna_writes",
   "published_at": "2026-11-13T18:58:46Z",
@@ -288,8 +288,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0024",
-  "source": "synthetic",
+  "id": "fx-ae2902bde0",
+  "source": "context_social",
   "platform": "x",
   "author": "helsinki_rider",
   "published_at": "2026-11-13T19:05:43Z",
@@ -300,8 +300,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0025",
-  "source": "synthetic",
+  "id": "fx-8931ae87c4",
+  "source": "context_social",
   "platform": "x",
   "author": "aino_k",
   "published_at": "2026-11-13T19:05:47Z",
@@ -312,7 +312,7 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0026",
+  "id": "fx-1a58d254fc",
   "source": "synthetic",
   "platform": "x",
   "author": "realvoice_fi",
@@ -324,7 +324,7 @@
   "campaign_id": "swarm-001"
  },
  {
-  "id": "fx-0027",
+  "id": "fx-6b633ae40c",
   "source": "synthetic",
   "platform": "x",
   "author": "nordic_patriot7",
@@ -336,7 +336,7 @@
   "campaign_id": "swarm-001"
  },
  {
-  "id": "fx-0028",
+  "id": "fx-32c943873f",
   "source": "synthetic",
   "platform": "x",
   "author": "truthfinland_01",
@@ -348,7 +348,7 @@
   "campaign_id": "swarm-001"
  },
  {
-  "id": "fx-0029",
+  "id": "fx-402c775637",
   "source": "synthetic",
   "platform": "x",
   "author": "helsinki_truth9",
@@ -360,7 +360,7 @@
   "campaign_id": "swarm-001"
  },
  {
-  "id": "fx-0030",
+  "id": "fx-3af9123386",
   "source": "synthetic",
   "platform": "x",
   "author": "citizen_watch22",
@@ -372,7 +372,7 @@
   "campaign_id": "swarm-001"
  },
  {
-  "id": "fx-0031",
+  "id": "fx-2c51c30b38",
   "source": "synthetic",
   "platform": "x",
   "author": "fair_fares_now",
@@ -384,8 +384,8 @@
   "campaign_id": "swarm-001"
  },
  {
-  "id": "fx-0032",
-  "source": "synthetic",
+  "id": "fx-830810a1ed",
+  "source": "context_social",
   "platform": "x",
   "author": "laura_s",
   "published_at": "2026-11-13T19:15:30Z",
@@ -396,8 +396,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0033",
-  "source": "synthetic",
+  "id": "fx-bae30e01bd",
+  "source": "context_social",
   "platform": "x",
   "author": "laura_s",
   "published_at": "2026-11-13T19:17:53Z",
@@ -408,8 +408,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0034",
-  "source": "synthetic",
+  "id": "fx-bb552eb440",
+  "source": "context_social",
   "platform": "x",
   "author": "helsinki_rider",
   "published_at": "2026-11-13T19:20:35Z",
@@ -420,8 +420,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0035",
-  "source": "synthetic",
+  "id": "fx-105becce8e",
+  "source": "context_social",
   "platform": "x",
   "author": "helsinki_rider",
   "published_at": "2026-11-13T19:23:50Z",
@@ -432,8 +432,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0036",
-  "source": "synthetic",
+  "id": "fx-4e58328773",
+  "source": "context_social",
   "platform": "x",
   "author": "aino_k",
   "published_at": "2026-11-13T19:24:06Z",
@@ -444,8 +444,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0037",
-  "source": "synthetic",
+  "id": "fx-f1be7574a9",
+  "source": "context_social",
   "platform": "x",
   "author": "commuter_eero",
   "published_at": "2026-11-13T19:24:35Z",
@@ -456,8 +456,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0038",
-  "source": "synthetic",
+  "id": "fx-f6c5b27a14",
+  "source": "context_social",
   "platform": "x",
   "author": "kallio_local",
   "published_at": "2026-11-13T19:27:43Z",
@@ -468,8 +468,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0039",
-  "source": "synthetic",
+  "id": "fx-4969617bfb",
+  "source": "context_social",
   "platform": "x",
   "author": "commuter_eero",
   "published_at": "2026-11-13T19:29:04Z",
@@ -480,8 +480,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0040",
-  "source": "synthetic",
+  "id": "fx-f6f372daf2",
+  "source": "context_social",
   "platform": "x",
   "author": "sanna_writes",
   "published_at": "2026-11-13T19:29:59Z",
@@ -492,8 +492,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0041",
-  "source": "synthetic",
+  "id": "fx-d4ec837d0c",
+  "source": "context_social",
   "platform": "x",
   "author": "mikko.v",
   "published_at": "2026-11-13T19:32:43Z",
@@ -504,8 +504,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0042",
-  "source": "synthetic",
+  "id": "fx-ab51c0b261",
+  "source": "context_social",
   "platform": "x",
   "author": "petri_h",
   "published_at": "2026-11-13T19:33:44Z",
@@ -516,8 +516,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0043",
-  "source": "synthetic",
+  "id": "fx-d28773ea01",
+  "source": "context_social",
   "platform": "x",
   "author": "ville_news",
   "published_at": "2026-11-13T19:41:18Z",
@@ -528,8 +528,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0044",
-  "source": "synthetic",
+  "id": "fx-a67517db8a",
+  "source": "context_social",
   "platform": "x",
   "author": "laura_s",
   "published_at": "2026-11-13T19:41:24Z",
@@ -540,8 +540,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0045",
-  "source": "synthetic",
+  "id": "fx-61ef378cf7",
+  "source": "context_social",
   "platform": "x",
   "author": "tiina.m",
   "published_at": "2026-11-13T19:44:57Z",
@@ -552,8 +552,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0046",
-  "source": "synthetic",
+  "id": "fx-84d8f16081",
+  "source": "context_social",
   "platform": "x",
   "author": "laura_s",
   "published_at": "2026-11-13T19:47:06Z",
@@ -564,8 +564,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0047",
-  "source": "synthetic",
+  "id": "fx-11522701af",
+  "source": "context_social",
   "platform": "x",
   "author": "mikko.v",
   "published_at": "2026-11-13T19:48:45Z",
@@ -576,8 +576,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0048",
-  "source": "synthetic",
+  "id": "fx-3ac2acefba",
+  "source": "context_social",
   "platform": "x",
   "author": "urban_otto",
   "published_at": "2026-11-13T19:49:13Z",
@@ -588,7 +588,7 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0049",
+  "id": "fx-fc4bd6ef38",
   "source": "synthetic",
   "platform": "x",
   "author": "realvoice_fi",
@@ -600,7 +600,7 @@
   "campaign_id": "swarm-001"
  },
  {
-  "id": "fx-0050",
+  "id": "fx-e5c1d58e3a",
   "source": "synthetic",
   "platform": "x",
   "author": "truthfinland_01",
@@ -612,7 +612,7 @@
   "campaign_id": "swarm-001"
  },
  {
-  "id": "fx-0051",
+  "id": "fx-7ad9a66722",
   "source": "synthetic",
   "platform": "x",
   "author": "nordic_patriot7",
@@ -624,7 +624,7 @@
   "campaign_id": "swarm-001"
  },
  {
-  "id": "fx-0052",
+  "id": "fx-c5c71fc83a",
   "source": "synthetic",
   "platform": "x",
   "author": "helsinki_truth9",
@@ -636,7 +636,7 @@
   "campaign_id": "swarm-001"
  },
  {
-  "id": "fx-0053",
+  "id": "fx-fda3ee658d",
   "source": "synthetic",
   "platform": "x",
   "author": "citizen_watch22",
@@ -648,7 +648,7 @@
   "campaign_id": "swarm-001"
  },
  {
-  "id": "fx-0054",
+  "id": "fx-29286fbcbf",
   "source": "synthetic",
   "platform": "x",
   "author": "fair_fares_now",
@@ -660,8 +660,8 @@
   "campaign_id": "swarm-001"
  },
  {
-  "id": "fx-0055",
-  "source": "synthetic",
+  "id": "fx-4b21434d00",
+  "source": "context_social",
   "platform": "x",
   "author": "tiina.m",
   "published_at": "2026-11-13T19:55:01Z",
@@ -672,8 +672,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0056",
-  "source": "synthetic",
+  "id": "fx-29e31bc1b8",
+  "source": "context_social",
   "platform": "x",
   "author": "aino_k",
   "published_at": "2026-11-13T19:55:11Z",
@@ -684,8 +684,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0057",
-  "source": "synthetic",
+  "id": "fx-671fcad3c9",
+  "source": "context_social",
   "platform": "x",
   "author": "mikko.v",
   "published_at": "2026-11-13T19:56:01Z",
@@ -696,8 +696,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0058",
-  "source": "synthetic",
+  "id": "fx-726f2f9d28",
+  "source": "context_social",
   "platform": "x",
   "author": "tiina.m",
   "published_at": "2026-11-13T19:58:43Z",
@@ -708,8 +708,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0059",
-  "source": "synthetic",
+  "id": "fx-89420ab31b",
+  "source": "context_social",
   "platform": "x",
   "author": "ville_news",
   "published_at": "2026-11-13T20:00:20Z",
@@ -720,8 +720,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0060",
-  "source": "synthetic",
+  "id": "fx-2c63442ccc",
+  "source": "context_social",
   "platform": "x",
   "author": "kallio_local",
   "published_at": "2026-11-13T20:00:55Z",
@@ -732,8 +732,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0061",
-  "source": "synthetic",
+  "id": "fx-f2376c54aa",
+  "source": "context_social",
   "platform": "x",
   "author": "sanna_writes",
   "published_at": "2026-11-13T20:10:51Z",
@@ -744,8 +744,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0062",
-  "source": "synthetic",
+  "id": "fx-c837d4a365",
+  "source": "context_social",
   "platform": "x",
   "author": "jussi88",
   "published_at": "2026-11-13T20:11:37Z",
@@ -756,8 +756,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0063",
-  "source": "synthetic",
+  "id": "fx-c20c928529",
+  "source": "context_social",
   "platform": "x",
   "author": "commuter_eero",
   "published_at": "2026-11-13T20:13:54Z",
@@ -768,8 +768,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0064",
-  "source": "synthetic",
+  "id": "fx-86e2c9c8ae",
+  "source": "context_social",
   "platform": "x",
   "author": "mikko.v",
   "published_at": "2026-11-13T20:15:29Z",
@@ -780,8 +780,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0065",
-  "source": "synthetic",
+  "id": "fx-a06a9a5cb0",
+  "source": "context_social",
   "platform": "x",
   "author": "petri_h",
   "published_at": "2026-11-13T20:19:21Z",
@@ -792,8 +792,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0066",
-  "source": "synthetic",
+  "id": "fx-d7a45b16b5",
+  "source": "context_social",
   "platform": "x",
   "author": "tiina.m",
   "published_at": "2026-11-13T20:21:47Z",
@@ -804,8 +804,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0067",
-  "source": "synthetic",
+  "id": "fx-beab5ad004",
+  "source": "context_social",
   "platform": "x",
   "author": "laura_s",
   "published_at": "2026-11-13T20:23:03Z",
@@ -816,8 +816,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0068",
-  "source": "synthetic",
+  "id": "fx-23de040f7f",
+  "source": "context_social",
   "platform": "x",
   "author": "ville_news",
   "published_at": "2026-11-13T20:27:17Z",
@@ -828,7 +828,7 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0069",
+  "id": "fx-26d90b68c5",
   "source": "synthetic",
   "platform": "x",
   "author": "realvoice_fi",
@@ -840,7 +840,7 @@
   "campaign_id": "swarm-001"
  },
  {
-  "id": "fx-0070",
+  "id": "fx-1fe0066c29",
   "source": "synthetic",
   "platform": "x",
   "author": "truthfinland_01",
@@ -852,7 +852,7 @@
   "campaign_id": "swarm-001"
  },
  {
-  "id": "fx-0071",
+  "id": "fx-871862949c",
   "source": "synthetic",
   "platform": "x",
   "author": "nordic_patriot7",
@@ -864,7 +864,7 @@
   "campaign_id": "swarm-001"
  },
  {
-  "id": "fx-0072",
+  "id": "fx-7d13eeab3f",
   "source": "synthetic",
   "platform": "x",
   "author": "helsinki_truth9",
@@ -876,7 +876,7 @@
   "campaign_id": "swarm-001"
  },
  {
-  "id": "fx-0073",
+  "id": "fx-d4b636fb22",
   "source": "synthetic",
   "platform": "x",
   "author": "fair_fares_now",
@@ -888,7 +888,7 @@
   "campaign_id": "swarm-001"
  },
  {
-  "id": "fx-0074",
+  "id": "fx-f3d36a1059",
   "source": "synthetic",
   "platform": "x",
   "author": "citizen_watch22",
@@ -900,8 +900,8 @@
   "campaign_id": "swarm-001"
  },
  {
-  "id": "fx-0075",
-  "source": "synthetic",
+  "id": "fx-61360d4fe7",
+  "source": "context_social",
   "platform": "x",
   "author": "commuter_eero",
   "published_at": "2026-11-13T20:34:02Z",
@@ -912,8 +912,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0076",
-  "source": "synthetic",
+  "id": "fx-b9fc44f251",
+  "source": "context_social",
   "platform": "x",
   "author": "laura_s",
   "published_at": "2026-11-13T20:42:04Z",
@@ -924,8 +924,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0077",
-  "source": "synthetic",
+  "id": "fx-16c691f4ea",
+  "source": "context_social",
   "platform": "x",
   "author": "petri_h",
   "published_at": "2026-11-13T20:52:31Z",
@@ -936,8 +936,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0078",
-  "source": "synthetic",
+  "id": "fx-d644788305",
+  "source": "context_social",
   "platform": "x",
   "author": "jussi88",
   "published_at": "2026-11-13T20:55:04Z",
@@ -948,8 +948,8 @@
   "campaign_id": null
  },
  {
-  "id": "fx-0079",
-  "source": "synthetic",
+  "id": "fx-8c28e1e5b5",
+  "source": "context_social",
   "platform": "x",
   "author": "helsinki_rider",
   "published_at": "2026-11-13T20:58:19Z",

@@ -24,7 +24,7 @@
 - **AI Router:** один ключ на 150+ моделей (Anthropic, OpenAI, DeepSeek, Mistral, xAI), совместим с OpenAI и Anthropic SDK.
 - **Connector / API / MCP** (`github.com/hostinger/api-mcp-server`): деплой и домен прямо из редактора.
 
-**Роль у нас:** Docker Compose на VPS: `caddy` (HTTPS), `api` (FastAPI + дашборд), `worker` (поллинг Context.dev, детекторы, Gemini, eval), `db` (Postgres + pgvector). AI Router = запасной LLM (если упрёмся в лимиты Gemini) и показывает судьям, что мы используем их стек.
+**Роль у нас:** Docker Compose на VPS: `caddy` (HTTPS), `api` (FastAPI + дашборд), `worker` (поллинг Context.dev, детекторы, Gemini; eval P2 гоняет отдельно → `eval/report.json`), `db` (Postgres). AI Router = запасной LLM (если упрёмся в лимиты Gemini) и показывает судьям, что мы используем их стек.
 
 **Обязательно:** живой публичный URL к концу хакатона. 40% оценки = качество детекции и честные метрики.
 
@@ -66,7 +66,7 @@
 - **Gemma.** EmbeddingGemma на CPU — лишняя интеграция, эмбеддинги уже даёт Gemini.
 - **Nemotron.** Силён в картинках и видео, а у нас текст.
 - **Modal / Verda.** Им нужно, чтобы GPU был центральным. Нам GPU не нужен.
-- **Aiven.** Postgres + pgvector в Docker на VPS проще и держит всё на Hostinger.
+- **Aiven.** Postgres в Docker на VPS проще и держит всё на Hostinger.
 - **CRACI.** CI на их раннере не добавляет ничего к детекции, а судят глубину интеграции.
 
 Полный канонический список CUT: [architecture.md](architecture.md#объём-must--should--cut).

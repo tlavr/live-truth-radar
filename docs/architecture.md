@@ -22,7 +22,7 @@
 ```
           ┌──────────────── Hostinger VPS (Docker Compose, публичный HTTPS-домен) ───────────┐
  ВЕБ      │                                                                                   │
- новости ─┼─► worker: поллинг Context.dev каждые N мин ──► db: Postgres + pgvector            │
+ новости ─┼─► worker: поллинг Context.dev каждые N мин ──► db: Postgres            │
  соцсети  │   (news search + social scrape)                  (items, actors, embeddings,     │
           │                                                   findings, labels)              │
           │   worker: эмбеддинги Gemini → matched filter → корреляция аккаунтов              │
@@ -31,7 +31,7 @@
           │   api: FastAPI (REST + отдаёт дашборд)  ──►  дашборд: алерты, карточка, метрики │
           │   eval: синтетический рой в живом потоке → ROC, precision, FPR, время до решения │
           └───────────────────────────────────────────────────────────────────────────────────┘
-             LLM: Gemini (основной) · Hostinger AI Router (запасной, тот же OpenAI-совм. клиент)
+             LLM: Gemini (основной) · Hostinger AI Router (запасной, клиент `openai`, модель из `HOSTINGER_AI_ROUTER_MODEL`)
 ```
 
 ## Модули
@@ -51,7 +51,8 @@
 ```
 CLAUDE.md                 общее: инструкции агентам
 contracts/models.py       ОБЩЕЕ — меняем только вдвоём
-fixtures/items.json       тестовые данные (синтетика, потом реальный пример Context.dev из T2)
+fixtures/items.json       тестовые данные (генерирует `make fixtures`, руками не править)
+fixtures/items_live_sample.json  реальный сэмпл из БД (T2, обновляется на синках), авторы псевдонимизированы
 fixtures/findings.json    пример находок (их отдаёт мок-детектор P1 до I1)
 ingest/  api/  web/  infra/      P1
 detect/  synth/  eval/           P2
@@ -61,8 +62,8 @@ Makefile                  `make test` (pytest, без сети, <5 с), `make sm
 ```
 Слои связаны **одним контрактом** — pydantic v2 в [`contracts/models.py`](../contracts/models.py) (источник истины, здесь только кратко):
 - `Item` — пост/статья: `source` (`context_social` / `context_news` / `synthetic`), `author`, `published_at` (UTC), `text`, `url`, `topic`, `synthetic`, `campaign_id` (ground truth только у синтетики).
-- `Finding` — вердикт (`coordinated` / `organic` / `watching`), `accounts`, `item_ids`, `llr`, `snr_db`, `sprt_trace`, `sprt_upper` / `sprt_lower` (пороги для графика), `decided_at_item`, `first_seen` / `last_seen`, `correlation` и `lag_sec` (квадратные матрицы в порядке `accounts`, для heatmap), `id` = `finding_id(topic, accounts)` (стабильный), `explanation: Explanation | None` (`technique`, `quote`, `confidence`, `summary`), `synthetic`.
-- `AlertsResponse`, `MetricsReport` (ROC, detection rate, рабочая Pfa, постов/секунд до решения, live FPR / precision, `n_labelled`).
+- `Finding` — вердикт (`coordinated` / `organic` / `watching`), `accounts`, `item_ids`, `llr`, `snr_db`, `sprt_trace`, `sprt_upper` / `sprt_lower` (пороги для графика), `decided_at_item`, `first_seen` / `last_seen`, `correlation` и `lag_sec` (квадратные матрицы в порядке `accounts`, для heatmap), `id` = `finding_id(topic, accounts)` (стабильный), `snr_db` (кластер) и `snr_db_single` (один аккаунт: «−x → +y дБ»), `explanation: Explanation | None` (`technique`, `quote`, `confidence`, `summary`), `synthetic`.
+- `AlertsResponse` (+ `last_poll_at`: «обновлено N мин назад»), `MetricsReport` (ROC, detection rate, рабочая Pfa, постов/секунд до решения, live FPR / precision, `n_labelled`, `failure_examples`).
 - Вход детектора (P2): `detect.pipeline.detect(items, *, alpha=0.02, beta=0.1) -> list[Finding]`.
 - API (P1): `GET /health`, `GET /api/alerts` → `AlertsResponse`, `GET /api/metrics` → `MetricsReport`, `POST /api/inject` (кнопка демо).
 
@@ -76,12 +77,13 @@ P2 работает офлайн на `fixtures/` (без сети и БД), P1 
 | `caddy` | Reverse proxy + автоматический HTTPS для домена Hostinger |
 | `api` | Python, FastAPI: REST для дашборда, отдаёт статический дашборд |
 | `worker` | Python (`ingest/worker.py`): поллинг Context.dev, `detect()` (numpy/scipy), объяснения Gemini. Eval гоняет P2 отдельно (`python -m eval.run` → `eval/report.json`) |
-| `db` | Postgres + pgvector |
+| `db` | Postgres |
 
 Фронт без сборки (HTML + JS + Chart.js), чтобы не тратить время на тулчейн. Это решение по умолчанию: если в команде есть человек, который быстро делает React, можно поменять, не трогая остальное.
 
 ## Хранилище
-Таблицы: `actors` (аккаунт/автор), `items` (пост/статья: текст, автор, время, URL, источник, флаг `synthetic`), `embeddings` (pgvector), `findings` (вердикт, LLR, SNR, объяснение), `labels` (ручная разметка).
+Эмбеддинги кэшируются на диске (`cache/`, volume, в git не попадает); векторный поиск в БД не нужен, поэтому pgvector не берём.
+Таблицы: `actors` (аккаунт/автор), `items` (пост/статья: текст, автор, время, URL, источник, флаг `synthetic`), `findings` (вердикт, LLR, SNR, объяснение), `labels` (ручная разметка).
 Ответы Context.dev кэшируем у себя (повторный запрос стоит тех же кредитов). Схема БД — P1 (T4), но поля `items` / `findings` повторяют контракт.
 
 ## Данные для метрик (40% оценки!)

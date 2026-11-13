@@ -7,3 +7,9 @@ node_modules/
 Junction-2026-Challenges-and-Developer-Assets.md
 *.zip
 !.env.example
+.venv/
+*.pyc
+.pytest_cache/
+.cache/
+# raw API responses and embedding caches may contain real handles: never commit
+cache/

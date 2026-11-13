@@ -32,7 +32,7 @@ tests/               `make test` (offline, fast), `make smoke URL=...`
 Docs (in Russian):
 - `docs/HANDOFF.md` – start here: what we build, roles, deadlines, task plan.
 - `docs/workflow.md` – how we work: agents, branches, per-task cycle, testing.
-- `docs/tasks.md` – task cards (T0–T18, I1, S1).
+- `docs/tasks.md` – task cards (T0–T18, I1, S1, F).
 - `docs/challenge-decode-the-noise.md` – main challenge (Hostinger): task, requirements, judging.
 - `docs/tech-challenges.md` – Context.dev, Gemini, Codex: what counts, MUST/SHOULD/CUT.
 - `docs/signal-processing.md` – the signal-processing approach.

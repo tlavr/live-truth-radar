@@ -41,7 +41,7 @@
 Объём урезан до ядра (MUST / SHOULD / CUT): [architecture.md](architecture.md#объём-must--should--cut). Нас двое, работа разделена по слоям через один контракт (`contracts/`): P2 работает офлайн на `fixtures/` (без сети и БД), P1 — с мок-детектором, который отдаёт `fixtures/findings.json`, до интеграции I1. Подробные карточки задач («что сделать / файлы / готово, когда»): [tasks.md](tasks.md). Цикл работы агента и правила веток: [workflow.md](workflow.md).
 
 **Роли:**
-- **P1 «Труба»** — Context.dev ingest, Postgres + pgvector, Docker Compose + деплой на Hostinger (caddy, HTTPS), FastAPI, объяснения Gemini, дашборд, smoke. Папки: `ingest/`, `api/`, `web/`, `infra/`. Работает в Claude Code.
+- **P1 «Труба»** — Context.dev ingest, Postgres, Docker Compose + деплой на Hostinger (caddy, HTTPS), FastAPI, объяснения Gemini, дашборд, smoke. Папки: `ingest/`, `api/`, `web/`, `infra/`. Работает в Claude Code.
 - **P2 «Мозг»** — эмбеддинги Gemini, matched filter, корреляция аккаунтов, CFAR, SPRT, генератор синтетического роя, eval (ROC, метрики), preliminary и финальный текст. Папки: `detect/`, `synth/`, `eval/`. `detect/` может писать в Codex (решение на T0).
 
 | ID | Задача | Кто | Дедлайн |
@@ -61,20 +61,22 @@
 | T11 | Объяснение Gemini (structured output) + AI Router как запасной | P1 | Сб 16:00 |
 | T12 | Дашборд (одна страница) + `/metrics` + кнопка инжекции | P1 | Сб 19:00 |
 | T13 | Eval: ROC, доля найденных, время до решения на инжектированных → `MetricsReport` | P2 | Сб 19:00 |
-| T14 | Разметка ~50 живых аккаунтов (рубрика 15 мин; ~25 из алертов + ~25 случайных) → live FPR / precision | оба | Сб 20:30 |
+| T14 | Разметка ~50 живых аккаунтов (рубрика 15 мин; ~25 из алертов + ~25 случайных, без синтетики) до 20:00 → 20:00–20:30 `make eval` + `make deploy` → live FPR / precision | оба | Сб 20:30 |
 | S1 | SHOULD: Source Trust через Context.dev brand/company — только если весь MUST, кроме T14, готов к Сб 20:00 | P1 | Вс 01:00 |
 | T15 | Тюнинг порогов (α, β, CFAR), стабильность, `restart: always` | оба | Вс 02:00 |
 | F | **Фича-фриз кода.** Дальше только баги | оба | **Вс 02:00** |
 | T16 | Видео 2 мин на живом демо | оба | Вс 03:00 |
-| T17 | 7 слайдов + финальный текст с реальными числами; README «Context.dev endpoints & why»; `docs/codex-log.md` (только если Codex) | P2 | Вс 08:00 |
+| T17 | 7 слайдов + финальный текст с реальными числами; `docs/codex-log.md` (только если Codex); README «Context.dev endpoints & why» — пишет P1 | P2 (+P1) | Вс 08:00 |
 | T18 | Финальная форма сабмита | оба | **Вс 10:00** |
 
 **Синки (10 мин: мёрж, деплой `main`, проверка цепочки вживую):** Сб 04:30 (до сна P1) · Сб 11:00 · I1 Сб 15:00 · Сб 19:00 · Вс 01:00.
 
 **Интерфейсы вне контракта (решены заранее, менять только вдвоём; в tasks.md помечены ⚙):**
-- `synth.campaign.make_campaign(topic, now, *, n_accounts=12, seed=None) -> list[Item]` (P2, T9) — его вызывает `POST /api/inject` (P1). До T9 inject берёт синтетические items из `fixtures/items.json` со сдвигом времени на «сейчас».
-- `eval/report.json` (`MetricsReport`, пишет P2 в T13, пересчёт после T14) — его отдаёт `GET /api/metrics`; пока файла нет — заглушка с `None`.
-- `eval/labels.csv` (`account,topic,alerted,label,note`) — общая разметка T14.
+- `synth.campaign.make_campaign(topic, now, *, n_accounts=12, seed=None) -> list[Item]` (P2, T9) — его вызывает `POST /api/inject` (P1). Правила: `published_at` в окне `[now − 15 мин, now]`; `campaign_id = f"inj-{topic}-{now:%H%M%S}"`; id постов `f"{campaign_id}-{k}"` (каждый инжект новый, upsert не съедает повтор); текст — сообщение, которого **нет** в банке шаблонов (честный eval). До T9 inject берёт синтетику из `fixtures/items.json` с теми же правилами (время сжато в 15 мин, новые id). После инжекта API сразу запускает `detect()` по этой теме, не ждёт цикла.
+- Окно детектора: worker каждый цикл вызывает `detect(items за последние DETECT_WINDOW_HOURS=6 ч по теме)` и атомарно заменяет findings этой темы; `/api/alerts` отдаёт только последний прогон + `last_poll_at`.
+- `eval/report.json` (`MetricsReport`, пишет `make eval`, P2 в T13; пересчёт после T14 может сделать любой) — **коммитим в git**; compose монтирует `./eval` в api только на чтение, поэтому доставка на VPS = `git pull` (`make deploy`), без пересборки. Пока файла нет — `/api/metrics` отдаёт заглушку с `None`.
+- `eval/labels.csv` (`account,topic,alerted,label,note`) — общая разметка T14; `account` — псевдоним `contracts.pseudonym(author, LTR_HASH_SALT)`, реальные хэндлы в публичный репо **не попадают**. Скелет файла делает `ingest/label_sample.py` (P1).
+- `fixtures/items_live_sample.json` — живой сэмпл из БД для офлайн-работы P2 (`ingest/export_sample.py`, P1; авторы псевдонимизированы); обновляется на каждом синке.
 - `GET /api/source/{domain}` (S1) — Source Trust отдельным эндпоинтом, контракт `Finding` не меняем.
 - Worker: `ingest/worker.py`; объяснение Gemini: `ingest/explain.py`; схема БД: `infra/schema.sql` (всё P1).
 - Офлайн для P2: эмбеддинги с кэшем на диск + детерминированный hashing-эмбеддер для тестов (T7); вариации Gemini для роя кэшируются в `synth/variations/` (в git, T9).

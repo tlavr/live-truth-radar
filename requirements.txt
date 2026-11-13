@@ -1,9 +1,9 @@
-pydantic>=2
-numpy
-scipy
-fastapi
-uvicorn
-httpx
-psycopg[binary]
-pgvector
-google-genai
+pydantic>=2,<3
+numpy>=2,<3
+scipy>=1.13,<2
+fastapi>=0.110,<1
+uvicorn>=0.29,<1
+httpx>=0.27,<1
+psycopg[binary]>=3.1,<4
+google-genai>=1,<2
+openai>=1.30,<2  # Hostinger AI Router fallback (OpenAI-compatible)

@@ -1,12 +1,24 @@
-URL ?= http://localhost:8000
+URL ?= http://localhost
+VPS ?= root@your-vps
+REMOTE_DIR ?= live-truth-radar
+COMPOSE = docker compose -f infra/docker-compose.yml --env-file .env
 
-.PHONY: test smoke fixtures
+.PHONY: setup test smoke fixtures eval deploy
 
-test:
+setup:  ## local dev env (Python >= 3.11)
+	pip install -r requirements.txt -r requirements-dev.txt
+
+test:  ## offline, < 5 s; run before every commit
 	python -m pytest -q
 
-smoke:
+smoke:  ## after every deploy: make smoke URL=https://<domain>
 	python tests/smoke.py $(URL)
 
-fixtures:
+fixtures:  ## regenerate fixtures/items.json + findings.json (never hand-edit them)
 	python synth/fixture_gen.py
+
+eval:  ## P2 (or P1 after T14): writes eval/report.json; commit it, then make deploy
+	python -m eval.run
+
+deploy:  ## P1: pull main on the VPS and rebuild (eval/ is mounted read-only, no rebuild needed for report.json)
+	ssh $(VPS) 'cd $(REMOTE_DIR) && git pull --ff-only && $(COMPOSE) up -d --build'

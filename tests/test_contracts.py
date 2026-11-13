@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
 from pydantic import TypeAdapter
 
 from contracts.models import AlertsResponse, Finding, Item
@@ -15,11 +16,16 @@ def _items() -> list[Item]:
     return TypeAdapter(list[Item]).validate_json((FIX / "items.json").read_text(encoding="utf-8"))
 
 
-def test_items_parse():
-    items = _items()
+@pytest.mark.parametrize("path", sorted(FIX.glob("items*.json")), ids=lambda p: p.name)
+def test_items_parse(path):
+    """items.json and any other items*.json (e.g. T2/T8 live sample) parse into the contract."""
+    items = TypeAdapter(list[Item]).validate_json(path.read_text(encoding="utf-8"))
     assert len(items) > 0
     assert len({it.id for it in items}) == len(items)
     assert all(it.published_at.utcoffset() is not None for it in items)
+    # "synthetic" source <=> injected item with ground truth
+    assert all((it.source == "synthetic") == it.synthetic for it in items)
+    assert all((it.campaign_id is not None) == it.synthetic for it in items)
 
 
 def test_findings_parse_and_reference_items():

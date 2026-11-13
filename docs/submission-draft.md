@@ -28,7 +28,7 @@ Propaganda campaigns behave like a spread-spectrum signal: each bot account is t
 
 # ФИНАЛЬНАЯ ВЕРСИЯ (до вс 10:00)
 
-## Description (~4515/5000 с пометками [SHOULD] / [ONLY IF TRUE], markdown), заменить короткую на эту
+## Description (~4601/5000 с пометками [SHOULD] / [ONLY IF TRUE], markdown), заменить короткую на эту
 *`[скобки]` заменить реальными цифрами, ничего не выдумывать. Строку или фрагмент с пометкой `[SHOULD]` (Source Trust, S1) / `[ONLY IF TRUE]` (Codex) удалить, если это не работает вживую; иначе убрать саму пометку. Замена `[ALT]` — сразу под блоком.*
 ```markdown
 ## The idea: propaganda is a signal hidden in noise
@@ -43,7 +43,7 @@ Coordinated campaigns work the same way. Each bot posts too little to flag alone
 - 🐝 **CDMA despreading (Spot the swarm)**: account activity becomes 0/1 sequences per minute. Organic users behave like independent random codes; a coordinated group shows a cross-correlation peak at a common lag. Combining the cluster gives a processing gain of roughly N, shown as SNR in dB.
 - 📈 **CFAR alerting**: like radar, the alarm threshold adapts to each topic's own background noise, keeping the false-alarm rate constant for busy and quiet topics alike.
 - ⚖️ **SPRT decision**: a sequential likelihood-ratio test accumulates evidence (text similarity and timing) post by post and decides *coordinated*, *organic* or *keep watching* as early as possible, with error rates α and β that we set.
-- 🎭 **Name the technique**: Gemini reads the whole cluster, labels loaded language, fear appeal, whataboutism and fabricated authority, highlights the exact phrases and explains *why* in plain language.
+- 🎭 **Name the technique**: Gemini reads the whole cluster, labels loaded language, fear appeal, whataboutism and fabricated authority, quotes the key phrase and explains *why* in plain language.
 - 🔗 **Trust the source** [SHOULD]: company identity and cloned branding behind a domain, from Context.dev enrichment.
 
 ## Honest, measurable detection
@@ -52,13 +52,13 @@ We report detection the way radar engineers do:
 - **Test-target injection**: we hide a synthetic coordinated campaign inside the real live stream and measure whether, and how fast, it is detected (**[N] posts / [T] seconds** to decision).
 - A hand-labelled live test set of [N] real accounts, so the false-alarm rate is measured on real people, separately from the synthetic tests.
 
-Current results: **detection [X]% of injected campaigns at [Pfa]%; live FPR [Z], precision [P]** on the labelled set. Known failure cases are listed on the metrics page. When evidence is weak, the system says *"uncertain"* instead of accusing a real person.
+Current results: **detection [X]% of injected campaigns at [Pfa]%; live FPR [Z], precision [P]** on the labelled set. Known failure cases are listed on the metrics page. When evidence is weak, the verdict stays *"keep watching"* instead of accusing a real person. Injected test messages are never in the detector's template bank, so the scores are not circular.
 
 ## Explainable verdicts
 Each alert shows the evidence a human can check in seconds: the correlated accounts and their timing, the reworded posts that matched, the highlighted phrases, the source data, the SNR and the SPRT trace showing when the decision was made.
 
 ## Deployed live on Hostinger
-Docker Compose on a Hostinger VPS with a public HTTPS domain: FastAPI, a detector worker and Postgres + pgvector. The worker polls Context.dev every few minutes, so alerts follow the live web. Gemini is the main model, with Hostinger AI Router as a fallback. Public dashboard and REST API.
+Docker Compose on a Hostinger VPS with a public HTTPS domain: FastAPI, a detector worker and Postgres. The worker polls Context.dev every few minutes, so alerts follow the live web. Gemini is the main model, with Hostinger AI Router as a fallback. Public dashboard and REST API.
 
 ## Who it is for
 - **Fact-checkers and journalists**: know in minutes whether a trend is organic or coordinated.
@@ -81,7 +81,7 @@ Fact-checking with source fusion, cross-country geo echo, change watch for silen
 ## Как текст закрывает критерии Hostinger
 | Критерий | Вес | Где |
 |---|---|---|
-| Качество детекции: точность, FP, объяснимость | 40% | «Honest, measurable detection» (ROC, Neyman–Pearson, инжекция цели), «uncertain», «Explainable verdicts» |
+| Качество детекции: точность, FP, объяснимость | 40% | «Honest, measurable detection» (ROC, Neyman–Pearson, инжекция цели), «keep watching», «Explainable verdicts» |
 | Техника + живой деплой на Hostinger | 25% | «Deployed live on Hostinger» + Demo link |
 | Оригинальность и эффект | 20% | Вся радарная рамка: CDMA-деспрединг, CFAR, SPRT |
 | Ясность демо | 15% | Видео ниже |

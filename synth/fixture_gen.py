@@ -1,18 +1,22 @@
-"""Deterministic fixture generator -> fixtures/items.json.
+"""Deterministic fixture generator -> fixtures/items.json + fixtures/findings.json.
 
 One topic, ~3 hours, ~12 organic accounts posting at random times with varied
 texts, plus one injected synthetic swarm (~6 accounts) posting near-identical
 reworded messages with small, account-specific lags.
 
 This is a small offline fixture for tests and the mock pipeline; the real
-Gemini-based swarm generator is T9.
+Gemini-based swarm generator is T9. Do NOT hand-edit the JSON outputs: change
+this script and run `make fixtures`. Item ids are derived from content, so they
+stay stable when items are added.
 
-Usage: python synth/fixture_gen.py [out_path]
+Usage: python synth/fixture_gen.py [out_dir]
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -23,7 +27,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from contracts.models import Item  # noqa: E402
+from contracts.models import Finding, Item, finding_id  # noqa: E402
 
 SEED = 2026
 TOPIC = "helsinki-tram-fares"
@@ -128,13 +132,15 @@ def generate(seed: int = SEED) -> list[Item]:
 
     raw.sort(key=lambda r: (r["t"], r["author"]))
     items = []
-    for i, r in enumerate(raw):
+    for r in raw:
         ts = START + timedelta(seconds=r["t"])
         syn = r["synthetic"]
+        key = f"{r['author']}|{r['t']}|{r['text']}"
         items.append(
             Item(
-                id=f"fx-{i:04d}",
-                source="synthetic",  # whole fixture is generated; ground truth via campaign_id
+                id="fx-" + hashlib.sha1(key.encode("utf-8")).hexdigest()[:10],
+                # organic posts imitate live social data; only the injected swarm is "synthetic"
+                source="synthetic" if syn else "context_social",
                 platform="x",
                 author=r["author"],
                 published_at=ts,
@@ -148,14 +154,80 @@ def generate(seed: int = SEED) -> list[Item]:
     return items
 
 
+ALPHA, BETA = 0.02, 0.1
+UPPER = round(math.log((1 - BETA) / ALPHA), 4)
+LOWER = round(math.log(BETA / (1 - ALPHA)), 4)
+
+
+def _finding(items: list[Item], accounts: list[str], *, verdict: str, llr_steps: list[float],
+             corr_level: float, snr_db: float, snr_db_single: float, explanation: dict | None,
+             seed: int) -> Finding:
+    """Hand-shaped sample finding (for the mock detector), consistent with the items."""
+    rng = np.random.default_rng(seed)
+    acc_items = sorted((it for it in items if it.author in accounts), key=lambda it: it.published_at)
+    first = {a: min(it.published_at for it in acc_items if it.author == a) for a in accounts}
+    n = len(accounts)
+    corr = [[1.0 if i == j else round(corr_level + float(rng.uniform(-0.04, 0.04)), 2)
+             for j in range(n)] for i in range(n)]
+    corr = [[corr[min(i, j)][max(i, j)] for j in range(n)] for i in range(n)]  # symmetric
+    coordinated = verdict == "coordinated"
+    lag = [[round((first[b] - first[a]).total_seconds(), 1) if coordinated else 0.0 for b in accounts]
+           for a in accounts]
+    trace, total, decided = [], 0.0, None
+    for k, step in enumerate(llr_steps[: len(acc_items)]):
+        total = round(total + step, 2)
+        trace.append(total)
+        if decided is None and (total >= UPPER or total <= LOWER):
+            decided = k
+            break
+    last_seen = acc_items[-1].published_at
+    return Finding(
+        id=finding_id(TOPIC, accounts), topic=TOPIC, created_at=last_seen + timedelta(seconds=30),
+        verdict=verdict, accounts=accounts, item_ids=[it.id for it in acc_items],
+        llr=trace[-1], snr_db=snr_db, snr_db_single=snr_db_single, sprt_trace=trace,
+        sprt_upper=UPPER, sprt_lower=LOWER, decided_at_item=decided,
+        first_seen=acc_items[0].published_at, last_seen=last_seen,
+        correlation=corr, lag_sec=lag, explanation=explanation,
+        synthetic=any(it.synthetic for it in acc_items),
+    )
+
+
+def mock_findings(items: list[Item]) -> list[Finding]:
+    """Two sample findings: the injected swarm (coordinated) and 3 organic accounts (watching)."""
+    first_post = {}
+    for it in sorted(items, key=lambda it: it.published_at):
+        first_post.setdefault(it.author, it)
+    swarm_quote = next(it.text for it in items if it.synthetic)
+    coordinated = _finding(
+        items, SWARM_ACCOUNTS, verdict="coordinated",
+        llr_steps=[0.4, 0.5, 0.3, 0.6, 0.5, 0.4, 0.7, 0.6, 0.5, 0.4, 0.5, 0.6],
+        corr_level=0.87, snr_db=14.2, snr_db_single=-1.4, seed=1,
+        explanation=dict(
+            technique="Fear appeal + call to action",
+            quote=swarm_quote.split(".")[0].split("!")[0],
+            confidence=0.82,
+            summary="Six new accounts post reworded versions of the same claims within two minutes "
+                    "of each other, four times in a row, urging people to share before deletion.",
+        ),
+    )
+    watching = _finding(
+        items, ORGANIC_ACCOUNTS[:3], verdict="watching",
+        llr_steps=[-0.3, 0.2, -0.4, -0.2, 0.1, -0.3, -0.2],
+        corr_level=0.1, snr_db=1.3, snr_db_single=0.4, seed=2, explanation=None,
+    )
+    return [coordinated, watching]
+
+
 def main(argv: list[str]) -> None:
-    out = Path(argv[1]) if len(argv) > 1 else ROOT / "fixtures" / "items.json"
+    out_dir = Path(argv[1]) if len(argv) > 1 else ROOT / "fixtures"
+    out_dir.mkdir(parents=True, exist_ok=True)
     items = generate()
     data = [it.model_dump(mode="json") for it in items]
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    (out_dir / "items.json").write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    findings = [f.model_dump(mode="json") for f in mock_findings(items)]
+    (out_dir / "findings.json").write_text(json.dumps(findings, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     n_syn = sum(it.synthetic for it in items)
-    print(f"wrote {len(items)} items ({n_syn} synthetic) -> {out}")
+    print(f"wrote {len(items)} items ({n_syn} synthetic) and {len(findings)} findings -> {out_dir}")
 
 
 if __name__ == "__main__":

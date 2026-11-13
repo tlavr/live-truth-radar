@@ -6,7 +6,7 @@
 
 | Кто | Роль | Папки | Инструмент |
 |---|---|---|---|
-| **P1 «Труба»** | Context.dev ingest, Postgres+pgvector, Docker Compose, деплой на Hostinger (caddy HTTPS), FastAPI, объяснения Gemini, дашборд, smoke | `ingest/ api/ web/ infra/` | Claude Code |
+| **P1 «Труба»** | Context.dev ingest, Postgres, Docker Compose, деплой на Hostinger (caddy HTTPS), FastAPI, объяснения Gemini, дашборд, smoke | `ingest/ api/ web/ infra/` | Claude Code |
 | **P2 «Мозг»** | Эмбеддинги Gemini, matched filter, корреляция аккаунтов, CFAR, SPRT, генератор синтетического роя, eval (ROC, метрики) | `detect/ synth/ eval/` | Claude Code и/или Codex (решаем на T0) |
 
 Делим **по слоям**, а не по фичам, потому что между слоями ровно **одна граница**:
