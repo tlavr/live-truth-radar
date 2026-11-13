@@ -1,0 +1,252 @@
+[
+  {
+    "id": "f-f5346bc66cab",
+    "topic": "helsinki-tram-fares",
+    "created_at": "2026-11-13T19:11:57Z",
+    "verdict": "coordinated",
+    "accounts": [
+      "truthfinland_01",
+      "realvoice_fi",
+      "citizen_watch22",
+      "nordic_patriot7",
+      "fair_fares_now",
+      "helsinki_truth9"
+    ],
+    "item_ids": [
+      "fx-0011",
+      "fx-0012",
+      "fx-0013",
+      "fx-0014",
+      "fx-0015",
+      "fx-0016",
+      "fx-0026",
+      "fx-0027",
+      "fx-0028",
+      "fx-0029",
+      "fx-0030",
+      "fx-0031",
+      "fx-0049",
+      "fx-0050",
+      "fx-0051",
+      "fx-0052",
+      "fx-0053",
+      "fx-0054",
+      "fx-0069",
+      "fx-0070",
+      "fx-0071",
+      "fx-0072",
+      "fx-0073",
+      "fx-0074"
+    ],
+    "llr": 6.9,
+    "snr_db": 14.2,
+    "sprt_trace": [
+      0.4,
+      1.0,
+      1.5,
+      2.2,
+      2.75,
+      3.4,
+      3.7,
+      4.5,
+      5.1,
+      5.6,
+      6.3,
+      6.9
+    ],
+    "sprt_upper": 3.8067,
+    "sprt_lower": -2.2824,
+    "decided_at_item": 7,
+    "first_seen": "2026-11-13T18:30:47Z",
+    "last_seen": "2026-11-13T20:32:02Z",
+    "correlation": [
+      [
+        1.0,
+        0.91,
+        0.88,
+        0.86,
+        0.9,
+        0.87
+      ],
+      [
+        0.91,
+        1.0,
+        0.89,
+        0.85,
+        0.88,
+        0.9
+      ],
+      [
+        0.88,
+        0.89,
+        1.0,
+        0.84,
+        0.87,
+        0.86
+      ],
+      [
+        0.86,
+        0.85,
+        0.84,
+        1.0,
+        0.85,
+        0.83
+      ],
+      [
+        0.9,
+        0.88,
+        0.87,
+        0.85,
+        1.0,
+        0.89
+      ],
+      [
+        0.87,
+        0.9,
+        0.86,
+        0.83,
+        0.89,
+        1.0
+      ]
+    ],
+    "lag_sec": [
+      [
+        0.0,
+        -22.0,
+        49.0,
+        -3.0,
+        55.0,
+        11.0
+      ],
+      [
+        22.0,
+        0.0,
+        71.0,
+        19.0,
+        77.0,
+        33.0
+      ],
+      [
+        -49.0,
+        -71.0,
+        0.0,
+        -52.0,
+        6.0,
+        -38.0
+      ],
+      [
+        3.0,
+        -19.0,
+        52.0,
+        0.0,
+        58.0,
+        14.0
+      ],
+      [
+        -55.0,
+        -77.0,
+        -6.0,
+        -58.0,
+        0.0,
+        -44.0
+      ],
+      [
+        -11.0,
+        -33.0,
+        38.0,
+        -14.0,
+        44.0,
+        0.0
+      ]
+    ],
+    "explanation": {
+      "technique": "Copypasta amplification with urgency framing",
+      "quote": "This fare increase is a scam to pay for politicians' pet projects. Share before it's deleted!",
+      "confidence": 0.87,
+      "summary": "Six accounts posted reworded versions of the same four talking points within ~2 minutes of each other, with a stable per-account lag pattern."
+    },
+    "synthetic": true
+  },
+  {
+    "id": "f-d1f81cfa2e74",
+    "topic": "helsinki-tram-fares",
+    "created_at": "2026-11-13T21:00:00Z",
+    "verdict": "watching",
+    "accounts": [
+      "aino_k",
+      "mikko.v",
+      "helsinki_rider"
+    ],
+    "item_ids": [
+      "fx-0000",
+      "fx-0001",
+      "fx-0005",
+      "fx-0009",
+      "fx-0010",
+      "fx-0017",
+      "fx-0024",
+      "fx-0025",
+      "fx-0034",
+      "fx-0035",
+      "fx-0036",
+      "fx-0041",
+      "fx-0047",
+      "fx-0056",
+      "fx-0057",
+      "fx-0064",
+      "fx-0079"
+    ],
+    "llr": -1.1,
+    "snr_db": 2.1,
+    "sprt_trace": [
+      -0.3,
+      -0.1,
+      -0.5,
+      -0.4,
+      -0.8,
+      -0.6,
+      -1.1
+    ],
+    "sprt_upper": 3.8067,
+    "sprt_lower": -2.2824,
+    "decided_at_item": null,
+    "first_seen": "2026-11-13T18:02:18Z",
+    "last_seen": "2026-11-13T20:58:19Z",
+    "correlation": [
+      [
+        1.0,
+        0.12,
+        0.18
+      ],
+      [
+        0.12,
+        1.0,
+        0.09
+      ],
+      [
+        0.18,
+        0.09,
+        1.0
+      ]
+    ],
+    "lag_sec": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0
+      ]
+    ],
+    "explanation": null,
+    "synthetic": false
+  }
+]

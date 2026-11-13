@@ -1,6 +1,6 @@
 # Архитектура Live Truth Radar
 
-*Урезанный объём под хакатон: делаем ядро глубоко, а не всё поверхностно. Пошаговый план и чекпоинты: [HANDOFF.md](HANDOFF.md#5-план-по-шагам).*
+*Урезанный объём под хакатон: делаем ядро глубоко, а не всё поверхностно. Нас двое: P1 «Труба» и P2 «Мозг». План, сроки и чекпоинты: [HANDOFF.md](HANDOFF.md#5-план-по-задачам), карточки задач: [tasks.md](tasks.md).*
 
 ## Как работает (для ребёнка)
 Представь **дежурного детектива**, который сидит на Hostinger и **каждые несколько минут смотрит в интернет** через бинокль Context.dev.
@@ -12,9 +12,9 @@
 ## Объём: MUST / SHOULD / CUT
 | Уровень | Что | Когда |
 |---|---|---|
-| **MUST** | Ingest, Swarm Detector, объяснение вердикта (Gemini), Eval, простой дашборд, деплой на Hostinger | К сб ~20:00 |
-| **SHOULD** | Source Trust (Context.dev brand/company), Context.dev scrape полного текста (`maxAgeMs: 0`), Oxylabs гео-`/search` в карточке, SemEval-подвыборка для метрик приёмов | Сб 20:00 – Вс 02:00, только если MUST работает (шаг 13) |
-| **CUT** | Fact-check, Change Watch, Context.dev monitors/webhooks (заменены поллингом), research, structured extraction; Oxylabs `/scrape` и «ответы AI-ассистентов»; Gemma, Nemotron, Modal / Verda, Aiven, CRACI; спектрограммы, delay-Doppler, MMSE-фьюжн; бот-датасеты TwiBot/Cresci | Только в слайд «что дальше» |
+| **MUST** | Ingest (Context.dev news search + social scrape, поллинг каждые 2–5 мин, 3–5 тем), Swarm Detector (эмбеддинги → matched filter → корреляция → CFAR → SPRT, SNR в дБ), объяснение вердикта Gemini (приём + цитата + уверенность), Eval (инжекция синтетического роя + ~50 размеченных живых аккаунтов), дашборд на одну страницу + `/metrics` + кнопка инжекции, деплой на Hostinger | К Сб 19:00–21:00 (T0–T14, I1) |
+| **SHOULD** | Только **S1** — Source Trust через Context.dev brand/company (P1) | Только если весь MUST готов к Сб 20:00; дедлайн Вс 01:00 |
+| **CUT** | Oxylabs (целиком, включая гео-`/search`); SemEval; Context.dev scrape полного текста, monitors/webhooks (заменены поллингом), research, structured extraction; Fact-check, Change Watch; Gemma, Nemotron, Modal / Verda, Aiven, CRACI; спектрограммы, delay-Doppler, MMSE-фьюжн; бот-датасеты TwiBot/Cresci | Только в слайд «что дальше» |
 
 *Это канонический список уровней: остальные файлы на него ссылаются.*
 
@@ -35,16 +35,38 @@
 ```
 
 ## Модули
-| # | Модуль | Уровень | Что делает | Тулы |
-|---|---|---|---|---|
-| 0 | **Live Ingest** | MUST | Каждые N минут (2–5) тянет свежие статьи и посты по 3–5 темам, сохраняет текст, автора, время, URL | Context.dev news search + social scrape |
-| 1 | **Swarm Detector** | MUST | Matched filter (банк шаблонов нарративов по эмбеддингам) → кросс-корреляция активности аккаунтов → CFAR (всплеск) → SPRT (решение) + SNR в дБ | Gemini embeddings + наш код (numpy/scipy) |
-| 2 | **Explain / Technique** | MUST | Для кластера: приём манипуляции + цитата-доказательство + уверенность + объяснение простыми словами | Gemini structured output (длинный контекст на весь кластер) |
-| E | **Eval Harness** | MUST | Инжекция синтетического роя в живой поток → ROC (Pd vs Pfa) и «постов/секунд до решения»; FPR и precision на ~50 размеченных живых примерах; порог «не уверен» | Наш код + Gemini для генерации вариаций роя |
-| UI | **Radar Dashboard** | MUST | Лента алертов, карточка вердикта (посты, heatmap корреляции аккаунтов, SNR, SPRT-трасса, приём), страница `/metrics` | Статический HTML + JS + Chart.js, отдаёт FastAPI |
-| 3 | **Source Trust** | SHOULD | Кто стоит за доменом: компания, возраст, чужое лого | Context.dev brand + company enrichment |
-| 4 | **Geo Echo** | SHOULD | Тот же нарратив в других странах? Живой вызов + URL источников в карточке | Oxylabs `/search` с гео |
-| — | Fact-check, Change Watch | CUT | — | — |
+| # | Модуль | Уровень | Кто | Папка | Что делает | Тулы |
+|---|---|---|---|---|---|---|
+| 0 | **Live Ingest** | MUST | P1 | `ingest/` | Каждые 2–5 мин тянет свежие статьи и посты по 3–5 темам, сохраняет текст, автора, время, URL как `Item` | Context.dev news search + social scrape |
+| 1 | **Swarm Detector** | MUST | P2 | `detect/` | Matched filter (банк шаблонов нарративов по эмбеддингам) → кросс-корреляция активности аккаунтов → CFAR (всплеск) → SPRT (решение) + SNR в дБ → `Finding` | Gemini embeddings + numpy/scipy (возможно, Codex) |
+| 2 | **Explain / Technique** | MUST | P1 | `api/` / worker | Для `Finding`: приём манипуляции + цитата-доказательство + уверенность + объяснение простыми словами → `Explanation` | Gemini structured output; AI Router запасной |
+| S | **Synthetic Swarm** | MUST | P2 | `synth/` | ~30 вариаций одного месседжа, фейковые аккаунты с лагами, `synthetic = true`, `campaign_id` | Gemini |
+| E | **Eval Harness** | MUST | P2 | `eval/` | ROC (Pd vs Pfa), доля найденных, постов/секунд до решения → `MetricsReport`; live FPR / precision по разметке | numpy |
+| UI | **Radar Dashboard** | MUST | P1 | `web/` | Лента алертов, карточка вердикта (посты, heatmap корреляции, SNR, SPRT-трасса, приём), `/metrics`, кнопка «инжектировать тестовую кампанию» | Статический HTML + JS + Chart.js, отдаёт FastAPI |
+| Ops | **Deploy** | MUST | P1 | `infra/` | Docker Compose, caddy HTTPS, Hostinger VPS, `tests/smoke.py` | Hostinger |
+| 3 | **Source Trust** | SHOULD (S1) | P1 | `ingest/` | Кто стоит за доменом: компания, возраст, чужое лого | Context.dev brand + company |
+| — | Geo Echo (Oxylabs), Fact-check, Change Watch | CUT | — | — | — | — |
+
+## Репо и контракт
+```
+CLAUDE.md                 общее: инструкции агентам
+contracts/models.py       ОБЩЕЕ — меняем только вдвоём
+fixtures/items.json       тестовые данные (синтетика, потом реальный пример Context.dev из T2)
+fixtures/findings.json    пример находок (их отдаёт мок-детектор P1 до I1)
+ingest/  api/  web/  infra/      P1
+detect/  synth/  eval/           P2
+tests/                    test_contracts.py (общий), test_detect_*.py (P2), smoke.py (P1)
+docs/                     план и workflow
+Makefile                  `make test` (pytest, без сети, <5 с), `make smoke URL=...`
+```
+Слои связаны **одним контрактом** — pydantic v2 в [`contracts/models.py`](../contracts/models.py) (источник истины, здесь только кратко):
+- `Item` — пост/статья: `source` (`context_social` / `context_news` / `synthetic`), `author`, `published_at` (UTC), `text`, `url`, `topic`, `synthetic`, `campaign_id` (ground truth только у синтетики).
+- `Finding` — вердикт (`coordinated` / `organic` / `watching`), `accounts`, `item_ids`, `llr`, `snr_db`, `sprt_trace`, `decided_at_item`, `correlation` (квадратная матрица в порядке `accounts`, для heatmap), `explanation: Explanation | None` (`technique`, `quote`, `confidence`, `summary`), `synthetic`.
+- `AlertsResponse`, `MetricsReport` (ROC, detection rate, рабочая Pfa, постов/секунд до решения, live FPR / precision, `n_labelled`).
+- Вход детектора (P2): `detect.pipeline.detect(items, *, alpha=0.02, beta=0.1) -> list[Finding]`.
+- API (P1): `GET /health`, `GET /api/alerts` → `AlertsResponse`, `GET /api/metrics` → `MetricsReport`, `POST /api/inject` (кнопка демо).
+
+P2 работает офлайн на `fixtures/` (без сети и БД), P1 — с мок-детектором до интеграции **I1 (Сб 15:00)**. Подробнее: [workflow.md](workflow.md).
 
 ## Стек на VPS (Docker Compose)
 | Сервис | Что внутри |
@@ -58,29 +80,30 @@
 
 ## Хранилище
 Таблицы: `actors` (аккаунт/автор), `items` (пост/статья: текст, автор, время, URL, источник, флаг `synthetic`), `embeddings` (pgvector), `findings` (вердикт, LLR, SNR, объяснение), `labels` (ручная разметка).
-Ответы Context.dev кэшируем у себя (повторный запрос стоит тех же кредитов).
+Ответы Context.dev кэшируем у себя (повторный запрос стоит тех же кредитов). Схема БД — P1 (T4), но поля `items` / `findings` повторяют контракт.
 
 ## Данные для метрик (40% оценки!)
 | Уровень | Набор | Для чего |
 |---|---|---|
 | MUST | **Синтетический рой:** LLM пишет ~30 вариаций одного месседжа, разносим по фейковым аккаунтам с лагами, прячем в реальные посты (`synthetic = true`) | ROC и время до решения для Swarm Detector |
-| MUST | **Ручная разметка ~50 живых аккаунтов:** ~25 из алертов + ~25 случайных без алерта из тех же тем; классы «органика / подозрительно / не понятно», ~1 час | Precision (по алертам) и FPR на реальных людях (по случайным) |
-| SHOULD | **SemEval-2020 Task 11** (Propaganda Techniques Corpus), подвыборка | Precision классификатора приёмов. Проверить лицензию и скачивание |
+| MUST | **Ручная разметка ~50 живых аккаунтов (T14, оба):** рубрика 15 мин, единица — аккаунт, классы «органика / подозрительно / не понятно»; **~25 из алертов** (→ live precision) + **~25 случайных без алерта** из тех же тем (→ live FPR) | Precision и FPR на реальных людях, отдельно от синтетики |
+| CUT | SemEval-2020 Task 11 (корпус приёмов) | Вдвоём не успеем; приёмы показываем объяснением с цитатой, без отдельной метрики |
 | CUT | TwiBot-20/22, Cresci-2017 | Доступ по запросу, не успеем |
 
 ## Демо-сценарий на 2 минуты
 1. Открываем `https://<домен Hostinger>`: лента живых алертов по 3–5 темам (обновляется поллингом).
 2. Нажимаем «инжектировать тестовую кампанию» → через несколько минут/постов появляется алерт «🐝 Рой: [N] аккаунтов, SNR из [−x] до [+y] дБ» (числа — реальные, из демо).
 3. Карточка: посты, heatmap корреляции аккаунтов, SPRT-трасса («решение на [k]-м посте»), приём «🎭 Fear appeal» с подсветкой фраз и объяснением.
-4. (SHOULD) «🔗 Источник: …» от Context.dev и «🌍 то же в EE/DE» от Oxylabs с URL.
+4. (SHOULD S1) «🔗 Источник: …» — кто стоит за доменом, от Context.dev brand/company.
 5. Страница `/metrics`: ROC, рабочая точка, precision/FPR, примеры ошибок.
 
 ## Главные риски
 | Риск | Что делаем |
 |---|---|
-| Social scrape Context.dev не отдаёт автора или время | **Проверить первым делом (шаг 2 плана).** Запасной вариант: news search + синтетический рой; авторы = домены/авторы статей |
+| Social scrape Context.dev не отдаёт автора или время | **Проверить первым делом (T2, P1, Пт 23:15).** Запасной вариант: news search + синтетический рой; авторы = домены/авторы статей |
 | Мало реальных роёв за выходные | Инжекция тестовой цели: это и метрика, и демо |
 | Лимиты Gemini | Hostinger AI Router как запасной LLM; эмбеддинги кэшируем |
-| Деплой ломается в последний момент | Деплой с первого часа, фича-фриз кода в вс 02:00 |
+| Деплой ломается в последний момент | Деплой скелета к Сб 03:00 (T5), smoke после каждого деплоя, фича-фриз кода (F) в Вс 02:00 |
+| Детектор не готов к интеграции | Чекпоинт T10 Сб 14:00: P1 работает на моке, при отставании S1 не делаем, P1 помогает P2 |
 
 Зачем каждый тул и условия призов: [tech-challenges.md](tech-challenges.md).

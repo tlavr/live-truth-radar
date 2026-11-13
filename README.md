@@ -6,7 +6,7 @@
 
 ## Challenges
 - **Main:** Decode the Noise (Hostinger)
-- **Tech:** Context.dev (core), Gemini; Oxylabs only if it works live in the demo; Codex only if we genuinely build with it
+- **Tech:** Context.dev (core: live news search + social scrape), Gemini (embeddings, explanations, synthetic test campaigns); OpenAI Codex only if we genuinely build the detectors with it
 
 ## The idea
 Coordinated propaganda behaves like a spread-spectrum (CDMA) signal: each bot account is too weak to flag alone, but together they carry one "code". Live Truth Radar applies radar and signal-processing math to the live web:
@@ -20,12 +20,23 @@ Coordinated propaganda behaves like a spread-spectrum (CDMA) signal: each bot ac
 Receiver chain: `live web (Context.dev) → embeddings + activity time series → filters → detector → explained verdict`
 
 ## Repository layout
-All docs are in `docs/` (in Russian):
-- `docs/HANDOFF.md` – start here: what we build, deadlines, step-by-step plan.
+```
+CLAUDE.md            instructions for AI agents (read first)
+contracts/models.py  shared data contract (Item, Finding, AlertsResponse, MetricsReport)
+fixtures/            shared test data
+ingest/ api/ web/ infra/   P1 "Pipe": Context.dev ingest, FastAPI, dashboard, Docker/Hostinger deploy
+detect/ synth/ eval/       P2 "Brain": swarm detector, synthetic campaigns, metrics
+tests/               `make test` (offline, fast), `make smoke URL=...`
+```
+
+Docs (in Russian):
+- `docs/HANDOFF.md` – start here: what we build, roles, deadlines, task plan.
+- `docs/workflow.md` – how we work: agents, branches, per-task cycle, testing.
+- `docs/tasks.md` – task cards (T0–T18, I1, S1).
 - `docs/challenge-decode-the-noise.md` – main challenge (Hostinger): task, requirements, judging.
-- `docs/tech-challenges.md` – Context.dev, Gemini, Oxylabs, Codex: what counts, MUST/SHOULD/CUT.
+- `docs/tech-challenges.md` – Context.dev, Gemini, Codex: what counts, MUST/SHOULD/CUT.
 - `docs/signal-processing.md` – the signal-processing approach.
-- `docs/architecture.md` – scope (MUST/SHOULD/CUT), modules, stack, data, demo script.
+- `docs/architecture.md` – scope (MUST/SHOULD/CUT), modules and owners, contract, stack, data, demo script.
 - `docs/submission-draft.md` – Junction submission text.
 
 ## Secrets

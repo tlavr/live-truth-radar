@@ -1,0 +1,9 @@
+pydantic>=2
+numpy
+scipy
+fastapi
+uvicorn
+httpx
+psycopg[binary]
+pgvector
+google-genai
