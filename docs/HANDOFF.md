@@ -53,10 +53,10 @@
 | T4 | Docker Compose (caddy, api, worker, db) + FastAPI `/health` + схема БД | P1 | Сб 01:00 |
 | T5 | Деплой скелета на Hostinger, HTTPS-домен, smoke проходит | P1 | Сб 03:00 |
 | T6 | Ingest: поллинг Context.dev → БД (`items`), кэш ответов | P1 | Сб 04:30 |
-| T7 | Эмбеддинги Gemini + matched filter (банк шаблонов по темам) на fixtures | P2 | Сб 09:00 |
+| T7 | Эмбеддинги Gemini + отбеливание (режекция клаттера темы) на fixtures | P2 | Сб 09:00 |
 | T8 | API `/api/alerts`, `/api/metrics`, `/api/inject` на БД + мок-детектор | P1 | Сб 11:00 |
 | T9 | Генератор синтетического роя (Gemini ~30 вариаций, фейковые аккаунты с лагами) + инжекция | P2 | Сб 11:00 |
-| T10 | Корреляция → CFAR → SPRT → `Finding` (LLR, SNR, вердикт, «watching»). **Чекпоинт: находит синтетический рой в fixtures** | P2 | **Сб 14:00** |
+| T10 | Коррелятор пар «время × смысл» → CFAR по парам → рой ≥ 3 → SPRT → `Finding` (LLR, SNR, вердикт, «watching»). **Чекпоинт: находит синтетический рой в fixtures** | P2 | **Сб 14:00** |
 | I1 | **Интеграция:** настоящий `detect()` в worker на живых данных на VPS; мок убран | оба | **Сб 15:00** |
 | T11 | Объяснение Gemini (structured output) + AI Router как запасной | P1 | Сб 16:00 |
 | T12 | Дашборд (одна страница) + `/metrics` + кнопка инжекции | P1 | Сб 19:00 |
@@ -72,7 +72,7 @@
 **Синки (10 мин: мёрж, деплой `main`, проверка цепочки вживую):** Сб 04:30 (до сна P1) · Сб 11:00 · I1 Сб 15:00 · Сб 19:00 · Вс 01:00.
 
 **Интерфейсы вне контракта (решены заранее, менять только вдвоём; в tasks.md помечены ⚙):**
-- `synth.campaign.make_campaign(topic, now, *, n_accounts=12, seed=None) -> list[Item]` (P2, T9) — его вызывает `POST /api/inject` (P1). Правила: `published_at` в окне `[now − 15 мин, now]`; `campaign_id = f"inj-{topic}-{now:%H%M%S}"`; id постов `f"{campaign_id}-{k}"` (каждый инжект новый, upsert не съедает повтор); текст — сообщение, которого **нет** в банке шаблонов (честный eval). До T9 inject берёт синтетику из `fixtures/items.json` с теми же правилами (время сжато в 15 мин, новые id). После инжекта API **не** запускает детектор сам: пишет строку в `inject_requests`, worker проверяет её каждые ~10 с и сразу гоняет `detect()` по теме (детектор живёт только в worker, без гонок).
+- `synth.campaign.make_campaign(topic, now, *, n_accounts=12, seed=None) -> list[Item]` (P2, T9) — его вызывает `POST /api/inject` (P1). Правила: `published_at` в окне `[now − 15 мин, now]`; `campaign_id = f"inj-{topic}-{now:%H%M%S}"`; id постов `f"{campaign_id}-{k}"` (каждый инжект новый, upsert не съедает повтор); текст — из отложенных вариаций; детектор на синтетике не обучается и банка шаблонов не имеет (честный eval, см. [signal-processing.md §3](signal-processing.md)). До T9 inject берёт синтетику из `fixtures/items.json` с теми же правилами (время сжато в 15 мин, новые id). После инжекта API **не** запускает детектор сам: пишет строку в `inject_requests`, worker проверяет её каждые ~10 с и сразу гоняет `detect()` по теме (детектор живёт только в worker, без гонок).
 - Окно детектора: worker каждый цикл вызывает `detect(items за последние DETECT_WINDOW_HOURS=6 ч по теме)` и атомарно заменяет findings этой темы; `/api/alerts` отдаёт только последний прогон + `last_poll_at`.
 - `eval/report.json` (`MetricsReport`, пишет `make eval`, P2 в T13; пересчёт после T14 может сделать любой) — **коммитим в git**; compose (`infra/docker-compose.yml`, build context `..`) монтирует `../eval:/app/eval:ro` и `../cache:/app/cache`, поэтому доставка на VPS = `git pull` (`make deploy`), без пересборки. Пока файла нет — `/api/metrics` отдаёт заглушку с `None`.
 - `eval/labels.csv` (`account,topic,alerted,label,note`) — общая разметка T14; `account` — псевдоним `contracts.pseudonym(author, LTR_HASH_SALT)`, реальные хэндлы в публичный репо **не попадают**. Скелет файла делает `ingest/label_sample.py` (P1).

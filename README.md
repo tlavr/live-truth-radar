@@ -11,8 +11,8 @@
 ## The idea
 Coordinated propaganda behaves like a spread-spectrum (CDMA) signal: each bot account is too weak to flag alone, but together they carry one "code". Live Truth Radar applies radar and signal-processing math to the live web:
 
-- **Matched filters** find a narrative even when it is reworded (embeddings).
-- **Cross-correlation** of account activity "despreads" hidden swarms.
+- **Matched filtering in meaning space** finds a message even when it is reworded (embeddings, with the topic's common background whitened out).
+- **Cross-correlation** of accounts in time × meaning "despreads" hidden swarms.
 - **CFAR** thresholding raises alerts at a controlled false-alarm rate.
 - **SPRT** (sequential likelihood-ratio test) decides *coordinated / organic / keep watching*.
 - Every verdict is explained in plain language with evidence and sources.

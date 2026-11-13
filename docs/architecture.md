@@ -12,7 +12,7 @@
 ## Объём: MUST / SHOULD / CUT
 | Уровень | Что | Когда |
 |---|---|---|
-| **MUST** | Ingest (Context.dev news search + social scrape, поллинг каждые 2–5 мин, 3–5 тем), Swarm Detector (эмбеддинги → matched filter → корреляция → CFAR → SPRT, SNR в дБ), объяснение вердикта Gemini (приём + цитата + уверенность), Eval (инжекция синтетического роя + ~50 размеченных живых аккаунтов), дашборд на одну страницу + `/metrics` + кнопка инжекции, деплой на Hostinger | К Сб 19:00–20:30 (T0–T14, I1) |
+| **MUST** | Ingest (Context.dev news search + social scrape, поллинг каждые 2–5 мин, 3–5 тем), Swarm Detector (эмбеддинги → отбеливание → коррелятор пар «время × смысл» → CFAR → SPRT, SNR в дБ; дизайн: [signal-processing.md §3](signal-processing.md)), объяснение вердикта Gemini (приём + цитата + уверенность), Eval (инжекция синтетического роя + ~50 размеченных живых аккаунтов), дашборд на одну страницу + `/metrics` + кнопка инжекции, деплой на Hostinger | К Сб 19:00–20:30 (T0–T14, I1) |
 | **SHOULD** | Только **S1** — Source Trust через Context.dev brand/company (P1) | Только если весь MUST, кроме T14, готов к Сб 20:00; дедлайн Вс 01:00; отдельный `GET /api/source/{domain}` |
 | **CUT** | Oxylabs (целиком, включая гео-`/search`); SemEval; Context.dev scrape полного текста, monitors/webhooks (заменены поллингом), research, structured extraction; Fact-check, Change Watch; Gemma, Nemotron, Modal / Verda, Aiven, CRACI; спектрограммы, delay-Doppler, MMSE-фьюжн; бот-датасеты TwiBot/Cresci | Только в слайд «что дальше» |
 
@@ -25,7 +25,7 @@
  новости ─┼─► worker: поллинг Context.dev каждые N мин ──► db: Postgres            │
  соцсети  │   (news search + social scrape)                  (items, actors, inject_req.,    │
           │                                                   findings, labels)              │
-          │   worker: эмбеддинги Gemini → matched filter → корреляция аккаунтов              │
+          │   worker: эмбеддинги Gemini → отбеливание → корреляция аккаунтов                │
           │           → CFAR → SPRT → вердикт → объяснение Gemini (приём + цитата)           │
           │                                                                                   │
           │   api: FastAPI (REST + отдаёт дашборд)  ──►  дашборд: алерты, карточка, метрики │
@@ -38,7 +38,7 @@
 | # | Модуль | Уровень | Кто | Папка | Что делает | Тулы |
 |---|---|---|---|---|---|---|
 | 0 | **Live Ingest** | MUST | P1 | `ingest/` | Каждые 2–5 мин тянет свежие статьи и посты по 3–5 темам, сохраняет текст, автора, время, URL как `Item` | Context.dev news search + social scrape |
-| 1 | **Swarm Detector** | MUST | P2 | `detect/` | Matched filter (банк шаблонов нарративов по эмбеддингам) → кросс-корреляция активности аккаунтов → CFAR (всплеск) → SPRT (решение) + SNR в дБ → `Finding` | Gemini embeddings + numpy/scipy (возможно, Codex) |
+| 1 | **Swarm Detector** | MUST | P2 | `detect/` | Эмбеддинги + отбеливание (режекция клаттера темы) → коррелятор пар аккаунтов «время × смысл» с лагом → CFAR по парам → рой ≥ 3, когерентное накопление, SNR в дБ → SPRT (решение) + проверка «эхо новости» → `Finding` | Gemini embeddings + numpy/scipy (возможно, Codex) |
 | 2 | **Explain / Technique** | MUST | P1 | `ingest/explain.py` (в worker) | Для `Finding`: приём манипуляции + цитата-доказательство + уверенность + объяснение простыми словами → `Explanation` | Gemini structured output; AI Router запасной |
 | S | **Synthetic Swarm** | MUST | P2 | `synth/` | ~30 вариаций для нескольких месседжей (часть отложена для eval), фейковые аккаунты с лагами, `synthetic = true`, `campaign_id` | Gemini |
 | E | **Eval Harness** | MUST | P2 | `eval/` | ROC (Pd vs Pfa), доля найденных, постов/секунд до решения → `MetricsReport`; live FPR / precision по разметке | numpy |
@@ -89,7 +89,7 @@ P2 работает офлайн на `fixtures/` (без сети и БД), P1 
 ## Данные для метрик (40% оценки!)
 | Уровень | Набор | Для чего |
 |---|---|---|
-| MUST | **Синтетический рой:** LLM пишет ~30 вариаций для нескольких месседжей (часть отложена: их нет в банке шаблонов), разносим по фейковым аккаунтам с лагами, прячем в реальные посты (`synthetic = true`) | ROC и время до решения для Swarm Detector |
+| MUST | **Синтетический рой:** LLM пишет ~30 вариаций для нескольких месседжей (часть отложена для eval; детектор на синтетике не обучается), разносим по фейковым аккаунтам с лагами, прячем в реальные посты (`synthetic = true`) | ROC и время до решения для Swarm Detector |
 | MUST | **Ручная разметка ~50 живых аккаунтов (T14, оба):** рубрика 15 мин, единица — аккаунт, классы «органика / подозрительно / не понятно»; **~25 из алертов** (→ live precision) + **~25 случайных без алерта** из тех же тем (→ live FPR) | Precision и FPR на реальных людях, отдельно от синтетики |
 | CUT | SemEval-2020 Task 11 (корпус приёмов) | Вдвоём не успеем; приёмы показываем объяснением с цитатой, без отдельной метрики |
 | CUT | TwiBot-20/22, Cresci-2017 | Доступ по запросу, не успеем |

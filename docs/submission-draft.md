@@ -39,9 +39,9 @@ Coordinated campaigns work the same way. Each bot posts too little to flag alone
 ## The receiver chain
 `Antenna (live web) → front-end (embeddings + activity time series) → filters → detector → explained verdict`
 
-- 🎯 **Matched filter bank**: each post is correlated with narrative templates in embedding space, so a message is found even when reworded.
-- 🐝 **CDMA despreading (Spot the swarm)**: account activity becomes 0/1 sequences per minute. Organic users behave like independent random codes; a coordinated group shows a cross-correlation peak at a common lag. Combining the cluster gives a processing gain of roughly N, shown as SNR in dB.
-- 📈 **CFAR alerting**: like radar, the alarm threshold adapts to each topic's own background noise, keeping the false-alarm rate constant for busy and quiet topics alike.
+- 🎯 **Matched filtering in meaning space**: every post is correlated with every other post in embedding space, after whitening out the topic's common background (clutter rejection), so a message is found even when reworded, with no pre-built template bank.
+- 🐝 **CDMA despreading (Spot the swarm)**: each account is a vector signal in time × meaning. Organic users behave like independent random codes; a coordinated group shows a cross-correlation peak at a common lag. Coherently combining the M account pairs of a cluster gives a processing gain of 10·log10(M) dB, shown as SNR before and after.
+- 📈 **CFAR alerting**: like radar, the alarm threshold adapts to each topic's own background (median and spread over all account pairs, an order-statistic CFAR), keeping the false-alarm rate constant for busy and quiet topics alike.
 - ⚖️ **SPRT decision**: a sequential likelihood-ratio test accumulates evidence (text similarity and timing) post by post and decides *coordinated*, *organic* or *keep watching* as early as possible, with error rates α and β that we set.
 - 🎭 **Name the technique**: Gemini reads the whole cluster, labels loaded language, fear appeal, whataboutism and fabricated authority, quotes the key phrase and explains *why* in plain language.
 - 🔗 **Trust the source** [SHOULD]: company identity and cloned branding behind a domain, from Context.dev enrichment.
@@ -52,7 +52,7 @@ We report detection the way radar engineers do:
 - **Test-target injection**: we hide a synthetic coordinated campaign inside the real live stream and measure whether, and how fast, it is detected (**[N] posts / [T] seconds** to decision).
 - A hand-labelled live test set of [N] real accounts, so the false-alarm rate is measured on real people, separately from the synthetic tests.
 
-Current results: **detection [X]% of injected campaigns at [Pfa]%; live FPR [Z], precision [P]** on the labelled set. Known failure cases are listed on the metrics page. When evidence is weak, the verdict stays *"keep watching"* instead of accusing a real person. Injected test messages are never in the detector's template bank, so the scores are not circular.
+Current results: **detection [X]% of injected campaigns at [Pfa]%; live FPR [Z], precision [P]** on the labelled set. Known failure cases are listed on the metrics page. When evidence is weak, the verdict stays *"keep watching"* instead of accusing a real person. The detector has no template bank and is never trained on the synthetic campaigns, so the scores are not circular. Precision is reported only on hand-labelled live accounts, because on synthetic tests it depends on how often we inject.
 
 ## Explainable verdicts
 Each alert shows the evidence a human can check in seconds: the correlated accounts and their timing, the reworded posts that matched, the quoted key phrase, the source data, the SNR and the SPRT trace showing when the decision was made.
