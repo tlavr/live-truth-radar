@@ -15,7 +15,7 @@
  ВЕБ      │                                                                          │
  новости ─┼─► Context.dev: news search, scrape, crawl, social, brand/company,        │
  соцсети  │   monitors ──вебхук──► INGEST ──► БАЗА (события во времени + векторы)    │
- сайты    │   (+ Oxylabs: /search, /scrape, ответы ChatGPT/Perplexity)              │
+ сайты    │   (+ Oxylabs: /search, /scrape, ответы ChatGPT/Perplexity)               │
  логи ────┼─► (опц.) access-логи сайта                     │                        │
           │                                                ▼                        │
           │   АНАЛИЗ:  1 Swarm  2 Technique  3 Source Trust  4 Fact-check  5 Change │
@@ -39,7 +39,15 @@
 | UI | **Radar Dashboard** | Лента алертов, карточка вердикта, граф роя, таймлайн, страница метрик | — | Демо | Полнота демо |
 
 ## Хранилище
-Подойдёт Postgres (+ pgvector) или MariaDB (VECTOR + system-versioned tables для истории версий) прямо в Docker на VPS. Нужны таблицы: `sources`, `actors`, `items` (пост/статья + время), `versions` (история изменений), `embeddings`, `findings`, `labels`.
+**Postgres + pgvector** в Docker на том же VPS. Таблицы: `sources`, `actors`, `items` (пост/статья + время), `versions` (история изменений), `embeddings`, `findings`, `labels`.
+
+## Стек на VPS (Docker Compose)
+| Сервис | Что внутри |
+|---|---|
+| `api` | FastAPI: REST для дашборда + приём вебхуков Context.dev |
+| `worker` | Ingest и детекторы (matched filter, корреляция, CFAR, SPRT), вызовы Gemini |
+| `db` | Postgres + pgvector |
+| `web` | Дашборд: алерты, граф роя, карточка вердикта, страница метрик |
 
 ## Демо-сценарий на 2 минуты
 1. Открываем `live-truth-radar.<домен Hostinger>`.
@@ -50,13 +58,18 @@
 6. «✅/❌ Fact-check»: 3 ссылки на надёжные источники.
 7. Страница **Метрики:** precision 0.87, FPR 4% на тестовом наборе, примеры ошибок и как мы их обрабатываем.
 
-## Тех-челленджи для ядра
-| Тех-челлендж | Роль |
+## Тулы по модулям
+| Модуль | Тулы |
 |---|---|
-| **Context.dev** | Глаза: news, scrape, social, brand, company, monitors + webhooks, research (ядро) |
-| **Oxylabs** | Второй источник: /search, /scrape, гео, «что говорят ChatGPT/Perplexity об этой теме» |
-| **Gemini** | Объяснения вердиктов, fact-check, длинный контекст на пачку постов |
-| **Codex** | Разработка (документируем, как помог) |
+| Live Ingest | Context.dev news search + monitors/webhooks + social scrape |
+| Swarm Detector | Gemini эмбеддинги + наша корреляция/CFAR/SPRT; Oxylabs гео-`/search` |
+| Technique Classifier | Gemini (structured output) |
+| Source Trust | Context.dev brand + company enrichment |
+| Fact-check | Context.dev research + scrape; Oxylabs `/scrape` и ответы AI-ассистентов |
+| Change Watch | Context.dev monitors + наша история версий |
+| LLM запасной | Hostinger AI Router |
+
+Подробно, зачем каждый тул и что нужно для приза: [tech-challenges.md](tech-challenges.md).
 
 ## Данные для метрик (40% оценки!)
 - **Приёмы пропаганды:** открытые датасеты вида SemEval-2020 Task 11 (Propaganda Techniques Corpus) — проверить доступность и лицензию.
