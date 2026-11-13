@@ -21,7 +21,7 @@ Propaganda campaigns behave like a spread-spectrum signal: each bot account is t
 
 **Source Code:** ссылка на GitHub-репо (можно пустой)
 
-**Tech Challenges (отметить сейчас, можно поменять до вс 10:00):** Best Use of Context.dev: Fully Structured Web · Best Use of Gemini API · Best agentic usecase of Oxylabs Web API · Best Use of Codex
+**Tech Challenges (отметить сейчас, можно поменять до вс 10:00):** Best Use of Context.dev: Fully Structured Web · Best Use of Gemini API · Best agentic usecase of Oxylabs Web API · [Best Use of Codex — только если на шаге 0 = да]
 *Codex отмечаем, только если на шаге 0 нашёлся человек, который реально пишет им код. Oxylabs снять в финале, если SHOULD-шаг 13 не сделан.*
 
 ---
@@ -78,7 +78,7 @@ Fact-checking with source fusion, change watch for silently edited articles, spe
 *Team The Kerfufflers · Junction 2026*
 ```
 
-**[ALT] для Context.dev, если на шаге 2 у social scrape нет автора или времени:** заменить в пункте Context.dev предложение «Social scrape gives … define each narrative.» на *"News search gives fresh articles with authors and timestamps, which become the activity codes for despreading."*
+**[ALT] для Context.dev, если на шаге 2 у social scrape нет автора или времени:** заменить в пункте Context.dev предложение «Social scrape gives … define each narrative.» на *"News search gives fresh articles with authors and timestamps, which become the activity codes for despreading."* И добавить в «Honest, measurable detection»: *"Swarm detection is demonstrated on injected synthetic accounts; in the live stream, 'accounts' are news authors and domains."*
 
 ## Как текст закрывает критерии Hostinger
 | Критерий | Вес | Где |
