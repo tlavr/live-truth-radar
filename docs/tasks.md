@@ -13,10 +13,10 @@
 | T4 | P1 | сб 01:00 | Compose-скелет + /health + схема БД |
 | T5 | P1 | сб 03:00 | Деплой на Hostinger + HTTPS |
 | T6 | P1 | сб 04:30 | Ingest-поллинг → БД |
-| T7 | P2 | сб 09:00 | Эмбеддинги + matched filter |
+| T7 | P2 | сб 09:00 | Эмбеддинги + луч на тему + отбеливание |
 | T8 | P1 | сб 11:00 | API на БД + mock-детектор |
 | T9 | P2 | сб 11:00 | Генератор синтетического роя |
-| T10 | P2 | сб 14:00 | Корреляция → CFAR → SPRT → Finding (чекпоинт) |
+| T10 | P2 | сб 14:00 | Коррелятор пар → CFAR → рой → SPRT → Finding (чекпоинт) |
 | I1 | оба | сб 15:00 | Интеграция на VPS |
 | T11 | P1 | сб 16:00 | Объяснение Gemini |
 | T12 | P1 | сб 19:00 | Дашборд + /metrics + кнопка инжекта |
@@ -82,10 +82,10 @@
 **Зависит от:** T2, T5
 
 ### T7 · P2 · сб 09:00
-**Цель:** «согласованный фильтр»: насколько каждый пост похож на шаблоны нарративов темы.
-**Вход/выход:** `detect/embed.py`: `embed(texts) -> np.ndarray` (Gemini embeddings + кэш на диск; офлайн-фолбэк — детерминированный hashing-эмбеддер для тестов), `detect/matched_filter.py`: банк шаблонов на тему → score на `Item`. Шаблоны строятся **из данных** (центроиды кластеров почти-дубликатов в окне) + опционально ручные `detect/templates/<topic>.json`; инжектируемых сообщений из `synth/variations/` в банке быть не должно (иначе eval «круговой»). `embed()` читает `LTR_EMBEDDER` (`hash` в тестах, ставит `tests/conftest.py`), кэш в `cache/embeddings/`.
-**Готово, когда:** на `fixtures/items.json` посты синтетической кампании (`campaign_id` не `None`) имеют заметно более высокий score, чем органика; работает без сети (фолбэк).
-**Тесты:** 1–2 в `tests/test_detect_matched_filter.py` (похожий текст > непохожего), без сети.
+**Цель:** фронт-энд приёмника: эмбеддинг поста + луч на тему (бимформинг) + подавление клаттера темы (дизайн: [signal-processing.md §3.2–3.3](signal-processing.md#3-согласованный-дизайн-движка-v1-что-строить)).
+**Вход/выход:** `detect/embed.py`: `embed(texts) -> np.ndarray` (Gemini embeddings + кэш на диск; офлайн-фолбэк — детерминированный hashing-эмбеддер для тестов), читает `LTR_EMBEDDER` (`hash` в тестах, ставит `tests/conftest.py`), кэш в `cache/embeddings/`. `detect/beam.py`: направляющий вектор темы (робастное среднее, один голос на аккаунт), усиление луча `b_p` и `whiten(E) -> np.ndarray` — убрать проекцию на луч и нормировать остаток. `detect/config.py`: все параметры анализатора из §3.12 одним dataclass (в T7 используются `c_lo`/`c_hi`). Банка шаблонов **нет**: опорным сигналом служат сами посты (§3.2); центроид роя считается позже для карточки.
+**Готово, когда:** на `fixtures/items.json` после отбеливания средний cos между постами одной волны роя заметно выше, чем между органическими постами (органика ≈ 0); работает без сети (фолбэк).
+**Тесты:** 3 в `tests/test_detect_embed.py` (перефраз > непохожего; отбеливание роняет cos органики и сохраняет cos перефразов; пост не по теме получает усиление луча ≈ 0), без сети.
 **Зависит от:** T0 (фикстуры), T1 (ключ Gemini для живых эмбеддингов)
 
 ### T8 · P1 · сб 11:00
@@ -97,16 +97,16 @@
 
 ### T9 · P2 · сб 11:00
 **Цель:** тестовая цель для радара: синтетический рой с известной правдой.
-**Вход/выход:** `synth/variations.py`: Gemini пишет ~30 вариаций для **нескольких** месседжей на тему (часть — отложенные для eval) → кэш `synth/variations/<topic>.json` (в git, чтобы офлайн; сеть нужна только чтобы построить кэш). `synth/campaign.py` (можно переиспользовать `synth/fixture_gen.py`, который генерирует `fixtures/items.json` через `make fixtures`): ⚙ `make_campaign(topic: str, now: datetime, *, n_accounts: int = 12, seed: int | None = None) -> list[Item]` — фейковые аккаунты, лаги, `source="synthetic"`, `synthetic=True`; правила времени и id — HANDOFF §5 (`published_at` в `[now − 15 мин, now]`, `campaign_id = inj-<topic>-<HHMMSS>`, id `<campaign_id>-<k>`).
+**Вход/выход:** `synth/variations.py`: Gemini пишет ~30 вариаций для **нескольких** месседжей на тему (часть — отложенные для eval и инжекта; детектор на вариациях не обучается и банка шаблонов не имеет) → кэш `synth/variations/<topic>.json` (в git, чтобы офлайн; сеть нужна только чтобы построить кэш). `synth/campaign.py` (можно переиспользовать `synth/fixture_gen.py`, который генерирует `fixtures/items.json` через `make fixtures`): ⚙ `make_campaign(topic: str, now: datetime, *, n_accounts: int = 12, seed: int | None = None) -> list[Item]` — фейковые аккаунты, `source="synthetic"`, `synthetic=True`; форма залпа как у реального роя: 2 залпа внутри 15 минут, в каждом залпе каждый аккаунт постит один перефраз с собственным лагом 15–120 с (**не** равномерно по 15 минутам, иначе пары расходятся на 5+ минут и корреляция слабая); правила времени и id — HANDOFF §5 (`published_at` в `[now − 15 мин, now]`, `campaign_id = inj-<topic>-<HHMMSS>`, id `<campaign_id>-<k>`).
 **Готово, когда:** `make_campaign` детерминирован при одном `seed`, работает без сети по кэшу; результат можно вмешать в `fixtures/items.json`.
 **Тесты:** 1 тест: все items валидны, `synthetic=True`, общий `campaign_id`, времена в окне 15 мин, два вызова с разным `now` дают разные id.
 **Зависит от:** T1 (Gemini для генерации кэша), T7 не обязателен
 
 ### T10 · P2 · сб 14:00 · ЧЕКПОИНТ
-**Цель:** полный детектор: корреляция аккаунтов → CFAR → SPRT → `Finding`.
-**Вход/выход:** `detect/correlation.py` (временные ряды активности аккаунтов по нарративу, кросс-корреляция с лагом → матрица), `detect/cfar.py` (адаптивный порог по фону), `detect/sprt.py` (LLR, пороги из `alpha`/`beta`, трасса), `detect/pipeline.py`: `detect(items, *, alpha=0.02, beta=0.1) -> list[Finding]` (`id = finding_id(topic, accounts)`, `verdict` coordinated/organic/watching, `llr`, `snr_db`, `sprt_trace` + `sprt_upper`/`sprt_lower`, `decided_at_item`, `first_seen`/`last_seen`, `correlation` и `lag_sec` квадратные в порядке `accounts`, `explanation=None`). Математика: `docs/signal-processing.md` §2.2–2.6.
-**Готово, когда:** на `fixtures/items.json` синтетический рой → `coordinated`, органика → без `coordinated`; на `fixtures/items_live_sample.json` (если уже есть) не падает и не даёт `coordinated` на органике; заполнены `snr_db` (кластер) и `snr_db_single` (среднее по аккаунту); функция < 2 с на фикстурах.
-**Тесты:** 5–8 в `tests/test_detect_*.py`: пик корреляции на лаге; независимые аккаунты без тревоги; SPRT верх/низ на известной LLR; CFAR молчит на ровном фоне и срабатывает на всплеске. Ревью вторым агентом (математика).
+**Цель:** полный детектор: коррелятор пар → CFAR по парам → рой → SPRT → `Finding`. Математика и параметры: [signal-processing.md §3.4–3.8](signal-processing.md#3-согласованный-дизайн-движка-v1-что-строить).
+**Вход/выход:** `detect/correlation.py` (векторный сигнал «время × смысл», `R_ij = max_τ w(τ)·R_ij(τ)`, `τ_max` = 10 мин, `Δ` = 30 с → матрицы `R` и `lag`), `detect/cfar.py` (фон по всем парам темы: `z_ij = (R_ij − медиана)/max(1.4826·MAD, 0.05)`; граф `z > k` → группы ≥ 3 аккаунтов; накопление `Z = Σz/√M`), `detect/sprt.py` (причинный признак «эхо», гауссова LLR с ограничителем [−1, +1.5] и полом σ, пороги из `alpha`/`beta`, трасса), `detect/news_echo.py` (статья `context_news` с тем же смыслом перед залпом → максимум `watching`), `detect/config.py` (дополнить параметрами коррелятора, CFAR, SPRT; можно запустить второй анализатор, «медленный»), `detect/pipeline.py`: `detect(items, *, alpha=0.02, beta=0.1) -> list[Finding]` (`id = finding_id(topic, accounts)`, `verdict` coordinated/organic/watching, `llr`, `snr_db = 20·lg Z`, `snr_db_single = 20·lg(средняя z_ij)`, `ambiguity` (сетка §3.9), `note` («эхо новости»), `sprt_trace` + `sprt_upper`/`sprt_lower`, `decided_at_item`, `first_seen`/`last_seen`, `correlation` и `lag_sec` квадратные в порядке `accounts`, `explanation=None`).
+**Готово, когда:** на `fixtures/items.json` синтетический рой → `coordinated`, органика → без `coordinated`; сжатый в 15 минут залп (как инжект) тоже → `coordinated`; на `fixtures/items_live_sample.json` (если уже есть) не падает и не даёт `coordinated` на органике; функция < 2 с на фикстурах.
+**Тесты:** 6–8 в `tests/test_detect_*.py`: пик корреляции на нужном лаге; независимые аккаунты без тревоги; SPRT верх/низ на известной последовательности «эхо»; CFAR молчит на ровном фоне и выделяет группу; пара аккаунтов (N = 2) не даёт роя; «эхо новости» не становится `coordinated`. Ревью вторым агентом (математика).
 **Зависит от:** T7 (T9 не обязателен: в `fixtures/items.json` уже есть рой `swarm-001`)
 **Если не готово к 14:00:** S1 вырезаем, P1 подключается к P2 (см. [workflow §9](workflow.md#9-если-отстаём)).
 
@@ -126,22 +126,22 @@
 
 ### T12 · P1 · сб 19:00
 **Цель:** одна страница для судей и видео.
-**Вход/выход:** `web/index.html` + `web/app.js` (Chart.js): лента алертов из `/api/alerts`, карточка вердикта (посты, heatmap `correlation` с `lag_sec` в подсказке, SNR дБ, SPRT-трасса с порогами `sprt_upper`/`sprt_lower`, приём + цитата); `web/metrics.html` из `/api/metrics` (ROC, рабочая точка, precision/FPR, `failure_examples`), отдаётся по пути `/metrics`; вердикт `watching` подписан «keep watching / не уверены»; тексты постов из `/api/items`; хэндлы реальных аккаунтов маскируются (`@ab***`); в шапке «обновлено N мин назад» из `last_poll_at`; SNR в карточке «`snr_db_single` → `snr_db` дБ»; кнопка «inject test campaign» → `POST /api/inject`. Отдаёт FastAPI.
+**Вход/выход:** `web/index.html` + `web/app.js` (Chart.js), раскладка согласована P1 + P2 ([signal-processing.md §3.9](signal-processing.md#3-согласованный-дизайн-движка-v1-что-строить)). **Главный экран (простой):** переключатель тем (= выбор луча), лента алертов из `/api/alerts`, в карточке светофор + одна фраза («N аккаунтов говорят одно и то же почти одновременно. Целевой уровень ложной тревоги: X%», X = `operating_pfa` из `/api/metrics`, без отчёта 2%), «тело неопределённости» (heatmap из `Finding.ambiguity`: задержка × смысловая расстройка, слои `counts` и `background`), посты, приём + цитата, `Finding.note` (например, «эхо новости»). **Вкладка «Детали»:** heatmap `correlation` с `lag_sec` в подсказке, SNR дБ, SPRT-трасса с порогами `sprt_upper`/`sprt_lower`; `web/metrics.html` из `/api/metrics` (ROC, рабочая точка, Pd от размера роя `pd_by_size`, чистота роя, live precision с интервалом `live_precision_ci`, live FPR, `failure_examples`), отдаётся по пути `/metrics`; вердикт `watching` подписан «keep watching / не уверены»; тексты постов из `/api/items`; хэндлы реальных аккаунтов маскируются (`@ab***`); в шапке «обновлено N мин назад» из `last_poll_at`; SNR в карточке «`snr_db_single` → `snr_db` дБ»; кнопка «inject test campaign» → `POST /api/inject`. Отдаёт FastAPI.
 **Готово, когда:** на `https://<домен>` всё видно без консольных ошибок; инжект → алерт появляется в ленте (обновление поллингом); работает на телефоне.
 **Тесты:** нет (UI не тестируем), `make smoke`.
 **Зависит от:** T8 (данные mock), I1, T11
 
 ### T13 · P2 · сб 19:00
-**Цель:** честные цифры для 40% оценки.
-**Вход/выход:** `eval/run.py`: многократная инжекция `make_campaign` в фон из живого сэмпла/фикстур → прогон `detect` при разных порогах → ROC (pfa, pd), detection rate, рабочая `operating_pfa`, `mean_posts_to_decision`, `mean_seconds_to_decision` → `eval/report.json` (`MetricsReport`, в git; запуск `make eval` с `LTR_EMBEDDER=gemini` и кэшем, сеть разрешена; `embedder` пишется в отчёт, на `hash` — только с `--dev`); инжектируются только **отложенные** сообщения, которых нет в банке шаблонов; `failure_examples` — 3–5 реальных промахов/ложных тревог; `live_fpr`/`live_precision`/`n_labelled` — из разметки T14 (⚙ `eval/labels.csv`); после T14 отчёт пересчитать (может и P1: `make eval` читает только `labels.csv` и фикстуры).
+**Цель:** честные цифры для 40% оценки. Определения: [signal-processing.md §3.10](signal-processing.md#3-согласованный-дизайн-движка-v1-что-строить).
+**Вход/выход:** `eval/run.py`: опыт = окно 6 ч одной темы. Окна **без цели** (живой сэмпл + органика фикстур, размноженные перемешиванием времени) → Pfa = доля окон с любым `coordinated`. Окна **с инжектом** `make_campaign` (отложенные фразы) → Pd = доля окон, где найден `coordinated`, у которого ≥ половины аккаунтов из инжекта и который покрывает ≥ половины аккаунтов инжекта. ROC (pfa, pd) движением порога CFAR `k` через `detect/config.py`, `operating_pfa` (Нейман–Пирсон: наименьший `k` с Pfa ≤ 2%), `detection_rate`, `mean_posts_to_decision`, `mean_seconds_to_decision`, Pd от размера роя (3, 4, 6, 8, 12) → `pd_by_size`, чистота роя → `swarm_purity` → `eval/report.json` (`MetricsReport`, в git; запуск `make eval` с `LTR_EMBEDDER=gemini` и кэшем, сеть разрешена; `embedder` пишется в отчёт, на `hash` — только с `--dev`). «Синтетическую precision» не считаем (зависит от доли окон с целью). `failure_examples` — 3–5 реальных промахов/ложных тревог. Из разметки T14 (⚙ `eval/labels.csv`): `live_precision` = подозрительные/(подозрительные + органика) с интервалом Вильсона (`live_precision_ci`), `live_fpr` = P(алерт | органика) с перевзвешиванием расслоенной выборки по `eval/labels_meta.json`, `n_labelled`; строки, добранные из `watching`, в обе формулы не входят; после T14 отчёт пересчитать (может и P1: `make eval` читает только `labels.csv`, `labels_meta.json` и фикстуры).
 **Готово, когда:** `make eval` офлайн на фикстурах пишет валидный `MetricsReport`; после коммита и `make deploy` `/api/metrics` на VPS его отдаёт.
 **Тесты:** 1 тест: отчёт валиден, ROC монотонна, значения в [0,1].
 **Зависит от:** T9, T10
 
 ### T14 · оба · сб 20:30
 **Цель:** live precision и live FPR на реальных людях.
-**Вход/выход:** рубрика (15 мин) органика / подозрительно / непонятно; `ingest/label_sample.py` (P1, заранее) делает скелет `eval/labels.csv` (`account, topic, alerted, label, note`; `account` — псевдоним; соответствие `псевдоним,хэндл` → `cache/label_handles.csv`, git-ignored): ~25 аккаунтов из алертов + ~25 случайных без алерта из тех же тем, **синтетика исключена**; если реальных алертов < 25 — добираем из `watching` с наибольшим LLR и честно пишем n. Размечаем по реальным хэндлам в БД/дашборде, в файл пишется только псевдоним. До 20:00 разметка, 20:00–20:30 `make eval` + коммит + `make deploy`.
-**Готово, когда:** размечено ≥ 40 аккаунтов, `/api/metrics` показывает `live_precision`, `live_fpr`, `n_labelled`.
+**Вход/выход:** рубрика (15 мин) органика / подозрительно / непонятно; `ingest/label_sample.py` (P1, заранее) делает скелет `eval/labels.csv` (`account, topic, alerted, verdict, label, note`; `verdict` = `coordinated` / `watching` / пусто, `alerted` = 1 только для `coordinated`) и `eval/labels_meta.json` с размерами слоёв по каждой теме `{topic: {n_accounts, n_alerted}}` (реальные аккаунты темы в окне и сколько из них в `coordinated`; нужны для перевзвешивания live FPR, см. [signal-processing.md §3.10](signal-processing.md#3-согласованный-дизайн-движка-v1-что-строить); согласовано P1 + P2); `account` — псевдоним; соответствие `псевдоним,хэндл` → `cache/label_handles.csv`, git-ignored): ~25 аккаунтов из алертов + ~25 случайных без алерта из тех же тем, **синтетика исключена**; если реальных алертов < 25 — добираем из `watching` с наибольшим LLR (`verdict = watching`, в формулы precision и FPR эти строки не входят) и честно пишем n. Размечаем по реальным хэндлам в БД/дашборде, в файл пишется только псевдоним. До 20:00 разметка, 20:00–20:30 `make eval` + коммит + `make deploy`.
+**Готово, когда:** размечено ≥ 40 аккаунтов, `/api/metrics` показывает `live_precision` с интервалом `live_precision_ci`, `live_fpr`, `n_labelled`.
 **Тесты:** нет.
 **Зависит от:** I1 (живые алерты), T13
 
@@ -154,7 +154,7 @@
 
 ### T15 · оба · вс 02:00
 **Цель:** стабильная работа и разумная рабочая точка.
-**Вход/выход:** подбор `alpha`, `beta`, параметров CFAR по ROC из T13 и разметке T14 → дефолты в `detect/pipeline.py`/`.env`; `restart: always` в compose; проверка перезапуска VPS.
+**Вход/выход:** подбор `alpha`, `beta`, CFAR `k`, порогов луча `c_lo`/`c_hi`, `μ1` по ROC из T13 и разметке T14 → дефолты в `detect/config.py`; `restart: always` в compose; проверка перезапуска VPS.
 **Готово, когда:** после `docker compose restart` и ребута всё поднимается само; FPR на живой разметке в пределах выбранной рабочей точки; дефолты записаны в HANDOFF.
 **Тесты:** `make test` + `make smoke`.
 **Зависит от:** T13, T14

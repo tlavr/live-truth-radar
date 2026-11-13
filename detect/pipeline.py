@@ -2,14 +2,19 @@
 
 Intended stages (radar analogy):
   1. Embed item texts (Gemini embeddings), group by topic.            [T7]
-  2. Matched filter: cosine similarity vs per-topic template bank,
-     per-account time series of filter output.                         [T7]
-  3. Account cross-correlation over lags -> pairwise peak matrix.      [T10]
-  4. CFAR: adaptive threshold vs local background -> candidate groups,
-     SNR in dB.                                                        [T10]
-  5. SPRT (Wald) on per-item LLR with error rates alpha/beta ->
-     verdict coordinated / organic / watching, sprt_trace.             [T10]
-  6. Emit Finding objects (explanation is filled later by P1, T11).
+  2. Topic beam (steering vector, main-lobe gain) and whitening:
+     remove the projection on the beam, keep the residual "code".      [T7]
+  3. Pair correlator in time x meaning over lags -> R and lag
+     matrices (no template bank).                                      [T10]
+  4. CFAR over all account pairs of the topic (median / MAD with a
+     floor) -> groups of >= 3 accounts, coherent integration, SNR dB.  [T10]
+  5. SPRT (Wald) on the causal per-post "echo" feature with error
+     rates alpha/beta -> coordinated / organic / watching, sprt_trace;
+     news-echo check caps a group at "watching".                       [T10]
+  6. Emit Finding objects with the ambiguity map and note
+     (explanation is filled later by P1, T11).
+
+Design and parameters: docs/signal-processing.md section 3.
 """
 
 from __future__ import annotations

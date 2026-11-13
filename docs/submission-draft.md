@@ -37,11 +37,12 @@ In radio, a spread-spectrum (CDMA) signal sits **below the noise floor**: no sin
 Coordinated campaigns work the same way. Each bot posts too little to flag alone, but together they share one "code": the same moments of activity, the same message in different words. Detectors that judge **one post at a time** cannot see them. **Live Truth Radar is a receiver for that signal.**
 
 ## The receiver chain
-`Antenna (live web) → front-end (embeddings + activity time series) → filters → detector → explained verdict`
+`Antenna + topic beam (live web) → front-end (embeddings, clutter whitening) → pair correlator (time × meaning) → CFAR + SPRT detector → explained verdict`
 
-- 🎯 **Matched filter bank**: each post is correlated with narrative templates in embedding space, so a message is found even when reworded.
-- 🐝 **CDMA despreading (Spot the swarm)**: account activity becomes 0/1 sequences per minute. Organic users behave like independent random codes; a coordinated group shows a cross-correlation peak at a common lag. Combining the cluster gives a processing gain of roughly N, shown as SNR in dB.
-- 📈 **CFAR alerting**: like radar, the alarm threshold adapts to each topic's own background noise, keeping the false-alarm rate constant for busy and quiet topics alike.
+- 📡 **Beamforming on a topic**: each watched topic is a beam. The Context.dev query steers the antenna, and a steering vector in embedding space keeps on-topic posts in the main lobe and suppresses off-topic sidelobes. Several topics run as parallel beams, each with its own noise floor.
+- 🎯 **Matched filtering in meaning space**: every post is correlated with every other post in embedding space, after whitening out the topic's common background (clutter rejection), so a message is found even when reworded, with no pre-built template bank.
+- 🐝 **CDMA despreading (Spot the swarm)**: each account is a vector signal in time × meaning. Organic users behave like independent random codes; a coordinated group shows a cross-correlation peak at a common lag. Coherently combining the M account pairs of a cluster gives a processing gain of 10·log10(M) dB, shown as SNR before and after.
+- 📈 **CFAR alerting**: like radar, the alarm threshold adapts to each topic's own background (median and spread over all account pairs, an order-statistic CFAR), keeping the false-alarm rate constant for busy and quiet topics alike.
 - ⚖️ **SPRT decision**: a sequential likelihood-ratio test accumulates evidence (text similarity and timing) post by post and decides *coordinated*, *organic* or *keep watching* as early as possible, with error rates α and β that we set.
 - 🎭 **Name the technique**: Gemini reads the whole cluster, labels loaded language, fear appeal, whataboutism and fabricated authority, quotes the key phrase and explains *why* in plain language.
 - 🔗 **Trust the source** [SHOULD]: company identity and cloned branding behind a domain, from Context.dev enrichment.
@@ -52,10 +53,10 @@ We report detection the way radar engineers do:
 - **Test-target injection**: we hide a synthetic coordinated campaign inside the real live stream and measure whether, and how fast, it is detected (**[N] posts / [T] seconds** to decision).
 - A hand-labelled live test set of [N] real accounts, so the false-alarm rate is measured on real people, separately from the synthetic tests.
 
-Current results: **detection [X]% of injected campaigns at [Pfa]%; live FPR [Z], precision [P]** on the labelled set. Known failure cases are listed on the metrics page. When evidence is weak, the verdict stays *"keep watching"* instead of accusing a real person. Injected test messages are never in the detector's template bank, so the scores are not circular.
+Current results: **detection [X]% of injected campaigns at [Pfa]%; live FPR [Z], precision [P] (95% interval [lo–hi])** on the labelled set. Known failure cases are listed on the metrics page. When evidence is weak, the verdict stays *"keep watching"* instead of accusing a real person. The detector has no template bank and is never trained on the synthetic campaigns, so the scores are not circular. Precision is reported only on hand-labelled live accounts, because on synthetic tests it depends on how often we inject.
 
 ## Explainable verdicts
-Each alert shows the evidence a human can check in seconds: the correlated accounts and their timing, the reworded posts that matched, the quoted key phrase, the source data, the SNR and the SPRT trace showing when the decision was made.
+Each alert shows the evidence a human can check in seconds: the correlated accounts and their timing, the reworded posts that matched, the quoted key phrase, the source data, and an ambiguity map (time lag × semantic mismatch) where a coordinated group shows up as one sharp peak; the SNR and the SPRT trace showing when the decision was made sit on a details tab.
 
 ## Deployed live on Hostinger
 Docker Compose on a Hostinger VPS with a public HTTPS domain: FastAPI, a detector worker and Postgres. The worker polls Context.dev every few minutes, so alerts follow the live web. Gemini is the main model, with Hostinger AI Router as a fallback. Public dashboard and REST API.
@@ -66,7 +67,7 @@ Docker Compose on a Hostinger VPS with a public HTTPS domain: FastAPI, a detecto
 
 ## Partner technology
 - **Hostinger**: VPS, domain and AI Router host the whole live system.
-- **Context.dev**: our antenna. Social scrape gives posts with authors and timestamps, which is what turns accounts into activity codes for despreading; news search gives the fresh articles that define each narrative. [SHOULD: Brand and company enrichment tells who is behind a domain.]
+- **Context.dev**: our antenna. Social scrape gives posts with authors and timestamps, which is what turns accounts into activity codes for despreading; news search gives the fresh articles, which also let us tell a real coordinated push from an honest reaction to breaking news. [SHOULD: Brand and company enrichment tells who is behind a domain.]
 - **Gemini**: embeddings for the matched filters, and long-context reasoning over a whole swarm cluster to name the technique and explain the verdict with quoted evidence. It judges the group, not one post, which is exactly what despreading needs, and it also writes the synthetic test campaigns we inject. Without long context we could only explain single posts.
 - **[ONLY IF TRUE] OpenAI Codex**: wrote [the detectors]; see `docs/codex-log.md`.
 
@@ -76,7 +77,7 @@ Fact-checking with source fusion, cross-country geo echo, change watch for silen
 *Team The Kerfufflers · Junction 2026*
 ```
 
-**[ALT] для Context.dev, если на T2 у social scrape нет автора или времени:** заменить в пункте Context.dev предложение «Social scrape gives … define each narrative.» на *"News search gives fresh articles with authors and timestamps, which become the activity codes for despreading."* И добавить в «Honest, measurable detection»: *"Swarm detection is demonstrated on injected synthetic accounts; in the live stream, 'accounts' are news authors and domains."*
+**[ALT] для Context.dev, если на T2 у social scrape нет автора или времени:** заменить в пункте Context.dev предложение «Social scrape gives … breaking news.» на *"News search gives fresh articles with authors and timestamps, which become the activity codes for despreading."* И добавить в «Honest, measurable detection»: *"Swarm detection is demonstrated on injected synthetic accounts; in the live stream, 'accounts' are news authors and domains."*
 
 ## Как текст закрывает критерии Hostinger
 | Критерий | Вес | Где |
@@ -98,7 +99,7 @@ Fact-checking with source fusion, cross-country geo echo, change watch for silen
 | Время | Кадр |
 |---|---|
 | 0:00–0:15 | «Боты шепчут ниже уровня шума»: поодиночке аккаунты не видны |
-| 0:15–0:50 | Инжекция тестовой кампании в живой поток → heatmap корреляции загорается → SNR из [−x] дБ в [+y] дБ (реальные числа из демо) |
+| 0:15–0:50 | Инжекция тестовой кампании в живой поток → на карте «задержка × смысловая расстройка» вырастает острый пик → SNR из [x] дБ (одна пара) в [y] дБ (весь рой) (реальные числа из демо) |
 | 0:50–1:10 | SPRT-трасса: решение «coordinated» на [k]-м посте |
 | 1:10–1:30 | Карточка: приём манипуляции с подсветкой фраз (+ источник, если S1 сделан) |
 | 1:30–1:50 | ROC-кривая и рабочая точка |
