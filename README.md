@@ -6,7 +6,7 @@
 
 ## Challenges
 - **Main:** Decode the Noise (Hostinger)
-- **Tech:** Context.dev (core), Oxylabs, Gemini, Codex
+- **Tech:** Context.dev (core), Oxylabs, Gemini (Codex maybe later)
 
 ## The idea
 Coordinated propaganda behaves like a spread-spectrum (CDMA) signal: each bot account is too weak to flag alone, but together they carry one "code". Live Truth Radar applies radar and signal-processing math to the live web:
@@ -23,7 +23,7 @@ Receiver chain: `live web (Context.dev) → embeddings + activity time series �
 All docs are in `docs/` (in Russian):
 - `docs/HANDOFF.md` – start here: what we build, deadlines, checklist.
 - `docs/challenge-decode-the-noise.md` – main challenge (Hostinger): task, requirements, judging.
-- `docs/tech-challenges.md` – Context.dev, Oxylabs, Gemini, Codex: what counts.
+- `docs/tech-challenges.md` – Context.dev, Oxylabs, Gemini (+ optional tools): what counts.
 - `docs/signal-processing.md` – the signal-processing approach.
 - `docs/architecture.md` – modules, data, demo script, metrics.
 - `docs/submission-draft.md` – Junction submission text.

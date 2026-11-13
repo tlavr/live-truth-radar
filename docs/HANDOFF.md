@@ -6,7 +6,7 @@
 **Live Truth Radar** — «радар» для онлайн-манипуляций: смотрит на живой веб, находит координированные бот-кампании и приёмы пропаганды и объясняет каждый вердикт с источниками и честными метриками ложных срабатываний. Подход взят из обработки сигналов (matched filter, CDMA-деспрединг, CFAR, SPRT).
 
 - **Основной челлендж:** Decode the Noise (Hostinger) → [challenge-decode-the-noise.md](challenge-decode-the-noise.md)
-- **Тех-челленджи:** Context.dev (ядро), Oxylabs, Gemini, Codex → [tech-challenges.md](tech-challenges.md)
+- **Тех-челленджи:** Context.dev (ядро), Oxylabs, Gemini (Codex: возможно позже) → [tech-challenges.md](tech-challenges.md)
 - **Подход:** [signal-processing.md](signal-processing.md) · **Архитектура:** [architecture.md](architecture.md)
 - **Текст сабмита:** [submission-draft.md](submission-draft.md)
 
@@ -30,7 +30,7 @@
 - **Метрики** (precision, FPR) на размеченных данных: это 40% оценки Hostinger.
 - Для Context.dev: заметка «какие эндпоинты и зачем»; `maxAgeMs: 0` для свежих данных.
 - Для Oxylabs: живой вызов в демо + URL источников; **отменить подписку после**.
-- Для Codex: скриншоты/лог, как помогал строить.
+- Codex пока не используем (код пишем с Claude). Если подключим, ведём скриншоты и лог.
 - Коды и ключи **не коммитим**: они в Junction Hackerpack и в `.env` (git-ignored).
 
 ## 5. Открытые вопросы
@@ -41,7 +41,7 @@
 ```
 Мы команда "The Kerfufflers" на Junction 2026 (Espoo, 13–15.11.2026), проект Live Truth Radar.
 Прочитай docs/HANDOFF.md, затем docs/signal-processing.md и docs/architecture.md.
-Основной челлендж: Decode the Noise (Hostinger). Тех: Context.dev, Oxylabs, Gemini, Codex.
+Основной челлендж: Decode the Noise (Hostinger). Тех: Context.dev, Oxylabs, Gemini (Codex возможно позже).
 Финальный сабмит: воскресенье 10:00 (Хельсинки).
 Отвечай по-русски: коротко, точно, с примерами, дружелюбно.
 Следующий шаг: <впиши, что нужно>.
