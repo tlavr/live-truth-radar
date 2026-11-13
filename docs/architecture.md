@@ -12,8 +12,8 @@
 ## Объём: MUST / SHOULD / CUT
 | Уровень | Что | Когда |
 |---|---|---|
-| **MUST** | Ingest (Context.dev news search + social scrape, поллинг каждые 2–5 мин, 3–5 тем), Swarm Detector (эмбеддинги → matched filter → корреляция → CFAR → SPRT, SNR в дБ), объяснение вердикта Gemini (приём + цитата + уверенность), Eval (инжекция синтетического роя + ~50 размеченных живых аккаунтов), дашборд на одну страницу + `/metrics` + кнопка инжекции, деплой на Hostinger | К Сб 19:00–21:00 (T0–T14, I1) |
-| **SHOULD** | Только **S1** — Source Trust через Context.dev brand/company (P1) | Только если весь MUST готов к Сб 20:00; дедлайн Вс 01:00 |
+| **MUST** | Ingest (Context.dev news search + social scrape, поллинг каждые 2–5 мин, 3–5 тем), Swarm Detector (эмбеддинги → matched filter → корреляция → CFAR → SPRT, SNR в дБ), объяснение вердикта Gemini (приём + цитата + уверенность), Eval (инжекция синтетического роя + ~50 размеченных живых аккаунтов), дашборд на одну страницу + `/metrics` + кнопка инжекции, деплой на Hostinger | К Сб 19:00–20:30 (T0–T14, I1) |
+| **SHOULD** | Только **S1** — Source Trust через Context.dev brand/company (P1) | Только если весь MUST, кроме T14, готов к Сб 20:00; дедлайн Вс 01:00; отдельный `GET /api/source/{domain}` |
 | **CUT** | Oxylabs (целиком, включая гео-`/search`); SemEval; Context.dev scrape полного текста, monitors/webhooks (заменены поллингом), research, structured extraction; Fact-check, Change Watch; Gemma, Nemotron, Modal / Verda, Aiven, CRACI; спектрограммы, delay-Doppler, MMSE-фьюжн; бот-датасеты TwiBot/Cresci | Только в слайд «что дальше» |
 
 *Это канонический список уровней: остальные файлы на него ссылаются.*
@@ -39,7 +39,7 @@
 |---|---|---|---|---|---|---|
 | 0 | **Live Ingest** | MUST | P1 | `ingest/` | Каждые 2–5 мин тянет свежие статьи и посты по 3–5 темам, сохраняет текст, автора, время, URL как `Item` | Context.dev news search + social scrape |
 | 1 | **Swarm Detector** | MUST | P2 | `detect/` | Matched filter (банк шаблонов нарративов по эмбеддингам) → кросс-корреляция активности аккаунтов → CFAR (всплеск) → SPRT (решение) + SNR в дБ → `Finding` | Gemini embeddings + numpy/scipy (возможно, Codex) |
-| 2 | **Explain / Technique** | MUST | P1 | `api/` / worker | Для `Finding`: приём манипуляции + цитата-доказательство + уверенность + объяснение простыми словами → `Explanation` | Gemini structured output; AI Router запасной |
+| 2 | **Explain / Technique** | MUST | P1 | `ingest/explain.py` (в worker) | Для `Finding`: приём манипуляции + цитата-доказательство + уверенность + объяснение простыми словами → `Explanation` | Gemini structured output; AI Router запасной |
 | S | **Synthetic Swarm** | MUST | P2 | `synth/` | ~30 вариаций одного месседжа, фейковые аккаунты с лагами, `synthetic = true`, `campaign_id` | Gemini |
 | E | **Eval Harness** | MUST | P2 | `eval/` | ROC (Pd vs Pfa), доля найденных, постов/секунд до решения → `MetricsReport`; live FPR / precision по разметке | numpy |
 | UI | **Radar Dashboard** | MUST | P1 | `web/` | Лента алертов, карточка вердикта (посты, heatmap корреляции, SNR, SPRT-трасса, приём), `/metrics`, кнопка «инжектировать тестовую кампанию» | Статический HTML + JS + Chart.js, отдаёт FastAPI |
@@ -61,10 +61,12 @@ Makefile                  `make test` (pytest, без сети, <5 с), `make sm
 ```
 Слои связаны **одним контрактом** — pydantic v2 в [`contracts/models.py`](../contracts/models.py) (источник истины, здесь только кратко):
 - `Item` — пост/статья: `source` (`context_social` / `context_news` / `synthetic`), `author`, `published_at` (UTC), `text`, `url`, `topic`, `synthetic`, `campaign_id` (ground truth только у синтетики).
-- `Finding` — вердикт (`coordinated` / `organic` / `watching`), `accounts`, `item_ids`, `llr`, `snr_db`, `sprt_trace`, `decided_at_item`, `correlation` (квадратная матрица в порядке `accounts`, для heatmap), `explanation: Explanation | None` (`technique`, `quote`, `confidence`, `summary`), `synthetic`.
+- `Finding` — вердикт (`coordinated` / `organic` / `watching`), `accounts`, `item_ids`, `llr`, `snr_db`, `sprt_trace`, `sprt_upper` / `sprt_lower` (пороги для графика), `decided_at_item`, `first_seen` / `last_seen`, `correlation` и `lag_sec` (квадратные матрицы в порядке `accounts`, для heatmap), `id` = `finding_id(topic, accounts)` (стабильный), `explanation: Explanation | None` (`technique`, `quote`, `confidence`, `summary`), `synthetic`.
 - `AlertsResponse`, `MetricsReport` (ROC, detection rate, рабочая Pfa, постов/секунд до решения, live FPR / precision, `n_labelled`).
 - Вход детектора (P2): `detect.pipeline.detect(items, *, alpha=0.02, beta=0.1) -> list[Finding]`.
 - API (P1): `GET /health`, `GET /api/alerts` → `AlertsResponse`, `GET /api/metrics` → `MetricsReport`, `POST /api/inject` (кнопка демо).
+
+Интерфейсы вне контракта (генератор для `/api/inject`, `eval/report.json`, `eval/labels.csv`, `/api/source/{domain}`, расположение worker): [HANDOFF.md §5](HANDOFF.md#5-план-по-задачам).
 
 P2 работает офлайн на `fixtures/` (без сети и БД), P1 — с мок-детектором до интеграции **I1 (Сб 15:00)**. Подробнее: [workflow.md](workflow.md).
 
@@ -73,7 +75,7 @@ P2 работает офлайн на `fixtures/` (без сети и БД), P1 
 |---|---|
 | `caddy` | Reverse proxy + автоматический HTTPS для домена Hostinger |
 | `api` | Python, FastAPI: REST для дашборда, отдаёт статический дашборд |
-| `worker` | Python: поллинг Context.dev, детекторы (numpy/scipy), вызовы Gemini, eval |
+| `worker` | Python (`ingest/worker.py`): поллинг Context.dev, `detect()` (numpy/scipy), объяснения Gemini. Eval гоняет P2 отдельно (`python -m eval.run` → `eval/report.json`) |
 | `db` | Postgres + pgvector |
 
 Фронт без сборки (HTML + JS + Chart.js), чтобы не тратить время на тулчейн. Это решение по умолчанию: если в команде есть человек, который быстро делает React, можно поменять, не трогая остальное.
