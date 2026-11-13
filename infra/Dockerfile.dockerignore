@@ -1,0 +1,12 @@
+# Used by BuildKit for infra/Dockerfile (context = repo root). Keep secrets and caches out of the image.
+.env
+.env.*
+*.key
+cache/
+.git/
+.venv/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+node_modules/
+*.zip
