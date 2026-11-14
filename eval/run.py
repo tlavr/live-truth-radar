@@ -18,7 +18,7 @@ One trial = one 6-hour window of one topic (docs/signal-processing.md section 3.
     Pd = share of inject windows with a `coordinated` finding whose accounts are >= half injected
     AND which covers >= half of the injected accounts.
   * ROC: (Pfa, Pd) while sweeping the CFAR threshold k (alpha, beta fixed); the same windows are
-    reused for every k. Operating point: the smallest k with Pfa <= 2%.
+    reused for every k. Operating point: the k with the largest Pd among those with Pfa <= 2% (ties: larger k).
 
 Run: `make eval` (LTR_EMBEDDER=gemini with the cache in cache/embeddings/; network only for
 missing embeddings). The hashing embedder is refused unless --dev.
@@ -420,13 +420,12 @@ def build_report(
 
     ok = [k for k, (pfa, _) in zip(ks, points) if pfa <= TARGET_PFA]
     if ok:
-        k_op = min(ok)
-        if k_op == min(ks):
-            log.warning(
-                "operating point k=%.2f is the edge of the grid (Pfa there %.3f < %.0f%%): the 2%% constraint "
-                "does not bind, the true Neyman-Pearson k may be lower; extend the grid or use a harder background",
-                k_op, points[ks.index(k_op)][0], 100 * TARGET_PFA,
-            )
+        # Neyman-Pearson: the largest Pd among the admissible k; a tie goes to the larger (safer) k.
+        # Pd is not monotone in k here: a very low k merges the swarm with background accounts (purity fails).
+        k_op = max(ok, key=lambda k: (points[ks.index(k)][1], k))
+        if len(ok) == len(ks):
+            log.warning("every k on the grid has Pfa <= %.0f%%: the constraint does not bind on this background, "
+                        "k=%.2f is chosen by Pd alone", 100 * TARGET_PFA, k_op)
     else:
         k_op = max(ks)
         log.warning("no k reaches Pfa <= %.0f%%; operating point = largest k %.2f", 100 * TARGET_PFA, k_op)

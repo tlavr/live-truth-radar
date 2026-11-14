@@ -9,7 +9,11 @@ from contracts.models import MetricsReport
 from eval.run import WINDOW, WINDOW_BASE, background_window, build_report, load_background, roc_curve
 
 
-def test_report_valid_roc_monotone_values_in_unit_interval(tmp_path):
+SMALL_BACKGROUND = ("items.json", "items_live_sample.json")  # tests stay < 5 s without the 48 h live export
+
+
+def test_report_valid_roc_monotone_values_in_unit_interval(tmp_path, monkeypatch):
+    monkeypatch.setattr("eval.run.BACKGROUND_FILES", SMALL_BACKGROUND)
     (tmp_path / "labels.csv").write_text(
         "account,topic,alerted,verdict,label,note\n"
         "acct-1,helsinki-tram-fares,1,coordinated,suspicious,\n"
