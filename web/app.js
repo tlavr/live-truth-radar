@@ -695,10 +695,11 @@ async function setMapAt(at) {
       `${asked === DESIGN_ALPHA ? '' : `&alpha=${asked}`}${live ? '' : `&at=${encodeURIComponent(new Date(end).toISOString())}`}`);
   } catch (e) {
     console.warn('timemap', e);
-    if (seq === mapSeq) { S.mapAt = S.drawnAt; S.mapPending = false; }  // state = what is drawn; refresh retries
+    if (seq === mapSeq) { S.mapAt = S.drawnAt; S.mapPending = false; }  // state = what is drawn (no map yet: refresh retries)
     return;
   }
-  if (seq !== mapSeq || S.topic !== topic || S.alpha !== asked) return;
+  if (seq !== mapSeq) return;  // a newer request owns the state
+  if (S.topic !== topic || S.alpha !== asked) { S.mapAt = S.drawnAt; S.mapPending = false; return; }
   S.mapPending = false; S.drawnAt = at;
   scrollTw?.kill();
   const hadMap = !!S.tmap, endMs = Date.parse(r.now);
