@@ -17,12 +17,13 @@ class AnalyzerConfig:
     # Topic beam (3.2a): gain b = clip((<e, a> - c_lo) / (c_hi - c_lo), 0, 1).
     # c_lo/c_hi are for the hashing embedder (tests, fallback); Gemini cosines live on another
     # scale, so detect() switches to gemini_c_lo/gemini_c_hi when Gemini produced the vectors
-    # (for_embedder). Gemini values: `python -m detect.calibrate_beam` on fixtures (sat 14.11);
-    # recheck on the live sample (T15).
+    # (for_embedder). Gemini values: `python -m detect.calibrate_beam` on fixtures (sat 14.11):
+    # off-topic q50 / q90 on the organic beam. The earlier 0.81/0.88 cut the gain of on-topic
+    # swarm posts in half (eval/report.json pd_by_size, 3 accounts: 0.28 -> 0.60). Recheck on the live sample (T15).
     c_lo: float = 0.15
     c_hi: float = 0.35
     gemini_c_lo: float = 0.81
-    gemini_c_hi: float = 0.88
+    gemini_c_hi: float = 0.83
     # Share of accounts (least aligned with the beam) dropped by the robust mean.
     beam_trim: float = 0.2
     # Whitening (3.3): residual norm below this -> zero vector ("pure topic" post).
