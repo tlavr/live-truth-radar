@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS findings (
     lag_sec         jsonb,
     explanation     jsonb,
     synthetic       boolean NOT NULL DEFAULT false,
+    ambiguity       jsonb,
+    note            text,
     CHECK (sprt_lower < sprt_upper),
     CHECK (first_seen <= last_seen)
 );
@@ -61,6 +63,7 @@ CREATE TABLE IF NOT EXISTS labels (
     account     text NOT NULL,
     topic       text NOT NULL,
     alerted     boolean NOT NULL,
+    verdict     text CHECK (verdict IN ('coordinated', 'watching')),  -- NULL = no finding for the account
     label       text CHECK (label IN ('organic', 'suspicious', 'unclear')),
     note        text,
     labelled_at timestamptz NOT NULL DEFAULT now(),

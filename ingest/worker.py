@@ -15,7 +15,8 @@ log = logging.getLogger("ltr.worker")
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
-    interval = int(os.environ.get("POLL_INTERVAL_SEC") or 180)
+    raw = os.environ.get("POLL_INTERVAL_SEC") or "180"
+    interval = int(raw) if raw.isdigit() and int(raw) > 0 else 180  # bad config must not spin or crash-loop
     stop = threading.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: stop.set())
