@@ -214,7 +214,7 @@ def topics() -> list[str]:
     return [t.strip() for t in (os.environ.get("TOPICS") or "").split(",") if t.strip()]
 
 
-# ---------------------------------------------------------------- T12d: live scan + red team console
+# ---------------------------------------------------------------- T12d: live scan + Bot Hive (attack simulator, /redteam)
 
 
 class ScanRequest(BaseModel):
@@ -328,7 +328,7 @@ def _attack_campaign(topic: str, click: datetime, n_accounts: int, scenario: str
       (lags 15-120 s -> 4-30 s, second volley after ~2 min);
     * copypasta: every post carries the very same text, DEMO_SPEED x faster (spike at zero lag, zero wording gap);
     * drift: real speed, texts drift away from the first one over time (ridge along lag x wording gap).
-    Labelled in the console; eval and /metrics keep P2's real schedule and texts."""
+    Labelled in Bot Hive; eval and /metrics keep P2's real schedule and texts."""
     from synth.campaign import make_campaign
 
     speed = SCENARIO_SPEED[scenario]
@@ -383,7 +383,7 @@ def attack_topics() -> list[str]:
 
 @app.post("/api/attack", response_model=AttackResponse)
 def attack(req: AttackRequest) -> AttackResponse:
-    """Red team console (public; the product itself has no inject button): a synthetic swarm whose posts appear one
+    """Bot Hive (public; the product itself has no inject button): a synthetic swarm whose posts appear one
     by one from now on (at DEMO_SPEED ~2.5 / 6.5 / 10.5 min for 2 / 4 / 6 posts per bot); one attack per 5 min per topic (429 with Retry-After)."""
     if req.topic not in _attack_topics():
         raise HTTPException(status_code=400, detail=f"topic {req.topic!r} is not monitored or has no variations")

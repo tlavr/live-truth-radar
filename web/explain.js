@@ -39,7 +39,7 @@ function head(f, list) {
     ? ` · <label class="sr" for="group">Group</label><select id="group">${list.map((g, i) => `<option value="${esc(g.id)}"${g === f ? ' selected' : ''}>${esc(optionText(g, i))}</option>`).join('')}</select>`
     : '');
   h.dataset.v = held ? 'watching' : f.verdict; h.textContent = title;
-  $('intro').textContent = `${text}${f.synthetic ? ' This is a simulated attack from the red team console.' : ''} Below: every step the detector took, in order.`;
+  $('intro').textContent = `${text}${f.synthetic ? ' This is a simulated attack from Bot Hive, the attack simulator.' : ''} Below: every step the detector took, in order.`;
   $('back').href = `/?q=${encodeURIComponent(f.topic)}`;
   document.title = `Live Swarm Radar · ${title}${list.length > 1 ? ` · group ${LETTER(k)}` : ''}`;
   // another group of the same topic: same page, same sensitivity
