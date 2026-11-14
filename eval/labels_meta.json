@@ -1,0 +1,22 @@
+{
+ "europe-bomb-threat-hoaxes": {
+  "n_accounts": 11,
+  "n_alerted": 0
+ },
+ "france-riots": {
+  "n_accounts": 8,
+  "n_alerted": 0
+ },
+ "jensen-huang-resignation": {
+  "n_accounts": 2,
+  "n_alerted": 0
+ },
+ "microsoft-global-outage": {
+  "n_accounts": 54,
+  "n_alerted": 0
+ },
+ "ukraine-peace-talks": {
+  "n_accounts": 7,
+  "n_alerted": 0
+ }
+}
