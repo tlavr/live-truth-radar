@@ -2,7 +2,7 @@
 
 Radar-style detector of coordinated narrative campaigns ("swarms") in live news/social streams; Junction 2026, Decode the Noise (Hostinger). Live public URL on Hostinger VPS is mandatory.
 
-**Stack:** Python 3.11+, pydantic v2, numpy, scipy, FastAPI, pytest · Postgres · Docker Compose + caddy (HTTPS) · Context.dev (ingest) · Gemini (embeddings, explanations; AI Router fallback) · static HTML+JS+Chart.js dashboard.
+**Stack:** Python 3.11+, pydantic v2, numpy, scipy, FastAPI, pytest · Postgres · Docker Compose + caddy (HTTPS) · Context.dev news + Bluesky searchPosts (ingest) · Gemini (embeddings, explanations; AI Router fallback) · static HTML+JS+Chart.js dashboard.
 
 ## Layout and ownership
 ```

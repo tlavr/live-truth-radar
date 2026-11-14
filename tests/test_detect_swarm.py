@@ -452,3 +452,43 @@ def test_inject_into_news_only_topic_stays_coordinated():
     hits = [f for f in detect(news + injected) if f.verdict == "coordinated"]
     assert len(hits) == 1 and hits[0].synthetic and hits[0].note is None
     assert set(hits[0].accounts) == {it.author for it in injected}
+
+
+def _meme_waves(n_waves: int = 4, per_wave: int = 6) -> list[Item]:
+    """A viral meme: waves of real people (context_social) posting it almost verbatim, one hour apart."""
+    organic = [it for it in _items("items.json") if not it.synthetic]
+    t0 = datetime(2026, 11, 13, 16, 0, tzinfo=timezone.utc)
+    meme = "The person responsible for the tram fare rise in Helsinki. Wrong answers only."
+    return organic + [
+        Item(id=f"meme-{w}-{k}", source="context_social", author=f"fan_{w}_{k}", topic=TOPIC,
+             published_at=t0 + timedelta(hours=w, seconds=40 * k + 5 * k * k), text=meme)
+        for w in range(n_waves) for k in range(per_wave)
+    ]
+
+
+def _later_waves(findings):
+    return [f for f in findings if any(a.startswith("fan_") and not a.startswith("fan_0_") for a in f.accounts)]
+
+
+def test_viral_echo_caps_later_waves_of_a_meme():
+    off = _later_waves(detect(_meme_waves(), cfg=replace(DEFAULT, viral_echo_enabled=False)))
+    assert any(f.verdict == "coordinated" for f in off)  # without the rule a meme wave looks like copypasta
+    on = _later_waves(detect(_meme_waves()))
+    assert on and all(f.verdict != "coordinated" for f in on)
+    assert any(f.note and f.note.startswith("viral echo: The person responsible") for f in on)
+
+
+def test_viral_echo_leaves_a_fresh_campaign_and_a_second_inject_alone():
+    background = _meme_waves()
+    injected = make_campaign(TOPIC, datetime(2026, 11, 13, 19, 30, tzinfo=timezone.utc), n_accounts=12, seed=1)
+    hits = [f for f in detect(background + injected) if f.synthetic and f.verdict == "coordinated"]
+    assert len(hits) == 1 and hits[0].note is None  # a new message: nobody outside said it before
+    # injected posts are not live-stream posts: an earlier inject is no "prior spread" for a later one
+    now = datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc)
+    two = make_campaign(TOPIC, now) + make_campaign(TOPIC, now + timedelta(minutes=20))
+    assert len([f for f in detect(background + two) if f.verdict == "coordinated" and f.synthetic]) == 2
+
+
+def test_viral_echo_is_off_without_social_posts():
+    alt = [it.model_copy(update={"source": "context_news"}) for it in _meme_waves()]
+    assert not [f for f in detect(alt) if f.note and f.note.startswith("viral echo")]

@@ -244,27 +244,13 @@ def test_failing_extra_alpha_never_loses_the_main_findings(monkeypatch):
 
 
 def test_reddit_source_is_off_by_default(monkeypatch):
-    calls = []
-
-    class Client:
-        def news_search(self, query, since):
-            calls.append("news")
-            return {}
-
-        def reddit_search(self, query):
-            calls.append("reddit")
-            return {}
-
-    monkeypatch.setattr(worker, "news_to_items", lambda resp, topic: [])
-    monkeypatch.setattr(worker, "reddit_to_items", lambda resp, topic: [])
+    monkeypatch.setattr(worker, "_get_client", lambda: object())
+    monkeypatch.setenv("BLUESKY_ENABLED", "0")
     monkeypatch.delenv("REDDIT_ENABLED", raising=False)
-    assert worker.fetch_topic(Client(), "jensen-huang-resignation", since=None) == []
-    assert calls == ["news"]  # no Context.dev request units spent on the failing reddit scrape
-
-    calls.clear()
+    # no Context.dev request units spent on the failing reddit scrape
+    assert [s.name for s in worker.active_sources(6)] == ["news"]
     monkeypatch.setenv("REDDIT_ENABLED", "1")
-    worker.fetch_topic(Client(), "jensen-huang-resignation", since=None)
-    assert calls == ["news", "reddit"]
+    assert [s.name for s in worker.active_sources(6)] == ["news", "reddit"]
 
 
 def test_no_stale_cleanup_without_topics(monkeypatch):
@@ -537,7 +523,7 @@ def test_ingest_cycle_warms_each_topic_before_its_items_become_visible(monkeypat
         def commit(self):
             ev.append("commit")
 
-    def fetch(client, topic, since):
+    def fetch(sources, topic, sinces):
         return [Item(id=topic, source="context_news", author="x.com", published_at=datetime.now(timezone.utc),
                      text=f"text {topic}", topic=topic)]
 
@@ -546,9 +532,8 @@ def test_ingest_cycle_warms_each_topic_before_its_items_become_visible(monkeypat
         raise RuntimeError("Gemini down")  # must not block the upsert
 
     monkeypatch.setenv("TOPICS", "a,b")
-    monkeypatch.setattr(worker, "_get_client", lambda: object())
+    monkeypatch.setattr(worker, "active_sources", lambda window_h: [worker.Source("news", lambda conn, t, now: None, lambda t, since: [])])
     monkeypatch.setattr(worker, "fetch_topic", fetch)
-    monkeypatch.setattr(worker.store, "latest_published", lambda conn, t, s: None)
     monkeypatch.setattr(worker.store, "upsert_items", lambda conn, items: ev.append(f"upsert {items[0].topic}") or 1)
     monkeypatch.setattr(worker.store, "set_last_poll", lambda conn: ev.append("last_poll"))
     import detect.embed

@@ -27,6 +27,7 @@ from detect.config import DEFAULT as DEFAULT_CFG
 from detect.pipeline import drop_expired_synthetic
 from detect.timemap import TimeMap, time_map
 from ingest import radar, store
+from ingest.contextdev import mask_handles
 
 log = logging.getLogger("ltr.api")
 
@@ -62,7 +63,8 @@ def public_item(it: Item) -> Item:
         return it
     # a social post URL contains the handle; article URLs (news) are public and kept
     url = None if it.source == "context_social" else it.url
-    return it.model_copy(update={"author": mask_handle(it.author), "url": url})
+    # posts mention other accounts (@bob.bsky.social, bsky.app/profile/... links): masked in the text too
+    return it.model_copy(update={"author": mask_handle(it.author), "url": url, "text": mask_handles(it.text)})
 
 
 def public_finding(f: Finding, fake: set[str]) -> Finding:

@@ -164,9 +164,8 @@ def test_ingest_cycle_survives_bad_topic(monkeypatch):
 
     upserted, polled = [], []
     monkeypatch.setenv("TOPICS", "a,c,q,dead,b")
-    monkeypatch.setattr(worker, "_get_client", lambda: object())
-    monkeypatch.setattr(worker.store, "latest_published", lambda *a: None)
-    monkeypatch.setattr(worker, "fetch_topic", lambda c, topic, since: None if topic == "dead" else [topic])
+    monkeypatch.setattr(worker, "active_sources", lambda window_h: [worker.Source("news", lambda conn, t, now: None, lambda t, since: [])])
+    monkeypatch.setattr(worker, "fetch_topic", lambda srcs, topic, sinces: None if topic == "dead" else [topic])
     monkeypatch.setattr(worker.store, "set_last_poll", lambda conn: polled.append(1))
 
     def bad_upsert(conn, items):
