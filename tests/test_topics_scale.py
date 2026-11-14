@@ -355,6 +355,9 @@ def test_no_urgent_cycles_without_a_paid_source(monkeypatch):
 
 GATE_CASES = [  # (topic, headline, passes the keyword gate)
     ("deportations", "Real Madrid beat Deportivo 3-1", False),
+    ("climate-change", "Thousands rally to demand climate justice as COP31 talks hit midpoint", True),
+    ("climate-change", "Thousands march in Dublin over climate inaction", True),
+    ("climate-change", "SpaceX carries out first-ever spaceship capture", False),
     ("deportations", "Judge halts deportations to Sudan", True),
     ("deportations", "Migrants deported overnight", True),
     ("musk", "Colonial musket found in a barn", False),

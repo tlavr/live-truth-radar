@@ -362,7 +362,7 @@ TOPIC_SPECS: dict[str, tuple[str, list[list[str]]]] = {
         "COP31 climate summit",
         [["cop31", "cop 31", "climate summit", "climate talks", "climate conference"]],
     ),
-    "climate-change": ("climate change", [["climate change", "global warming", "climate crisis"]]),
+    "climate-change": ("climate change", [["climate", "global warming"]]),  # "climate justice / deal / inaction"
     "vaccines": ("vaccines", [["vaccin"]]),
     "abortion": ("abortion", [["abortion"]]),
     "bird-flu": ("H5N1 bird flu", [["bird flu", "h5n1", "avian flu", "avian influenza"]]),
