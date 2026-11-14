@@ -23,9 +23,11 @@ def _item(topic: str, author: str, k: int, synthetic: bool = False) -> Item:
                 published_at=T, text="x", topic=topic, synthetic=synthetic)
 
 
+TEMPLATE = TypeAdapter(list[Finding]).validate_json(FIX.read_text())[0]
+
+
 def _finding(topic: str, verdict: str, accounts: list[str], llr: float = 0.0, synthetic: bool = False) -> Finding:
-    template = TypeAdapter(list[Finding]).validate_json(FIX.read_text())[0]
-    return template.model_copy(update={"id": f"{topic}-{verdict}-{accounts[0]}", "topic": topic, "verdict": verdict,
+    return TEMPLATE.model_copy(update={"id": f"{topic}-{verdict}-{accounts[0]}", "topic": topic, "verdict": verdict,
                                        "accounts": accounts, "llr": llr, "synthetic": synthetic})
 
 
@@ -84,13 +86,22 @@ def test_refuses_without_salt(world):
         build_sample(items, findings, "")
 
 
-def test_alerted_sample_is_simple_random_over_topics():
-    """Precision pools topics: a big topic must not be cut to the share of a small one."""
-    items = [_item("big", f"x{i}", 0) for i in range(40)] + [_item("small", f"y{i}", 0) for i in range(5)]
-    findings = [_finding("big", "coordinated", [f"x{i}" for i in range(40)]),
-                _finding("small", "coordinated", [f"y{i}" for i in range(5)])]
-    picks = [r["topic"] for r in build_sample(items, findings, SALT, n_alerted=20, n_quiet=0).rows]
-    assert len(picks) == 20 and picks.count("big") > 12
+def test_alerted_split_is_proportional_and_keeps_every_topic():
+    """Precision pools topics (big topic keeps its share); live FPR needs >= 1 alerted label per topic."""
+    sizes = {"big": 40, "mid": 8, "small": 2}
+    items = [_item(t, f"{t}{i}", 0) for t, k in sizes.items() for i in range(k)]
+    findings = [_finding(t, "coordinated", [f"{t}{i}" for i in range(k)]) for t, k in sizes.items()]
+    picks = [r["topic"] for r in build_sample(items, findings, SALT, n_alerted=10, n_quiet=0).rows]
+    assert len(picks) == 10 and {t: picks.count(t) for t in sizes} == {"big": 7, "mid": 2, "small": 1}
+    assert len(build_sample(items, findings, SALT, n_alerted=60, n_quiet=0).rows) == 50  # all fit: take all
+
+
+def test_real_alert_survives_a_mixed_inject_finding():
+    items = [_item("a", x, 0) for x in ("r1", "r2", "r3", "r4")] + [_item("a", "bot", 0, synthetic=True)]
+    findings = [_finding("a", "coordinated", ["r1", "r2", "r3"]),
+                _finding("a", "coordinated", ["r1", "r4", "bot"], synthetic=True)]
+    s = build_sample(items, findings, SALT, n_alerted=5, n_quiet=5)
+    assert s.meta == {"a": {"n_accounts": 3, "n_alerted": 3}}  # r4 out (inject only), r1 stays alerted
 
 
 def test_written_files_feed_eval_and_labels_are_never_overwritten(world, tmp_path, monkeypatch):
@@ -99,6 +110,8 @@ def test_written_files_feed_eval_and_labels_are_never_overwritten(world, tmp_pat
     monkeypatch.setattr(label_sample, "HANDLES", handles)
     s = build_sample(items, findings, SALT, n_alerted=5, n_quiet=6)
     write_sample(s, tmp_path, handles=handles)
+    old = build_sample([_item("z", "old_user", 0)], [], SALT, n_quiet=1)
+    write_sample(old, tmp_path, handles=handles)
     write_sample(s, tmp_path, handles=handles)  # an unlabelled skeleton may be regenerated
     with pytest.raises(ValueError):
         write_sample(s, tmp_path, handles=tmp_path / "eval" / "label_handles.csv")  # handles only under cache/
@@ -119,4 +132,4 @@ def test_written_files_feed_eval_and_labels_are_never_overwritten(world, tmp_pat
     assert m.n_labelled == sum(r["verdict"] != "watching" for r in rows)
     assert json.loads((tmp_path / "labels_meta.json").read_text()) == s.meta
     with handles.open(newline="") as fh:
-        assert {r["pseudonym"]: r["handle"] for r in csv.DictReader(fh)} == s.handles
+        assert {r["pseudonym"]: r["handle"] for r in csv.DictReader(fh)} == {**old.handles, **s.handles}  # merged
