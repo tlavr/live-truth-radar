@@ -17,7 +17,7 @@ x-app: &app
   depends_on:
     db:
       condition: service_healthy
-  restart: unless-stopped
+  restart: always
 
 services:
   db:
@@ -35,7 +35,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
-    restart: unless-stopped
+    restart: always
 
   api:
     <<: *app
@@ -59,7 +59,7 @@ services:
       - caddy_config:/config
     depends_on:
       - api
-    restart: unless-stopped
+    restart: always
 
 volumes:
   pgdata:
