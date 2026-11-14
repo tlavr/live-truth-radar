@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Live Truth Radar — Проверка темы</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Перейти к содержимому</a>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" data-nav-keep-id href="index.html">
+        <div class="brand-mark" aria-hidden="true">◎</div>
+        <div>
+          <div class="brand-title">Live Truth Radar</div>
+          <div class="brand-meta">
+            <span class="live-pulse" aria-hidden="true"></span>
+            <span id="freshness-label" class="num">обновлено 2 мин назад</span>
+          </div>
+        </div>
+      </a>
+
+      <nav class="segmented" aria-label="Разделы">
+        <a class="segmented-item is-active" aria-current="page" data-nav-keep-id href="index.html">Радар и итог</a>
+        <a class="segmented-item" data-nav-keep-id href="how.html">Как это работает</a>
+        <a class="segmented-item" data-nav-keep-id href="details.html">Детали</a>
+        <a class="segmented-item" href="metrics.html">Метрики</a>
+      </nav>
+
+      <div class="topbar-actions">
+        <button id="inject-btn" class="btn btn-primary" type="button">
+          <span>⚡ Вбросить тестовый рой</span>
+        </button>
+
+        <div class="segmented" role="group" aria-label="Тема оформления">
+          <button class="segmented-item" data-theme-choice="light" type="button">Light</button>
+          <button class="segmented-item" data-theme-choice="dark" type="button">Dark</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main id="main-content" class="container" tabindex="-1">
+    <!-- 1. Задаём тему -->
+    <section class="topic-hero" aria-label="Выбор или ввод темы">
+      <h1 class="topic-hero-title">Задайте тему — радар покажет, есть ли скоординированный рой</h1>
+      <p class="topic-hero-sub">
+        Выберите готовый поток или введите любую свою тему для мгновенной проверки по времени и смыслу постов.
+      </p>
+
+      <form id="topic-form" class="topic-form">
+        <label for="topic-input" class="sr-only">Тема для проверки</label>
+        <div class="topic-input-wrap">
+          <svg class="topic-search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input
+            id="topic-input"
+            class="topic-input"
+            type="text"
+            placeholder="Например: helsinki-tram-fares, nordic-energy-grid или «тарифы жкх»…"
+            autocomplete="off"
+          />
+        </div>
+
+        <div class="segmented" role="group" aria-label="Сценарий для новой темы" title="Что смоделировать, если темы ещё нет в потоке">
+          <button type="button" class="segmented-item is-active" aria-pressed="true" data-probe-mode="coordinated">Рой</button>
+          <button type="button" class="segmented-item" aria-pressed="false" data-probe-mode="echo">Эхо новости</button>
+          <button type="button" class="segmented-item" aria-pressed="false" data-probe-mode="organic">Живые люди</button>
+        </div>
+
+        <button type="submit" class="btn btn-primary topic-submit-btn">Проверить тему</button>
+      </form>
+
+      <div class="topic-presets-row">
+        <span class="beam-label">Активные темы и кейсы:</span>
+        <div id="beam-pills" class="beam-bar"></div>
+      </div>
+    </section>
+
+    <!-- 2. По центру саммари с текущим статусом -->
+    <section id="status-center" class="card status-center-card" aria-live="polite"></section>
+
+    <!-- 3. Ниже тело неопределённости с подписями и указанием на элементы -->
+    <section id="ambiguity-showcase" class="card ambiguity-showcase" aria-label="3D-тело неопределённости и разбор элементов"></section>
+  </main>
+
+  <div id="tooltip" class="tooltip-floating" role="tooltip"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="mock-data.js"></script>
+  <script src="state.js"></script>
+  <script src="ambiguity3d.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

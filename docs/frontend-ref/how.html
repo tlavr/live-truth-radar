@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Live Truth Radar — Объяснение на пальцах</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Перейти к содержимому</a>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" data-nav-keep-id href="index.html">
+        <div class="brand-mark" aria-hidden="true">◎</div>
+        <div>
+          <div class="brand-title">Live Truth Radar</div>
+          <div class="brand-meta">
+            <span>Объясняем на пальцах · 5 простых шагов</span>
+          </div>
+        </div>
+      </a>
+
+      <nav class="segmented" aria-label="Разделы">
+        <a class="segmented-item" data-nav-keep-id href="index.html">Радар и итог</a>
+        <a class="segmented-item is-active" aria-current="page" data-nav-keep-id href="how.html">Как это работает</a>
+        <a class="segmented-item" data-nav-keep-id href="details.html">Детали</a>
+        <a class="segmented-item" href="metrics.html">Метрики</a>
+      </nav>
+
+      <div class="topbar-actions">
+        <a class="btn btn-secondary" data-nav-keep-id href="index.html">‹ Вернуться к итогу</a>
+        <div class="segmented" role="group" aria-label="Тема оформления">
+          <button class="segmented-item" data-theme-choice="light" type="button">Light</button>
+          <button class="segmented-item" data-theme-choice="dark" type="button">Dark</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main id="main-content" class="container" tabindex="-1">
+    <section class="intro-strip intro-strip-center">
+      <div>
+        <h1 class="page-title">Как радар ловит ботов: объясняем на пальцах</h1>
+        <p class="page-subtitle">
+          Никаких сложных формул на первом экране — нажимайте шаги 1→5 и крутите интерактивные примеры справа.
+        </p>
+      </div>
+    </section>
+
+    <section id="stepper-rail" class="stepper-rail" aria-label="Шаги объяснения"></section>
+
+    <section id="guideline-stage" class="card guideline-stage" aria-live="polite"></section>
+  </main>
+
+  <div id="tooltip" class="tooltip-floating" role="tooltip"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="mock-data.js"></script>
+  <script src="state.js"></script>
+  <script src="ambiguity3d.js"></script>
+  <script src="how.js"></script>
+</body>
+</html>

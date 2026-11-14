@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Live Truth Radar — Детали</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Перейти к содержимому</a>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" data-nav-keep-id href="index.html">
+        <div class="brand-mark" aria-hidden="true">◎</div>
+        <div>
+          <div class="brand-title">Live Truth Radar</div>
+          <div class="brand-meta">
+            <span>Детали кейса · посты, корреляция, SPRT</span>
+          </div>
+        </div>
+      </a>
+
+      <nav class="segmented" aria-label="Разделы">
+        <a class="segmented-item" data-nav-keep-id href="index.html">Радар и итог</a>
+        <a class="segmented-item" data-nav-keep-id href="how.html">Как это работает</a>
+        <a class="segmented-item is-active" aria-current="page" data-nav-keep-id href="details.html">Детали</a>
+        <a class="segmented-item" href="metrics.html">Метрики</a>
+      </nav>
+
+      <div class="topbar-actions">
+        <label class="mask-toggle" title="В публичном дашборде реальные хэндлы маскируются как @ab*** (T12)">
+          <input id="mask-toggle" type="checkbox" checked />
+          <span>Маскировать <span class="mono">@ab***</span></span>
+        </label>
+
+        <div class="segmented" role="group" aria-label="Тема">
+          <button class="segmented-item" data-theme-choice="light" type="button">Light</button>
+          <button class="segmented-item" data-theme-choice="dark" type="button">Dark</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main id="main-content" class="container" tabindex="-1">
+    <section class="intro-strip">
+      <div>
+        <h1 class="page-title">Технические детали и все посты</h1>
+        <p class="page-subtitle">
+          Матрица корреляций аккаунтов, полная трасса SPRT, список участников и хронология сообщений.
+        </p>
+      </div>
+
+      <div id="case-switcher" class="case-switcher"></div>
+    </section>
+
+    <section id="stats-strip" class="stat-strip"></section>
+
+    <section class="two-col">
+      <div class="card subcard">
+        <div class="subcard-header">
+          <div>
+            <h2 class="subcard-title">Корреляция аккаунтов (R<sub>ij</sub>)</h2>
+            <p class="subcard-subtitle">Пик «время × смысл». Наведите на ячейку, чтобы увидеть сдвиг (lag в секундах).</p>
+          </div>
+        </div>
+        <div class="canvas-wrap">
+          <canvas id="corr-canvas" class="heatmap-canvas"></canvas>
+        </div>
+        <div class="heatmap-legend">
+          <span>0.00</span>
+          <div id="corr-legend-grad" class="legend-gradient"></div>
+          <span>1.00</span>
+        </div>
+      </div>
+
+      <div class="card subcard">
+        <div class="subcard-header">
+          <div>
+            <h2 class="subcard-title">Полная SPRT-трасса</h2>
+            <p class="subcard-subtitle">Накопление LLR Λ от поста к посту</p>
+          </div>
+          <span id="sprt-decision-tag" class="tag mono">—</span>
+        </div>
+        <div class="chart-box">
+          <canvas id="sprt-canvas"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <section id="evidence-section"></section>
+  </main>
+
+  <div id="tooltip" class="tooltip-floating" role="tooltip"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="mock-data.js"></script>
+  <script src="state.js"></script>
+  <script src="details.js"></script>
+</body>
+</html>
