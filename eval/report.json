@@ -1,76 +1,76 @@
 {
- "generated_at": "2026-11-14T18:51:29Z",
+ "generated_at": "2026-11-14T22:26:28Z",
  "roc": [
   [
-   0.009,
+   0.0008,
    0.7087
   ],
   [
-   0.0131,
+   0.0033,
    0.8562
   ],
   [
-   0.0139,
-   0.8562
-  ],
-  [
-   0.018,
-   0.8562
-  ],
-  [
-   0.0188,
-   0.8562
-  ],
-  [
-   0.0212,
-   0.8888
-  ],
-  [
-   0.0212,
+   0.0073,
    0.8925
   ],
   [
-   0.0261,
-   0.9
-  ],
-  [
-   0.0384,
-   0.9087
-  ],
-  [
-   0.04,
+   0.0098,
    0.9125
   ],
   [
-   0.0408,
+   0.0106,
+   0.9125
+  ],
+  [
+   0.0114,
+   0.9125
+  ],
+  [
+   0.0114,
+   0.9125
+  ],
+  [
+   0.0122,
+   0.9125
+  ],
+  [
+   0.0131,
+   0.9125
+  ],
+  [
+   0.0139,
+   0.9125
+  ],
+  [
+   0.0139,
    0.9125
   ]
  ],
- "detection_rate": 0.8562,
- "operating_pfa": 0.0131,
- "mean_posts_to_decision": 4.24,
- "mean_seconds_to_decision": 99.7,
+ "detection_rate": 0.9125,
+ "operating_pfa": 0.0098,
+ "mean_posts_to_decision": 4.22,
+ "mean_seconds_to_decision": 85.0,
  "live_fpr": 0.0,
  "live_precision": null,
  "n_labelled": 42,
  "failure_examples": [
   {
    "kind": "false_positive",
-   "finding_id": "f-f61746b393f5",
+   "finding_id": "f-4292a35f26b5",
    "account": null,
-   "note": "background window 808 (microsoft-global-outage, shift): 4 organic accounts flagged coordinated, SNR 24.5 dB, LLR 4.50"
+   "note": "background window 802 (microsoft-global-outage, shift): 5 organic accounts flagged coordinated, SNR 22.46 dB, LLR 4.56"
   },
   {
    "kind": "false_positive",
-   "finding_id": "f-c28647c497cc",
+   "finding_id": "f-2092895c9e96",
    "account": null,
-   "note": "background window 813 (microsoft-global-outage, subset): 5 organic accounts flagged coordinated, SNR 33.54 dB, LLR 5.00"
+   "note": "background window 818 (microsoft-global-outage, shift): 9 organic accounts flagged coordinated, SNR 20.51 dB, LLR 4.10"
   },
   {
    "kind": "false_positive",
-   "finding_id": "f-93b50d19bd22",
+   "finding_id": "f-3419b5ad8772",
    "account": null,
-   "note": "background window 839 (microsoft-global-outage, subset): 4 organic accounts flagged coordinated, SNR 31.85 dB, LLR 4.50"
+   "note": "background window 826 (microsoft-global-outage, shift): 5 organic accounts flagged coordinated, SNR 27.6 dB, LLR 5.00"
   },
   {
    "kind": "false_negative",
@@ -89,25 +89,25 @@
  "pd_by_size": [
   [
    3,
-   0.715
+   0.82
   ],
   [
    4,
-   0.83
+   0.89
   ],
   [
    6,
-   0.9175
+   0.935
   ],
   [
    8,
-   0.905
+   0.92
   ],
   [
    12,
-   0.8775
+   0.93
   ]
  ],
- "swarm_purity": 1.0,
+ "swarm_purity": 0.997,
  "live_precision_ci": null
 }
