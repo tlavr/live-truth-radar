@@ -1,9 +1,21 @@
 {
- "generated_at": "2026-11-14T13:36:45Z",
+ "generated_at": "2026-11-14T14:13:46Z",
  "embedder": "gemini",
  "cfar_k": 3.0,
  "default_alpha": 0.02,
  "points": [
+  {
+   "alpha": 0.005,
+   "pfa": 0.0,
+   "pfa_upper95": 0.0025,
+   "pd": 0.9525,
+   "pd_small": 0.0,
+   "posts_to_decision": 7.05,
+   "n_background": 1213,
+   "n_independent": 13,
+   "pfa_independent": 0.0,
+   "pfa_independent_upper95": 0.2058
+  },
   {
    "alpha": 0.01,
    "pfa": 0.0,
@@ -35,6 +47,18 @@
    "pd": 0.9925,
    "pd_small": 0.92,
    "posts_to_decision": 3.24,
+   "n_background": 1213,
+   "n_independent": 13,
+   "pfa_independent": 0.0,
+   "pfa_independent_upper95": 0.2058
+  },
+  {
+   "alpha": 0.1,
+   "pfa": 0.0,
+   "pfa_upper95": 0.0025,
+   "pd": 0.995,
+   "pd_small": 0.9325,
+   "posts_to_decision": 3.17,
    "n_background": 1213,
    "n_independent": 13,
    "pfa_independent": 0.0,
