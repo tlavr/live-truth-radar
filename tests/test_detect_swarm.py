@@ -10,7 +10,7 @@ from pydantic import TypeAdapter
 
 from contracts.models import Item
 from detect import cfar, sprt
-from detect.config import DEFAULT
+from detect.config import DEFAULT, SLOW
 from detect.correlation import TopicSignal, build_signal, pair_correlation
 from detect.pipeline import detect
 from synth.campaign import make_campaign
@@ -299,14 +299,14 @@ def _dense_reference(sig: TopicSignal, members=None, cfg=DEFAULT):
         ok &= members[sig.acct][None, :]
     x = np.where(ok, close * np.exp(-np.clip(dt, 0.0, None) / cfg.lag_kernel_sec), 0.0).max(axis=1)
     p, q = np.triu_indices(n, k=1)
-    near = (sig.acct[p] != sig.acct[q]) & (sig.t[q] - sig.t[p] <= cfg.tau_max_sec)
+    near = (sig.acct[p] != sig.acct[q]) & (sig.t[q] - sig.t[p] <= sig.pair_window)
     return x, set(zip(p[near].tolist(), q[near].tolist())), close
 
 
 def test_near_pairs_match_the_dense_computation():
     rng = np.random.default_rng(7)
     n = 700  # several PAIR_BLOCK blocks
-    t = np.sort(np.round(rng.uniform(0, 4 * 3600, n) / 30) * 30)  # 30 s grid: ties and pairs exactly at tau_max
+    t = np.sort(np.round(rng.uniform(0, 4 * 3600, n) / 15) * 15)  # 15 s grid: ties, gaps at tau_max and 615 s
     acct = rng.integers(0, 120, n)
     code = rng.normal(size=(n, 8))
     code /= np.linalg.norm(code, axis=1, keepdims=True)
@@ -315,8 +315,8 @@ def test_near_pairs_match_the_dense_computation():
     for m in (None, members):
         x_ref, pairs_ref, close = _dense_reference(sig, m)
         np.testing.assert_allclose(sprt.echo(sig, m), x_ref, rtol=0, atol=1e-12)
-    near = sig.pair_dt <= DEFAULT.tau_max_sec
-    assert set(zip(sig.pair_p[near].tolist(), sig.pair_q[near].tolist())) == pairs_ref
+    assert sig.pair_window == 615.0  # last lag cell edge: (20 + 0.5) * 30 s
+    assert set(zip(sig.pair_p.tolist(), sig.pair_q.tolist())) == pairs_ref  # the whole window, beyond tau_max too
     np.testing.assert_allclose(sig.pair_close, close[sig.pair_p, sig.pair_q], rtol=0, atol=1e-12)
     # pair correlation over all pairs equals the one over near pairs: farther pairs fall outside the lag grid
     full = _signal(t, acct, code, gain=sig.gain)
@@ -326,8 +326,13 @@ def test_near_pairs_match_the_dense_computation():
     full.pair_dt = sig.t[full.pair_q] - sig.t[full.pair_p]
     full.pair_close = close[full.pair_p, full.pair_q]
     full.pair_cos = np.einsum("ij,ij->i", code[full.pair_p], code[full.pair_q])
+    full.pair_window = np.inf
     for got, want in zip(pair_correlation(sig), pair_correlation(full)):
         np.testing.assert_array_equal(got, want)
+    with pytest.raises(ValueError):  # a wider cfg must not silently read a narrow signal
+        sprt.echo(sig, cfg=SLOW)
+    with pytest.raises(ValueError):
+        pair_correlation(sig, SLOW)
 
 
 def test_large_window_needs_no_post_by_post_matrices():

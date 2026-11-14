@@ -20,7 +20,7 @@ import numpy as np
 
 from detect.cfar import robust_scale
 from detect.config import DEFAULT, AnalyzerConfig
-from detect.correlation import TopicSignal
+from detect.correlation import TopicSignal, require_window
 
 
 def thresholds(alpha: float, beta: float) -> tuple[float, float]:
@@ -35,6 +35,7 @@ def echo(sig: TopicSignal, members: np.ndarray | None = None, cfg: AnalyzerConfi
 
     With a mask, only earlier posts of member accounts count as possible sources.
     """
+    require_window(sig, cfg)
     x = np.zeros(sig.n_posts)
     # near pairs: source = the earlier post pair_p, echo lands on the later post pair_q
     ok = sig.pair_dt <= cfg.tau_max_sec

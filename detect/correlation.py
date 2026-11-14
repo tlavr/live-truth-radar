@@ -10,7 +10,7 @@ the delay is dt_pq = t_q - t_p. Then
 
 Only post pairs close in time ever matter (the lag grid, the SPRT echo and the ambiguity map all stop
 near tau_max), so the signal keeps a sparse list of near pairs instead of an (n, n) matrix: memory and
-time grow with n * (posts per window), not n^2.
+time grow with n * (posts per pair window), not n^2 (still quadratic inside one dense burst).
 """
 
 from __future__ import annotations
@@ -32,9 +32,10 @@ class TopicSignal:
     accounts: list[str]  # account names, in order of their first post
     gain: np.ndarray  # (n,) beam gain b
     code: np.ndarray  # (n, d) whitened unit residuals e~ (zero rows for "pure topic" posts)
-    # Near pairs: posts p < q (time order) of different accounts with t_q - t_p <= pair_window_sec(cfg).
-    pair_p: np.ndarray  # (m,) int
-    pair_q: np.ndarray  # (m,) int
+    # Near pairs: posts p < q (time order) of different accounts with t_q - t_p <= pair_window.
+    pair_window: float  # seconds; consumers needing a wider gap must rebuild the signal (require_window)
+    pair_p: np.ndarray  # (m,) int32
+    pair_q: np.ndarray  # (m,) int32
     pair_dt: np.ndarray  # (m,) t_q - t_p >= 0
     pair_cos: np.ndarray  # (m,) <e~_p, e~_q> (raw, may be negative)
     pair_close: np.ndarray  # (m,) c_pq = sqrt(b_p * b_q) * max(0, cos)
@@ -44,7 +45,7 @@ class TopicSignal:
         return len(self.t)
 
 
-PAIR_BLOCK = 256  # posts per block in near_pairs: the dense product is at most block x (block + window)
+PAIR_BLOCK = 256  # posts per block in build_signal: dense product of block x (posts up to pair_window later)
 
 
 def n_lag_steps(cfg: AnalyzerConfig = DEFAULT) -> int:
@@ -53,8 +54,16 @@ def n_lag_steps(cfg: AnalyzerConfig = DEFAULT) -> int:
 
 
 def pair_window_sec(cfg: AnalyzerConfig = DEFAULT) -> float:
-    """Widest time gap any stage reads: tau_max (echo, ambiguity) and the outer edge of the last lag cell."""
-    return max(cfg.tau_max_sec, (n_lag_steps(cfg) + 1) * cfg.lag_step_sec)
+    """Widest time gap any stage reads: tau_max (echo, ambiguity) and the outer edge of the last lag cell
+    (cell = floor(delay / step + 0.5) + half is inside the grid iff |delay| < (half + 0.5) * step)."""
+    return max(cfg.tau_max_sec, (n_lag_steps(cfg) + 0.5) * cfg.lag_step_sec)
+
+
+def require_window(sig: TopicSignal, cfg: AnalyzerConfig) -> None:
+    """Fail loudly instead of silently missing pairs when cfg reads wider gaps than the signal holds."""
+    if pair_window_sec(cfg) > sig.pair_window:
+        raise ValueError(f"signal holds pairs up to {sig.pair_window:g} s, cfg needs {pair_window_sec(cfg):g} s: "
+                         "build the signal with this cfg")
 
 
 def build_signal(
@@ -81,16 +90,16 @@ def build_signal(
         mask = (cols > rows) & (t[cols] - t[rows] <= window) & (acct[rows] != acct[cols])
         r, c = np.nonzero(mask)
         cos = code[start:stop] @ code[start:end].T  # rows: p in the block, columns: q in [start, end)
-        ps.append(r + start)
-        qs.append(c + start)
+        ps.append((r + start).astype(np.int32))
+        qs.append((c + start).astype(np.int32))
         coss.append(cos[r, c])
     if ps:
         p, q, cos = np.concatenate(ps), np.concatenate(qs), np.concatenate(coss)
     else:
-        p = q = np.zeros(0, dtype=np.int64)
+        p = q = np.zeros(0, dtype=np.int32)
         cos = np.zeros(0)
     close = np.sqrt(gain[p] * gain[q]) * np.clip(cos, 0.0, None)
-    return TopicSignal(t=t, acct=acct, accounts=accounts, gain=gain, code=code,
+    return TopicSignal(t=t, acct=acct, accounts=accounts, gain=gain, code=code, pair_window=window,
                        pair_p=p, pair_q=q, pair_dt=t[q] - t[p], pair_cos=cos, pair_close=close)
 
 
@@ -121,6 +130,7 @@ def pair_correlation(sig: TopicSignal, cfg: AnalyzerConfig = DEFAULT) -> tuple[n
         np.fill_diagonal(R, 1.0)
     if sig.n_posts < 2 or n_acc < 2:
         return R, lag
+    require_window(sig, cfg)
 
     keep = sig.pair_close > 0  # p earlier than q (time order); pairs beyond the window fall outside the lag grid
     p, q, c, dt = sig.pair_p[keep], sig.pair_q[keep], sig.pair_close[keep], sig.pair_dt[keep]

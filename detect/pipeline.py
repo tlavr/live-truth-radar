@@ -28,7 +28,7 @@ import numpy as np
 from contracts.models import AmbiguityMap, Finding, Item, finding_id
 from detect import cfar, sprt
 from detect.config import DEFAULT, AnalyzerConfig
-from detect.correlation import TopicSignal, n_lag_steps, pair_correlation, topic_signal
+from detect.correlation import TopicSignal, n_lag_steps, pair_correlation, require_window, topic_signal
 from detect.embed import embed_with_backend
 from detect.news_echo import news_echo_note
 
@@ -140,6 +140,7 @@ def _detect_topic(topic: str, items: list[Item], E: np.ndarray, now: datetime, c
 
 def _pair_bins(sig: TopicSignal, cfg: AnalyzerConfig) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Cross-account post pairs with |lag| <= tau_max: (account p, account q, |lag|, mismatch)."""
+    require_window(sig, cfg)
     near = sig.pair_dt <= cfg.tau_max_sec  # near pairs are already cross-account
     p, q, dt = sig.pair_p[near], sig.pair_q[near], sig.pair_dt[near]
     mismatch = 1.0 - np.clip(sig.pair_cos[near], 0.0, 1.0)
