@@ -273,3 +273,19 @@ def test_beam_thresholds_follow_the_embedder_that_ran(monkeypatch):
     assert not [f for f in detect(items) if f.verdict == "coordinated"]
     monkeypatch.setattr(pipeline, "embed_with_backend", lambda texts: (hash_embed(texts), "hash"))
     assert [f for f in detect(items) if f.verdict == "coordinated"]
+
+
+def test_news_echo_off_in_news_only_stream():
+    # [ALT]: no context_social posts at all; an injected swarm that happens to repeat a headline
+    # must still be caught, otherwise the rule would block every inject into a live news topic.
+    alt = [
+        it.model_copy(update={"source": "context_news"})  # organic background: outlets
+        if it.id.startswith("fx-")
+        else it.model_copy(update={"source": "synthetic", "synthetic": True})
+        if it.source == "context_social"
+        else it
+        for it in _news_burst(with_article=True)
+    ]
+    assert not any(it.source == "context_social" for it in alt)
+    hits = [f for f in detect(alt) if "reader_0" in f.accounts]
+    assert hits and hits[0].verdict == "coordinated" and hits[0].note is None
