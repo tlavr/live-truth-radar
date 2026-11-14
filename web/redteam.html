@@ -4,88 +4,161 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>Red Team Console</title>
+<title>Bot Hive</title>
 <link rel="icon" href="data:,">
 <style>
+/* the dashboard's look (index.html, how.html): the same tokens, glass panels, pill controls; the pink accent marks the bots */
 :root{
-  --bg:#08060A;--panel:#120D14;--line:#2A1E2C;--ink:#EDE3EE;--muted:#9C8AA0;--dim:#5F5063;
-  --red:#FF4D6D;--amber:#FFB547;--ok:#5BE49B;--mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  --bg:#0C100E;--surface:rgba(22,29,25,.76);--surface-solid:#161D19;--surface-hi:rgba(34,44,38,.84);--ink:#F2F6F3;
+  --muted:rgba(218,232,222,.64);--tertiary:rgba(218,232,222,.38);--hairline:rgba(218,240,224,.12);
+  --cool:#63CF97;--salat:#8EE87B;--peak:#FFE066;--accent:#FF5C9E;
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",system-ui,sans-serif;
+  --ease-out:cubic-bezier(0.23,1,0.32,1);--gutter:clamp(16px,3vw,36px);
 }
 *{box-sizing:border-box}
-html{background:var(--bg);color:var(--ink);font-family:var(--mono);font-size:14px;line-height:1.5}
-body{margin:0;overflow-x:hidden}
+html{color-scheme:dark;background:var(--bg);color:var(--ink);font-family:var(--font);font-size:16px;line-height:1.45;-webkit-font-smoothing:antialiased}
+body{margin:0;padding:0 var(--gutter) 80px;overflow-x:hidden;min-height:100svh;
+  background:radial-gradient(90% 55% at 50% -12%,rgba(255,92,158,.10),transparent 70%) no-repeat}
+a{color:inherit}
 button,select{font:inherit;color:inherit}
-:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
-header{padding:16px clamp(16px,3vw,32px);border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
-header h1{margin:0;font-size:16px;letter-spacing:.08em;text-transform:uppercase;color:var(--red)}
-header span{color:var(--dim);font-size:12px}
-main{max-width:980px;margin:0 auto;padding:18px clamp(16px,3vw,32px) 60px}
-.box{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px;margin-bottom:14px}
-.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
-label{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em}
-select{background:#0C080E;border:1px solid var(--line);border-radius:4px;padding:7px 9px;min-width:0}
-.btn{background:var(--red);color:#12060A;border:0;border-radius:4px;padding:8px 18px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;cursor:pointer}
-.btn:disabled{opacity:.45;cursor:not-allowed}
-.msg{color:var(--amber);min-height:1.5em;margin-top:8px}
-.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
-.stat b{display:block;font-size:22px;color:var(--ink)}
-.stat span{color:var(--dim);font-size:12px}
-.stat.hit b{color:var(--ok)}
-#log{list-style:none;margin:0;padding:0;max-height:55vh;overflow:auto}
-#log li{padding:6px 0;border-top:1px dashed var(--line);display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:start}
-#log time{color:var(--dim)}
-#log .who{color:var(--amber)}
-#log .txt{color:var(--ink);word-break:break-word}
-#log .det{color:var(--dim);white-space:nowrap}
-#log .det.on{color:var(--ok)}
-.hint{color:var(--dim);font-size:12px;margin:8px 0 0}
-@media (max-width:640px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}#log li{grid-template-columns:1fr}}
+button{background:none;border:0;padding:0;cursor:pointer}
+:focus-visible{outline:2px solid var(--salat);outline-offset:3px;border-radius:8px}
+
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;height:70px;max-width:760px;margin:0 auto}
+.brand{font-weight:600;font-size:17px;letter-spacing:-.015em;display:flex;align-items:center;gap:9px}
+.brand svg{width:20px;height:20px;color:var(--accent)}
+.badge{font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--tertiary);
+  padding:4px 10px;border-radius:999px;border:1px solid var(--hairline)}
+main{max-width:760px;margin:0 auto;display:grid;gap:14px}
+
+.card{padding:20px;border-radius:16px;background:var(--surface);border:1px solid var(--hairline);
+  backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px)}
+.tag{display:block;margin-bottom:8px;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--tertiary)}
+
+/* setup */
+.setup{display:grid;gap:16px}
+.topic{position:relative}
+.topic select{appearance:none;-webkit-appearance:none;width:100%;height:48px;padding:0 44px 0 18px;border-radius:999px;
+  background:var(--surface-hi);border:1px solid var(--hairline);font-size:16px;font-weight:600;cursor:pointer;
+  transition:border-color 160ms ease}
+.topic::after{content:"";position:absolute;right:20px;top:50%;width:8px;height:8px;margin-top:-6px;border:solid var(--muted);
+  border-width:0 2px 2px 0;transform:rotate(45deg);pointer-events:none}
+@media (hover:hover) and (pointer:fine){.topic select:hover{border-color:rgba(142,232,123,.5)}}
+.opts{display:flex;flex-wrap:wrap;gap:16px 20px}
+.seg{display:inline-flex;padding:3px;border-radius:999px;background:rgba(255,255,255,.05);border:1px solid var(--hairline)}
+.seg button{height:34px;padding:0 14px;border-radius:999px;font-size:14px;font-weight:500;color:var(--muted);white-space:nowrap;
+  transition:background-color 160ms ease,color 160ms ease}
+.seg button[aria-checked=true]{background:rgba(255,255,255,.13);color:var(--ink);font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.3),inset 0 0 0 1px rgba(255,255,255,.08)}
+@media (hover:hover) and (pointer:fine){.seg button:not([aria-checked=true]):hover{color:var(--ink)}}
+.seg button:disabled{cursor:not-allowed;opacity:.5}
+.go{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.btn{height:48px;padding:0 32px;border-radius:999px;background:var(--accent);color:#1A0610;font-weight:700;font-size:16px;letter-spacing:-.01em;
+  box-shadow:0 10px 28px rgba(255,92,158,.25);transition:transform 160ms var(--ease-out),filter 160ms ease,opacity 160ms ease;font-variant-numeric:tabular-nums}
+.btn:active{transform:scale(.97)}
+.btn:disabled{opacity:.4;cursor:not-allowed;box-shadow:none}
+@media (hover:hover) and (pointer:fine){.btn:not(:disabled):hover{filter:brightness(1.08)}}
+.summary{font-size:14px;color:var(--muted);font-variant-numeric:tabular-nums}
+.summary b{color:var(--ink);font-weight:600}
+.go .radar{margin-left:auto;font-size:14px;font-weight:500;color:var(--salat);text-decoration:none}
+@media (hover:hover) and (pointer:fine){.go .radar:hover{text-decoration:underline}}
+.hint{margin:0;font-size:13.5px;color:var(--tertiary);max-width:62ch}
+.msg{margin:0;font-size:14px;color:var(--peak);min-height:0}
+.msg:empty{display:none}
+
+/* live stats */
+.live[hidden]{display:none}
+.live{display:grid;grid-template-columns:minmax(0,1.4fr) repeat(3,minmax(0,1fr));gap:18px;align-items:end}
+.caught b{display:block;font-size:40px;font-weight:700;letter-spacing:-.03em;line-height:1;color:var(--salat);font-variant-numeric:tabular-nums}
+.caught b small{font-size:20px;color:var(--tertiary);font-weight:600}
+.bar{height:6px;margin-top:12px;border-radius:3px;background:rgba(255,255,255,.07);overflow:hidden}
+.bar i{display:block;height:100%;width:0;border-radius:3px;background:linear-gradient(90deg,var(--cool),var(--salat));transition:width 500ms var(--ease-out)}
+.stat b{display:block;font-size:20px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.stat .tag,.caught .tag{margin-bottom:6px}
+.status{grid-column:1/-1;margin:0;font-size:14px;color:var(--muted);display:flex;align-items:flex-start;gap:8px}
+.status a{color:var(--salat);text-decoration:none;font-weight:500}
+@media (hover:hover) and (pointer:fine){.status a:hover{text-decoration:underline}}
+.dot{margin-top:6.5px;width:8px;height:8px;border-radius:50%;background:var(--accent);flex:0 0 auto;animation:pulse 1.6s ease-out infinite}
+.status.done .dot{background:var(--tertiary);animation:none}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,92,158,.55)}100%{box-shadow:0 0 0 8px rgba(255,92,158,0)}}
+
+/* feed */
+.feed-head{display:flex;justify-content:space-between;align-items:baseline}
+#log{list-style:none;margin:0;padding:0;max-height:60vh;overflow:auto}
+#log li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 14px;padding:12px 0;border-top:1px solid var(--hairline)}
+#log li:first-child{border-top:0}
+#log li.new{animation:enter 260ms var(--ease-out)}
+@keyframes enter{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+#log .meta{font-size:13px;color:var(--tertiary);font-variant-numeric:tabular-nums}
+#log .who{color:var(--accent);font-weight:600;margin-right:8px}
+#log .txt{grid-column:1;font-size:14.5px;color:var(--ink);word-break:break-word}
+#log .det{grid-row:1/3;grid-column:2;align-self:center;display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:500;
+  color:var(--tertiary);white-space:nowrap;padding:4px 10px;border-radius:999px;background:rgba(255,255,255,.04)}
+#log .det::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+#log .det.on{color:var(--salat);background:rgba(142,232,123,.10)}
+.empty{margin:0;padding:22px 0 8px;text-align:center;color:var(--tertiary);font-size:14px}
+#log:not(:empty)+.empty{display:none}
+
+@media (max-width:640px){
+  .top{height:58px}
+  .opts{flex-direction:column}
+  .seg{display:flex}.seg button{flex:1;padding:0 8px}
+  .btn{width:100%}
+  .go .radar{margin-left:0}
+  .live{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .caught{grid-column:1/-1}
+  #log li{grid-template-columns:minmax(0,1fr)}
+  #log .det{grid-row:auto;grid-column:1;justify-self:start}
+}
+@media (prefers-reduced-motion:reduce){.dot{animation:none}#log li.new{animation:none}.bar i{transition:none}}
 </style>
 </head>
 <body>
-<header>
-  <h1>▌Red Team Console</h1>
-  <span>synthetic swarm simulator · posts are flagged synthetic in the data</span>
+<header class="top">
+  <span class="brand"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 1.8 17.1 5.9v8.2L10 18.2 2.9 14.1V5.9z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M10 6.6 13 8.3v3.4L10 13.4 7 11.7V8.3z" fill="currentColor"/></svg>Bot Hive</span>
+  <span class="badge">Simulator</span>
 </header>
 <main>
-  <section class="box">
-    <div class="row">
-      <label for="topic">Target topic</label>
-      <select id="topic" disabled></select>
-      <label for="size">Bots</label>
-      <select id="size" disabled>
-        <option value="40">40</option>
-        <option value="25" selected>25</option>
-        <option value="12">12</option>
-      </select>
-      <label for="ppb">Posts per bot</label>
-      <select id="ppb" disabled>
-        <option value="2">2</option>
-        <option value="4" selected>4</option>
-        <option value="6">6</option>
-      </select>
-      <span class="hint" id="total"></span>
-      <label for="scenario">Scenario</label>
-      <select id="scenario" disabled>
-        <option value="paraphrase" selected>Paraphrase</option>
-        <option value="copypasta">Copypasta</option>
-        <option value="drift">Drift</option>
-      </select>
-      <button class="btn" id="attack" type="button" disabled>Attack</button>
+  <section class="card setup" aria-label="Attack setup">
+    <div>
+      <label class="tag" for="topic">Target topic</label>
+      <div class="topic"><select id="topic" disabled></select></div>
     </div>
-    <p class="msg" id="msg" aria-live="polite"></p>
+    <div class="opts">
+      <div><span class="tag" id="sizeL">Bots</span>
+        <div class="seg" role="radiogroup" aria-labelledby="sizeL" data-name="size">
+          <button type="button" role="radio" data-v="12">12</button><button type="button" role="radio" data-v="25" aria-checked="true">25</button><button type="button" role="radio" data-v="40">40</button>
+        </div></div>
+      <div><span class="tag" id="ppbL">Posts per bot</span>
+        <div class="seg" role="radiogroup" aria-labelledby="ppbL" data-name="ppb">
+          <button type="button" role="radio" data-v="2">2</button><button type="button" role="radio" data-v="4" aria-checked="true">4</button><button type="button" role="radio" data-v="6">6</button>
+        </div></div>
+      <div><span class="tag" id="scenarioL">Scenario</span>
+        <div class="seg" role="radiogroup" aria-labelledby="scenarioL" data-name="scenario">
+          <button type="button" role="radio" data-v="paraphrase" aria-checked="true">Paraphrase</button><button type="button" role="radio" data-v="copypasta">Copypasta</button><button type="button" role="radio" data-v="drift">Drift</button>
+        </div></div>
+    </div>
     <p class="hint" id="scenarioHint"></p>
-    <p class="hint">Each bot posts in volleys (posts per bot = number of volleys). Up to 40 bots: with ~50 the swarm hides
-      itself from the detector (its own pairs become the noise estimate). One attack per topic every 5 minutes. Watch it on the radar:
-      open the topic on the main page and press Check.</p>
+    <div class="go">
+      <button class="btn" id="attack" type="button" disabled>Attack</button>
+      <span class="summary" id="summary"></span>
+      <a class="radar" id="radar" href="/" target="_blank" rel="noopener">Open on the radar ↗</a>
+    </div>
+    <p class="msg" id="msg" role="status" aria-live="polite"></p>
   </section>
-  <section class="box stats" aria-live="polite">
-    <div class="stat"><b id="sPosted">—</b><span>posts published</span></div>
-    <div class="stat"><b id="sBots">—</b><span>bots active</span></div>
-    <div class="stat hit"><b id="sCaught">—</b><span>bots caught by the radar</span></div>
-    <div class="stat"><b id="sTime">—</b><span>time to first detection</span></div>
+
+  <section class="card live" id="live" hidden>
+    <div class="caught"><span class="tag">Caught by the radar</span><b id="sCaught">0<small> / 0</small></b><div class="bar"><i id="sBar"></i></div></div>
+    <div class="stat"><span class="tag">Posts</span><b id="sPosted">0</b></div>
+    <div class="stat"><span class="tag">Active bots</span><b id="sBots">0</b></div>
+    <div class="stat"><span class="tag">First catch</span><b id="sTime">—</b></div>
+    <p class="status" id="status" aria-live="polite"><span class="dot"></span><span id="statusText"></span></p>
   </section>
-  <section class="box"><ul id="log" aria-label="Campaign posts"></ul></section>
+
+  <section class="card">
+    <div class="feed-head"><span class="tag">Bot posts</span></div>
+    <ul id="log" aria-label="Campaign posts"></ul>
+    <p class="empty">Launch an attack, and bot posts will appear here as they go out.</p>
+  </section>
 </main>
 <script type="module" src="/redteam.js"></script>
 </body>
