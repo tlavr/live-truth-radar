@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-14T13:29:52Z",
+ "generated_at": "2026-11-14T13:36:37Z",
  "roc": [
   [
    0.0,
@@ -50,9 +50,9 @@
  "operating_pfa": 0.0,
  "mean_posts_to_decision": 4.29,
  "mean_seconds_to_decision": 93.6,
- "live_fpr": null,
+ "live_fpr": 0.0,
  "live_precision": null,
- "n_labelled": 0,
+ "n_labelled": 42,
  "failure_examples": [
   {
    "kind": "false_negative",
