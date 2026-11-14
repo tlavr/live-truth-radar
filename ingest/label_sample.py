@@ -25,7 +25,11 @@ On the VPS (eval/ is mounted read-only in the containers, cache/ is writable):
     scp $VPS:live-truth-radar/cache/label_handles.csv cache/
     cp -n cache/labels/labels.csv cache/labels/labels_meta.json eval/   # -n: never clobbers labelled files
 (to replace an unlabelled eval/labels.csv, delete it first).
-Then fill the `label` column (suspicious / organic / unclear) and run `make eval`.
+Then fill the `label` column (suspicious / organic / unclear; rubric: docs/labelling.md) and run `make eval`.
+
+`--review` also writes <out-dir>/review.md (real handles and their window posts per row, in labels.csv order),
+so the rows can be labelled without the DB; it holds real handles, so --out-dir must stay under cache/:
+    scp $VPS:live-truth-radar/cache/labels/review.md cache/labels/
 """
 
 from __future__ import annotations
@@ -36,6 +40,7 @@ import json
 import math
 import os
 import random
+import re
 import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -161,6 +166,48 @@ def build_sample(
     return Sample(rows, meta, handles)
 
 
+def render_review(rows: Iterable[dict[str, str]], handles: dict[str, str], items: Iterable[Item], *,
+                  max_posts: int = 8, max_chars: int = 240) -> str:
+    """Markdown labelling sheet: per row (labels.csv order) its real handle and its real posts in the window.
+
+    Holds real handles: write it only under cache/ (git-ignored).
+    """
+    posts: dict[tuple[str, str], list[Item]] = {}
+    for it in sorted(items, key=lambda it: (it.published_at, it.id)):
+        if not it.synthetic:
+            posts.setdefault((it.topic, it.author), []).append(it)
+    out = ["# T14 labelling sheet (real handles: never commit)", "",
+           "Labels go into labels.csv: suspicious / organic / unclear; rubric in docs/labelling.md.", ""]
+    topic = None
+    for n, r in enumerate(rows, start=1):
+        if r["topic"] != topic:
+            topic = r["topic"]
+            out += [f"## {topic}", ""]
+        handle = handles.get(r["account"], "?")
+        mine = posts.get((r["topic"], handle), [])
+        out.append(f"### {n}. {r['account']} · {handle} · {r['verdict'] or 'quiet'} · {len(mine)} posts")
+        for it in mine[:max_posts]:
+            text = re.sub(r"\s+", " ", it.text).strip()
+            text = text if len(text) <= max_chars else text[: max_chars - 1] + "…"
+            out.append(f"- {it.published_at.astimezone(timezone.utc):%Y-%m-%d %H:%M} UTC · {text}"
+                       + (f" · <{it.url}>" if it.url else ""))
+        if len(mine) > max_posts:
+            out.append(f"- … {len(mine) - max_posts} more")
+        out.append("")
+    return "\n".join(out)
+
+
+def write_review(text: str, out_dir: Path) -> Path:
+    """review.md into out_dir, which must lie under cache/ (it holds real handles)."""
+    if not out_dir.resolve().is_relative_to(root := CACHE.resolve()):
+        raise ValueError(f"review.md holds real handles: --out-dir must be under {root}, not {out_dir}")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / "review.md"
+    path.unlink(missing_ok=True)  # a planted symlink must not redirect the handles out of cache/
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
 def _has_labels(path: Path) -> bool:
     if not path.exists():
         return False
@@ -203,7 +250,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--n-alerted", type=int, default=25)
     ap.add_argument("--n-quiet", type=int, default=25)
     ap.add_argument("--force", action="store_true", help="overwrite a labels.csv that already holds labels")
+    ap.add_argument("--review", action="store_true", help="also write <out-dir>/review.md (real handles; cache/ only)")
     args = ap.parse_args(argv)
+    if args.review and not args.out_dir.resolve().is_relative_to(CACHE.resolve()):
+        ap.error(f"--review writes real handles: --out-dir must be under {CACHE}")
     from ingest import store  # DB only for the CLI: build_sample() stays importable offline
     from ingest.worker import _positive, topics
 
@@ -220,6 +270,8 @@ def main(argv: list[str] | None = None) -> int:
     sample = build_sample(items, findings, os.environ.get("LTR_HASH_SALT") or "",
                           n_alerted=args.n_alerted, n_quiet=args.n_quiet)
     write_sample(sample, args.out_dir, force=args.force)
+    if args.review:
+        print(f"review -> {write_review(render_review(sample.rows, sample.handles, items), args.out_dir)}", file=sys.stderr)
     n = {v: sum(r["verdict"] == v for r in sample.rows) for v in ("coordinated", "watching", "")}
     print(f"window {hours:g} h; {len(sample.rows)} rows -> {args.out_dir}: coordinated={n['coordinated']} watching={n['watching']} "
           f"quiet={n['']}; topics={len(sample.meta)}", file=sys.stderr)
