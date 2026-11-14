@@ -244,14 +244,45 @@ def _attack_topics() -> list[str]:
     return [t for t in available_topics() if t in monitored]
 
 
-def _attack_campaign(topic: str, click: datetime, n_accounts: int) -> list[Item]:
-    """make_campaign(schedule="future") (P2: same swarm shape, texts and accounts as eval) with its clock run
-    DEMO_SPEED times faster from the click: bot lags 15-120 s -> 4-30 s, second volley after ~2 min. Labelled
-    "demo speed" in the console; eval and /metrics keep the real schedule."""
+Scenario = Literal["paraphrase", "copypasta", "drift"]
+# drift runs at the real schedule (~10 min): its ridge needs the whole 0-10 min lag axis
+SCENARIO_SPEED: dict[str, float] = {"paraphrase": DEMO_SPEED, "copypasta": DEMO_SPEED, "drift": 1}
+
+
+def _drift_texts(topic: str, posts: list[Item]) -> list[Item]:
+    """Texts that drift away from the first post over time: all variation texts of the topic ordered by meaning
+    (cosine to the first post's text, most similar first), the k-th post in time gets the matching rung."""
+    from detect.embed import embed
+    from synth.variations import load_variations
+
+    texts = list(dict.fromkeys([posts[0].text] + [v for m in load_variations(topic).messages for v in m.variations]))
+    E = embed(texts)  # unit rows; the worker warmed these texts into cache/embeddings/ at start
+    sim = E @ E[0]
+    ladder = [texts[k] for k in sorted(range(len(texts)), key=lambda k: (-float(sim[k]), k))]
+    last = max(1, len(posts) - 1)
+    return [it.model_copy(update={"text": ladder[round(r * (len(ladder) - 1) / last)]}) for r, it in enumerate(posts)]
+
+
+def _attack_campaign(topic: str, click: datetime, n_accounts: int, scenario: str = "paraphrase") -> list[Item]:
+    """make_campaign(schedule="future") (P2: same swarm shape, accounts and lags as eval), then per scenario:
+    * paraphrase: P2's texts (rewordings of one message per volley), clock DEMO_SPEED x faster from the click
+      (lags 15-120 s -> 4-30 s, second volley after ~2 min);
+    * copypasta: every post carries the very same text, DEMO_SPEED x faster (spike at zero lag, zero wording gap);
+    * drift: real speed, texts drift away from the first one over time (ridge along lag x wording gap).
+    Labelled in the console; eval and /metrics keep P2's real schedule and texts."""
     from synth.campaign import make_campaign
 
-    return [it.model_copy(update={"published_at": click + (it.published_at - click) / DEMO_SPEED})
-            for it in make_campaign(topic, click, n_accounts=n_accounts, schedule="future")]
+    speed = SCENARIO_SPEED[scenario]
+    posts = [it.model_copy(update={"published_at": click + (it.published_at - click) / speed})
+             for it in make_campaign(topic, click, n_accounts=n_accounts, schedule="future")]
+    posts.sort(key=lambda it: (it.published_at, it.id))
+    if scenario == "copypasta":
+        # one identical text per volley (n_accounts posts each): with a single text for the whole campaign every
+        # bot votes the same vector, the beam whitens it to zero and nothing is detected in a quiet topic
+        posts = [it.model_copy(update={"text": posts[(k // n_accounts) * n_accounts].text}) for k, it in enumerate(posts)]
+    elif scenario == "drift":
+        posts = _drift_texts(topic, posts)
+    return posts
 
 
 class AttackRequest(BaseModel):
@@ -259,6 +290,7 @@ class AttackRequest(BaseModel):
     # <= 25: with ~50 bots the swarm's own pairs fill most of the 2000 CFAR reference cells
     # (cfar_min_ref_cells) and raise the threshold above the swarm itself, so it is not detected
     n_accounts: Literal[12, 25] = 25
+    scenario: Scenario = "paraphrase"
 
 
 class AttackResponse(BaseModel):
@@ -298,7 +330,7 @@ def attack(req: AttackRequest) -> AttackResponse:
     click = datetime.now(timezone.utc)
     with store.connect() as conn:
         _rate_limit("attack", store.last_attack_at(conn, req.topic), click)
-        campaign = _attack_campaign(req.topic, click, req.n_accounts)
+        campaign = _attack_campaign(req.topic, click, req.n_accounts, req.scenario)
         cid = campaign[0].campaign_id
         starts, ends = min(it.published_at for it in campaign), max(it.published_at for it in campaign)
         if store.upsert_items(conn, campaign) == 0:  # same-second campaign: every id already exists

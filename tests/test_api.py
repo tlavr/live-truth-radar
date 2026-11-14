@@ -317,3 +317,38 @@ def test_scan_dedups_topics_and_radar_rejects_a_topic_outside_the_session(client
     sid = r.json()["session_id"]
     assert c.get(f"/api/radar?session={sid}&topic=b").status_code == 400  # monitored, but not in this session
     assert c.get(f"/api/radar?session={sid}&topic=a").status_code == 200
+
+
+def test_attack_scenarios_copypasta_and_drift():
+    from datetime import timedelta
+
+    import numpy as np
+
+    from detect.embed import embed
+
+    click = datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc)
+    para = main._attack_campaign("helsinki-tram-fares", click, 12)
+    copy = main._attack_campaign("helsinki-tram-fares", click, 12, "copypasta")
+    assert [it.published_at for it in copy] == [it.published_at for it in para]  # same bots, same 4x schedule
+    assert len({it.text for it in copy[:12]}) == 1 and len({it.text for it in copy[12:]}) == 1  # one text per volley
+    from detect.pipeline import detect
+    found = detect(copy, now=max(it.published_at for it in copy))
+    assert any(f.verdict == "coordinated" and len(f.accounts) == 12 for f in found)  # caught even in a quiet topic
+
+    drift = main._attack_campaign("helsinki-tram-fares", click, 12, "drift")
+    assert max(it.published_at for it in drift) <= click + timedelta(seconds=600)  # real speed: ~10 min
+    assert max(it.published_at for it in drift) > click + timedelta(seconds=400)
+    times = [it.published_at for it in drift]
+    assert times == sorted(times)
+    E = embed([it.text for it in drift])
+    sim = E @ E[0]
+    assert float(sim[0]) == pytest.approx(1.0) and np.all(np.diff(sim) <= 1e-9)  # meaning drifts away over time
+    assert len({it.text for it in drift}) == len(drift)
+    with pytest.raises(KeyError):
+        main._attack_campaign("helsinki-tram-fares", click, 12, "nope")
+
+
+def test_attack_rejects_unknown_scenario(client, monkeypatch):
+    c, _ = client
+    monkeypatch.setenv("TOPICS", "helsinki-tram-fares")
+    assert c.post("/api/attack", json={"topic": "helsinki-tram-fares", "scenario": "nope"}).status_code == 422

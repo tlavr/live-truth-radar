@@ -57,12 +57,18 @@ select{background:#0C080E;border:1px solid var(--line);border-radius:4px;padding
         <option value="25" selected>25</option>
         <option value="12">12</option>
       </select>
+      <label for="scenario">Scenario</label>
+      <select id="scenario" disabled>
+        <option value="paraphrase" selected>Paraphrase</option>
+        <option value="copypasta">Copypasta</option>
+        <option value="drift">Drift</option>
+      </select>
       <button class="btn" id="attack" type="button" disabled>Attack</button>
     </div>
     <p class="msg" id="msg" aria-live="polite"></p>
-    <p class="hint">Each bot posts a rewording of the same message in two volleys. Demo speed: bots post 4× faster than the
-      real schedule the metrics are measured on (the whole attack takes ~2.5 min). One attack per topic every 5 minutes.
-      Watch it on the radar: open the topic on the main page and press Check.</p>
+    <p class="hint" id="scenarioHint"></p>
+    <p class="hint">Each bot posts twice, in two volleys. One attack per topic every 5 minutes. Watch it on the radar:
+      open the topic on the main page and press Check.</p>
   </section>
   <section class="box stats" aria-live="polite">
     <div class="stat"><b id="sPosted">—</b><span>posts published</span></div>
