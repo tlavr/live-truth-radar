@@ -140,14 +140,9 @@ def _detect_topic(topic: str, items: list[Item], E: np.ndarray, now: datetime, c
 
 def _pair_bins(sig: TopicSignal, cfg: AnalyzerConfig) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Cross-account post pairs with |lag| <= tau_max: (account p, account q, |lag|, mismatch)."""
-    p, q = np.triu_indices(sig.n_posts, k=1)
-    keep = sig.acct[p] != sig.acct[q]
-    p, q = p[keep], q[keep]
-    dt = np.abs(sig.t[q] - sig.t[p])
-    near = dt <= cfg.tau_max_sec
-    p, q, dt = p[near], q[near], dt[near]
-    cos = np.einsum("ij,ij->i", sig.code[p], sig.code[q]) if len(p) else np.zeros(0)
-    mismatch = 1.0 - np.clip(cos, 0.0, 1.0)
+    near = sig.pair_dt <= cfg.tau_max_sec  # near pairs are already cross-account
+    p, q, dt = sig.pair_p[near], sig.pair_q[near], sig.pair_dt[near]
+    mismatch = 1.0 - np.clip(sig.pair_cos[near], 0.0, 1.0)
     return sig.acct[p], sig.acct[q], dt, mismatch
 
 

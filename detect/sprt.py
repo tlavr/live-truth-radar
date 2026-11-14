@@ -35,17 +35,14 @@ def echo(sig: TopicSignal, members: np.ndarray | None = None, cfg: AnalyzerConfi
 
     With a mask, only earlier posts of member accounts count as possible sources.
     """
-    n = sig.n_posts
-    x = np.zeros(n)
-    if n < 2:
-        return x
-    dt = sig.t[:, None] - sig.t[None, :]  # dt[p, q] = t_p - t_q
-    earlier = np.tril(np.ones((n, n), dtype=bool), k=-1)  # q comes before p in time order
-    ok = earlier & (dt >= 0) & (dt <= cfg.tau_max_sec)
+    x = np.zeros(sig.n_posts)
+    # near pairs: source = the earlier post pair_p, echo lands on the later post pair_q
+    ok = sig.pair_dt <= cfg.tau_max_sec
     if members is not None:
-        ok &= members[sig.acct][None, :]
-    contrib = np.where(ok, sig.close * np.exp(-np.clip(dt, 0.0, None) / cfg.lag_kernel_sec), 0.0)
-    return contrib.max(axis=1)
+        ok &= members[sig.acct[sig.pair_p]]
+    contrib = sig.pair_close[ok] * np.exp(-sig.pair_dt[ok] / cfg.lag_kernel_sec)
+    np.maximum.at(x, sig.pair_q[ok], contrib)
+    return x
 
 
 def background(x_ref: np.ndarray, cfg: AnalyzerConfig = DEFAULT) -> tuple[float, float]:
