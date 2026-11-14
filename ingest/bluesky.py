@@ -114,6 +114,11 @@ def _dict(v: Any) -> dict[str, Any]:
     return v if isinstance(v, dict) else {}
 
 
+def _ts(v: Any) -> datetime | None:
+    """_parse_ts for a JSON field that should be an ISO string (a number or object from a broken record -> None)."""
+    return _parse_ts(v) if isinstance(v, str) else None
+
+
 def _iso_ms(ts: datetime) -> str:
     return ts.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
@@ -124,7 +129,7 @@ def _oldest(posts: list[Any]) -> datetime | None:
     for p in posts:
         if isinstance(p, dict):
             for ts in (_dict(p.get("record")).get("createdAt"), p.get("indexedAt")):
-                t = _parse_ts(ts)
+                t = _ts(ts)
                 if t is not None:
                     times.append(t)
     return min(times) if times else None
@@ -160,7 +165,7 @@ def posts_to_items(resp: dict[str, Any], topic: str, *, now: datetime | None = N
             handle = _clean(author.get("did")).strip().lower()
         record = _dict(p.get("record"))
         text = _clean(record.get("text")).strip()
-        ts = _post_time(_parse_ts(record.get("createdAt")), _parse_ts(p.get("indexedAt")))
+        ts = _post_time(_ts(record.get("createdAt")), _ts(p.get("indexedAt")))
         if not uri or not handle or ts is None or _future(ts, now) or not _LINK_RE.sub("", text).strip():
             continue
         iid = f"bsky-{topic}-{hashlib.sha1(uri.encode('utf-8')).hexdigest()[:16]}"

@@ -161,11 +161,11 @@ def _future(ts: datetime, now: datetime | None) -> bool:
 
 # Reddit names may contain "-"; "-", "." and "+" before "@" mean an e-mail address (left untouched).
 # Bluesky profile links carry the handle or the DID; a bare DID ("did:plc:...", also inside at:// URIs) names
-# an account too; @alice.bsky.social is a plain @handle. Case-insensitive: "Bsky.app/Profile/..." is the same link.
+# an account too; @alice.bsky.social is a plain @handle. Only the Bluesky branches are case-insensitive
+# ("Bsky.app/Profile/..." is the same link); "u/" stays lower-case so news text like "U/S dollar" is left alone.
 _HANDLE_RE = re.compile(
-    r"(?<![\w.+-])@[\w.-]*\w|\bu/[\w-]+|\breddit\.com/user/[\w-]+|\bbsky\.app/profile/[\w.:-]*\w"
-    r"|\bdid:(?:plc|web):[\w.:-]*\w",
-    re.IGNORECASE,
+    r"(?<![\w.+-])@[\w.-]*\w|\bu/[\w-]+|\breddit\.com/user/[\w-]+"
+    r"|(?i:\bbsky\.app/profile/[\w.:-]*\w|\bdid:(?:plc|web):[\w.:-]*\w)"
 )
 
 

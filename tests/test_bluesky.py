@@ -272,3 +272,15 @@ def test_masking_is_case_insensitive_and_covers_bare_dids():
     assert mask_handles("Bsky.app/Profile/alice.example.social") == "@***"
     assert mask_handles("at://did:plc:xyz123/app.bsky.feed.post/1") == "at://@***/app.bsky.feed.post/1"
     assert mask_handles("see did:web:alice.example.") == "see @***."
+
+
+def test_reddit_branch_stays_case_sensitive_so_news_text_is_not_over_masked():
+    assert mask_handles("U/S dollar and the U/turn") == "U/S dollar and the U/turn"
+    assert mask_handles("thanks u/john-doe") == "thanks @***"
+
+
+def test_non_string_timestamps_drop_only_that_post():
+    bad = post(rkey="bad", created=1731600000, indexed={"x": 1})
+    good = post(rkey="good")
+    assert [it.url.rsplit("/", 1)[-1] for it in posts_to_items({"posts": [bad, good]}, TOPIC, now=NOW)] == ["good"]
+    assert bluesky._oldest([bad]) is None and bluesky._oldest([bad, good]) is not None
