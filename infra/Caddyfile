@@ -1,0 +1,5 @@
+# SITE_ADDRESS comes from compose: ":80" locally (plain HTTP), the domain on the VPS (automatic HTTPS, T5).
+{$SITE_ADDRESS} {
+	encode gzip
+	reverse_proxy api:8000
+}
