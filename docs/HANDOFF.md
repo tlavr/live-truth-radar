@@ -1,9 +1,9 @@
-# HANDOFF: Live Truth Radar · The Kerfufflers · Junction 2026
+# HANDOFF: Live Swarm Radar · The Kerfufflers · Junction 2026
 
 *Всё, что нужно, чтобы продолжить в новой сессии или на другом компьютере.*
 
 ## 1. Что мы строим
-**Live Truth Radar** — «радар» для онлайн-манипуляций: смотрит на живой веб, находит координированные бот-кампании и приёмы пропаганды и объясняет каждый вердикт с источниками и честными метриками ложных срабатываний. Подход взят из обработки сигналов (matched filter, CDMA-деспрединг, CFAR, SPRT).
+**Live Swarm Radar** — «радар» для онлайн-манипуляций: смотрит на живой веб, находит координированные бот-кампании и приёмы пропаганды и объясняет каждый вердикт с источниками и честными метриками ложных срабатываний. Подход взят из обработки сигналов (matched filter, CDMA-деспрединг, CFAR, SPRT).
 
 - **Основной челлендж:** Decode the Noise (Hostinger) → [challenge-decode-the-noise.md](challenge-decode-the-noise.md)
 - **Тех-челленджи:** Context.dev (ядро), Gemini; Codex — пока не используем (код пишем с Claude), возможно позже; Oxylabs — CUT → [tech-challenges.md](tech-challenges.md)
@@ -111,7 +111,7 @@
 
 ## 7. Промпт для нового AI-ассистента
 ```
-Мы команда "The Kerfufflers" на Junction 2026 (Espoo, 13–15.11.2026), проект Live Truth Radar. Нас двое: P1 «Труба» (ingest, БД, деплой, API, дашборд) и P2 «Мозг» (детектор, синтетика, eval).
+Мы команда "The Kerfufflers" на Junction 2026 (Espoo, 13–15.11.2026), проект Live Swarm Radar. Нас двое: P1 «Труба» (ingest, БД, деплой, API, дашборд) и P2 «Мозг» (детектор, синтетика, eval).
 Прочитай CLAUDE.md, затем docs/workflow.md (как работаем) и карточку своей задачи в docs/tasks.md. Контракт: contracts/models.py (меняем только вдвоём).
 Шире контекст — только если нужно: docs/HANDOFF.md (план и сроки), docs/architecture.md (MUST/SHOULD/CUT), docs/signal-processing.md, docs/submission-draft.md.
 Основной челлендж: Decode the Noise (Hostinger). Тех: Context.dev (ядро), Gemini; Codex пока не используем (возможно позже).

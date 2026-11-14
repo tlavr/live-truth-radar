@@ -2,6 +2,8 @@
 // Opened from the alert card as /explain?id=<finding id>&topic=<topic>&alpha=<slider alpha>.
 // Data: /api/alerts?topic=&alpha= (the finding, by id) and /api/items?ids= (its posts).
 
+import {topicLabel} from './labels.js';
+
 // detect/config.py defaults, shown in the plain-language hints
 const CFAR_K = 3, TAU_MAX_MIN = 10, NEWS_ECHO_MIN = 60, DESIGN_ALPHA = 0.02, MAX_IDS = 200;
 const CLOSE_MISMATCH_BINS = 3;  // ambiguity rows 0..0.3 of semantic mismatch = "near-identical wording"
@@ -105,7 +107,7 @@ function render(f, items, points) {
   const n = f.accounts.length, posts = f.item_ids.length, hit = f.verdict === 'coordinated';
   const dur = (Date.parse(f.last_seen) - Date.parse(f.first_seen)) / 1000;
   const news = items.filter(it => it.source === 'context_news').length;
-  $('intro').innerHTML = `Alert in <b>${esc(f.topic)}</b>: ${n} accounts, ${posts} posts${f.synthetic ? ' (an injected test campaign)' : ''}. ` +
+  $('intro').innerHTML = `Alert in <b>${esc(topicLabel(f.topic))}</b>: ${n} accounts, ${posts} posts${f.synthetic ? ' (an injected test campaign)' : ''}. ` +
     'Here is every step the detector took, in order, from raw posts to the verdict.';
   $('back').href = `/?q=${encodeURIComponent(f.topic)}`;
 

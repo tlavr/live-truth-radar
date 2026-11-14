@@ -4,7 +4,7 @@ description: Read-only reviewer for a finished task. Finds bugs and other proble
 tools: Read, Grep, Glob, Bash
 ---
 
-You verify one finished task of the Live Truth Radar repo.
+You verify one finished task of the Live Swarm Radar repo.
 
 ## Input (from the main agent)
 Task id, owner (P1 or P2), verification round (1-3), focus (`logic`, `fit` or `both`), and

@@ -1,15 +1,15 @@
-# Live Truth Radar
+# Live Swarm Radar
 
 **The Kerfufflers · Junction 2026 (Espoo, 13–15.11.2026)**
 
-> Bots whisper below the noise floor. Live Truth Radar is a spread-spectrum receiver for the web: it despreads coordinated campaigns, names propaganda techniques and reports honest false-alarm rates.
+> Bots whisper below the noise floor. Live Swarm Radar is a spread-spectrum receiver for the web: it despreads coordinated campaigns, names propaganda techniques and reports honest false-alarm rates.
 
 ## Challenges
 - **Main:** Decode the Noise (Hostinger)
 - **Tech:** Context.dev (core: live news search + social scrape), Gemini (embeddings, explanations, synthetic test campaigns); OpenAI Codex not used for now (code is written with Claude); maybe later, only if we genuinely build with it
 
 ## The idea
-Coordinated propaganda behaves like a spread-spectrum (CDMA) signal: each bot account is too weak to flag alone, but together they carry one "code". Live Truth Radar applies radar and signal-processing math to the live web:
+Coordinated propaganda behaves like a spread-spectrum (CDMA) signal: each bot account is too weak to flag alone, but together they carry one "code". Live Swarm Radar applies radar and signal-processing math to the live web:
 
 - **Beamforming**: each watched topic is a beam; off-topic posts fall into the sidelobes.
 - **Matched filtering in meaning space** finds a message even when it is reworded (embeddings, with the topic's common background whitened out).

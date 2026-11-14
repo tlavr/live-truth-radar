@@ -1,4 +1,4 @@
-# Тулы и тех-челленджи Live Truth Radar
+# Тулы и тех-челленджи Live Swarm Radar
 
 Коды и ключи в репо **не храним**: они в Junction Hackerpack, у нас в `.env` (git-ignored).
 Объём урезан до ядра (MUST / SHOULD / CUT), см. [architecture.md](architecture.md). Порядок работ: [HANDOFF.md](HANDOFF.md#5-план-по-задачам), карточки: [tasks.md](tasks.md). Нас двое: P1 «Труба», P2 «Мозг».

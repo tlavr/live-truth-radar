@@ -1,10 +1,11 @@
-// Live Truth Radar dashboard (T12). Scene and motion from the frontend reference
+// Live Swarm Radar dashboard (T12). Scene and motion from the frontend reference
 // (docs/frontend-reference on p2/frontend-reference); data from /api/* (T8).
 import * as THREE from 'three';
 import {EffectComposer} from 'three/addons/postprocessing/EffectComposer.js';
 import {RenderPass} from 'three/addons/postprocessing/RenderPass.js';
 import {UnrealBloomPass} from 'three/addons/postprocessing/UnrealBloomPass.js';
 import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
+import {topicLabel, platformLabel} from './labels.js';
 
 const POLL_MS = 15000, INJECT_POLL_MS = 4000, INJECT_TIMEOUT_MS = 120000;
 const WINDOW_HOURS = 6;            // DETECT_WINDOW_HOURS on the worker
@@ -317,7 +318,7 @@ function openTopic(topic, {instant = false, findingId = null} = {}) {
   history.replaceState(null, '', `?q=${encodeURIComponent(topic)}`);
   tl?.kill(); selTl?.kill();
   root.dataset.stage = 'scan'; scrollTo(0, 0); hideTip();
-  $('q').value = topic; $('q').blur(); syncClear();
+  $('q').value = topicLabel(topic); $('q').blur(); syncClear();
   if (!ok) return showResult(true);
   gsap.killTweensOf([U.uCarpet, U.uPeak, U.uNoise, U.uGlow, U.uSweep, U.uSweepOn, axisMat, cam]);
   U.uCarpet.value = 0; U.uPeak.value = 0; axisMat.opacity = 0;
@@ -401,7 +402,7 @@ function render() {
   $('legend').style.display = f ? '' : 'none';
   if (!f) {
     vt.dataset.v = 'organic'; vt.textContent = 'Quiet';
-    $('vText').textContent = `No groups of look-alike accounts in the last ${WINDOW_HOURS} h of ${S.topic}.`;
+    $('vText').textContent = `No groups of look-alike accounts in the last ${WINDOW_HOURS} h of ${topicLabel(S.topic)}.`;
     $('vRisk').innerHTML = `🟢 Nothing above the detector threshold. <small>${pfaText()}</small>`;
     for (const id of ['evSay', 'evWho', 'evPosts', 'evCorr', 'evDecision', 'evSignal']) $(id).innerHTML = '';
     $('evSay').innerHTML = `<h3>Nothing to show</h3><p>Try “Inject test campaign” to see what a swarm looks like.</p>`;
@@ -456,7 +457,7 @@ async function renderPosts(f) {
   if (S.list[S.sel] !== f) return;                       // the user moved on meanwhile
   const its = f.item_ids.map(i => S.items.get(i)).filter(Boolean).sort((a, b) => a.published_at.localeCompare(b.published_at));
   const shown = its.slice(0, 8);
-  $('evPosts').innerHTML = `<h3>Posts</h3><ul class="posts">${shown.map(it => `<li><span class="meta">${esc(handle(it.author))} · ${hm(it.published_at)} UTC${it.platform ? ' · ' + esc(it.platform) : ''}${it.synthetic ? '<span class="syn">test</span>' : ''}</span>${esc(it.text)}${/^https?:\/\//i.test(it.url ?? '') ? ` <a href="${esc(it.url)}" target="_blank" rel="noopener">source</a>` : ''}</li>`).join('')}</ul>
+  $('evPosts').innerHTML = `<h3>Posts</h3><ul class="posts">${shown.map(it => `<li><span class="meta">${esc(handle(it.author))} · ${hm(it.published_at)} UTC${it.platform ? ' · ' + esc(platformLabel(it.platform)) : ''}${it.synthetic ? '<span class="syn">test</span>' : ''}</span>${esc(it.text)}${/^https?:\/\//i.test(it.url ?? '') ? ` <a href="${esc(it.url)}" target="_blank" rel="noopener">source</a>` : ''}</li>`).join('')}</ul>
     <p>${shown.length < its.length ? `First ${shown.length} of ${its.length} posts.` : `${its.length} posts.`}</p>`;
 }
 
@@ -509,13 +510,13 @@ function syncClear() { $('clear').classList.toggle('visible', $('q').value.lengt
 function renderHome() {
   const count = t => S.findings.filter(f => f.topic === t && f.verdict === 'coordinated').length;
   $('samples').innerHTML = S.topics.map(t =>
-    `<button class="sample-chip" type="button" data-sample="${esc(t)}">${esc(t)}${count(t) ? `<b>${count(t)}</b>` : ''}</button>`).join('');
-  $('topicList').innerHTML = S.topics.map(t => `<option value="${esc(t)}">`).join('');
+    `<button class="sample-chip" type="button" data-sample="${esc(t)}">${esc(topicLabel(t))}${count(t) ? `<b>${count(t)}</b>` : ''}</button>`).join('');
+  $('topicList').innerHTML = S.topics.map(t => `<option value="${esc(topicLabel(t))}">`).join('');
   const feed = S.findings.filter(f => f.verdict !== 'organic' && S.topics.includes(f.topic))
     .sort((a, b) => RANK[a.verdict] - RANK[b.verdict] || b.created_at.localeCompare(a.created_at)).slice(0, 6);
   $('feed').innerHTML = feed.length ? feed.map(f =>
     `<li><button type="button" data-topic="${esc(f.topic)}" data-fid="${esc(f.id)}"><span>${VERDICT[f.verdict].light} ${VERDICT[f.verdict].title}</span>
-      <span>${esc(f.topic)} · ${f.accounts.length} accounts${f.synthetic ? ' · test' : ''}</span><span class="t">${ago(f.created_at)}</span></button></li>`).join('')
+      <span>${esc(topicLabel(f.topic))} · ${f.accounts.length} accounts${f.synthetic ? ' · test' : ''}</span><span class="t">${ago(f.created_at)}</span></button></li>`).join('')
     : '<li class="empty">No alerts in the current window.</li>';
 }
 
@@ -579,7 +580,8 @@ $('search').addEventListener('submit', e => {
   e.preventDefault();
   const q = $('q').value.trim();
   if (!q) return;
-  const t = S.topics.find(t => t === q) ?? S.topics.find(t => t.includes(q.toLowerCase().replace(/\s+/g, '-')));
+  const lq = q.toLowerCase();
+  const t = S.topics.find(t => t === q || topicLabel(t).toLowerCase() === lq) ?? S.topics.find(t => t.includes(lq.replace(/\s+/g, '-')));
   if (t) openTopic(t); else { $('q').value = ''; $('q').placeholder = `Not monitored: ${q}`; syncClear(); }
 });
 $('samples').addEventListener('click', e => { const b = e.target.closest('[data-sample]'); if (b) openTopic(b.dataset.sample); });

@@ -30,7 +30,7 @@ POINTS_PATH = operating.POINTS_PATH
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 MAX_ITEM_IDS = 200
 
-app = FastAPI(title="Live Truth Radar")
+app = FastAPI(title="Live Swarm Radar")
 
 
 def mask_handle(author: str) -> str:

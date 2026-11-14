@@ -1,4 +1,4 @@
-# Live Truth Radar — agent instructions
+# Live Swarm Radar — agent instructions
 
 Radar-style detector of coordinated narrative campaigns ("swarms") in live news/social streams; Junction 2026, Decode the Noise (Hostinger). Live public URL on Hostinger VPS is mandatory.
 

@@ -1,4 +1,4 @@
--- Live Truth Radar DB schema (P1, T4). Columns mirror contracts/models.py.
+-- Live Swarm Radar DB schema (P1, T4). Columns mirror contracts/models.py.
 -- Applied by Postgres on first init (docker-entrypoint-initdb.d); idempotent, safe to re-run.
 -- No pgvector: embeddings are cached on disk in cache/.
 

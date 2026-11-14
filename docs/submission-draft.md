@@ -1,22 +1,22 @@
-# Драфт сабмита v4 · Live Truth Radar · The Kerfufflers
+# Драфт сабмита v4 · Live Swarm Radar · The Kerfufflers
 ## Основной: Decode the Noise (Hostinger) · тех: Context.dev, Gemini (Codex: возможно позже, пока не используем) · идея: обработка сигналов
 
 *Объём урезан до ядра, см. [architecture.md](architecture.md). Нас двое; preliminary (T3) и финальный текст (T17) ведёт P2 «Мозг». Правило: в финальном тексте только то, что реально работает в демо.*
 
 # ⏰ БЛОК ДЛЯ PRELIMINARY SUBMISSION (T3, до Пт 23:59), копировать как есть
 
-**Project Name:** `Live Truth Radar`
+**Project Name:** `Live Swarm Radar`
 
 **Punchline (197/200):**
 ```
-Bots whisper below the noise floor. Live Truth Radar is a spread-spectrum receiver for the web: it despreads coordinated campaigns, names propaganda techniques and reports honest false-alarm rates.
+Bots whisper below the noise floor. Live Swarm Radar is a spread-spectrum receiver for the web: it despreads coordinated campaigns, names propaganda techniques and reports honest false-alarm rates.
 ```
 
 **Challenge Picker:** `Decode the Noise`
 
 **Description (короткая версия, 640 символов):**
 ```markdown
-Propaganda campaigns behave like a spread-spectrum signal: each bot account is too weak to flag alone, but together they carry one message. **Live Truth Radar** applies radar and signal-processing math to the live web: matched filters find a narrative even when reworded, cross-correlation of account activity "despreads" hidden swarms, a CFAR threshold raises alerts, and a sequential likelihood-ratio test (SPRT) decides "coordinated / organic / keep watching" at a false-alarm rate we choose. Every verdict is explained in plain language with evidence and sources. Live web data comes from Context.dev; the system runs live on Hostinger.
+Propaganda campaigns behave like a spread-spectrum signal: each bot account is too weak to flag alone, but together they carry one message. **Live Swarm Radar** applies radar and signal-processing math to the live web: matched filters find a narrative even when reworded, cross-correlation of account activity "despreads" hidden swarms, a CFAR threshold raises alerts, and a sequential likelihood-ratio test (SPRT) decides "coordinated / organic / keep watching" at a false-alarm rate we choose. Every verdict is explained in plain language with evidence and sources. Live web data comes from Context.dev; the system runs live on Hostinger.
 ```
 
 **Source Code:** ссылка на GitHub-репо (можно пустой)
@@ -34,7 +34,7 @@ Propaganda campaigns behave like a spread-spectrum signal: each bot account is t
 ## The idea: propaganda is a signal hidden in noise
 In radio, a spread-spectrum (CDMA) signal sits **below the noise floor**: no single sample stands out, but a receiver that knows the code adds the pieces coherently and the signal rises out of the noise.
 
-Coordinated campaigns work the same way. Each bot posts too little to flag alone, but together they share one "code": the same moments of activity, the same message in different words. Detectors that judge **one post at a time** cannot see them. **Live Truth Radar is a receiver for that signal.**
+Coordinated campaigns work the same way. Each bot posts too little to flag alone, but together they share one "code": the same moments of activity, the same message in different words. Detectors that judge **one post at a time** cannot see them. **Live Swarm Radar is a receiver for that signal.**
 
 ## The receiver chain
 `Antenna + topic beam (live web) → front-end (embeddings, clutter whitening) → pair correlator (time × meaning) → CFAR + SPRT detector → explained verdict`
