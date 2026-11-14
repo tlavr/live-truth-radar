@@ -402,7 +402,7 @@ def test_ingest_loop_wakes_the_detect_loop(monkeypatch):
     stop = threading.Event()
     st = worker.LoopState(detector=lambda items: [], interval=300, window_hours=6)
 
-    def cycle(conn):
+    def cycle(conn, news=None, only=None):
         stop.set()  # one cycle only
         return items
 
