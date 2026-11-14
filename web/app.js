@@ -43,7 +43,7 @@ const S = {
   live: null,  // T12d live scan: {topic, session, since, frame, timer, busy, error}
   pickedWeak: false,               // T12d: a group below the alert threshold is shown only if the user picked it
   tmap: null, mapBusy: false,      // time x meaning map of the topic (/api/timemap), one layer per group
-  mapAt: null, view: 0,            // mapAt: null = live, else the ISO moment the map is rewound to;
+  mapAt: null, drawnAt: null, mapPending: false, view: 0,            // mapAt: null = live, else the ISO moment the map is rewound to;
                                    // view: bins between the end of the fetched map and the origin on screen
 };
 // T12c: the false-alarm slider picks an SPRT alpha; /api/alerts?alpha= serves the findings at that point
@@ -471,7 +471,7 @@ function openTopic(topic, {instant = false, findingId = null} = {}) {
   S.sel = Math.max(0, S.list.findIndex(f => f.id === findingId));
   S.pickedWeak = S.list[S.sel]?.verdict !== 'coordinated' && !!findingId;
   scrollTw?.kill(); scrollTw = null; mapSeq++;
-  S.tmap = null; S.mapAt = null; S.view = 0;
+  S.tmap = null; S.mapAt = null; S.drawnAt = null; S.mapPending = false; S.view = 0;
   setMapAt(rewindFor(shown()));  // the opened group on screen from the start (rewound if it is older than the map)
   history.replaceState(null, '', `?q=${encodeURIComponent(topic)}`);
   tl?.kill(); selTl?.kill();
@@ -562,7 +562,7 @@ function groupPicker(f, alerts, weak) {
   const sect = (label, ks) => ks.length ? `<optgroup label="${label} (${ks.length})">${ks.map(opt).join('')}</optgroup>` : '';
   return `<label class="group-pick"><span>Group${f ? ` ${S.sel + 1} of ${S.list.length}` : ''}</span>
     <select id="groupSel" aria-label="Group shown on the map">
-      <option value="now">${S.mapAt ? '⏵ Now · back to the live map' : '⏵ Now · live map'}</option>
+      <option value="now">${S.drawnAt ? '⏵ Now · back to the live map' : '⏵ Now · live map'}</option>
       ${f ? '' : `<option value="" selected disabled>${weak.length} weaker group${weak.length === 1 ? '' : 's'} · not alerts</option>`}
       ${sect('Alerts', alerts)}${sect('Weaker groups · not alerts', weak)}
     </select></label>`;
@@ -603,7 +603,7 @@ function render() {
   $('lgSpike').textContent = !y ? 'Loading the map…' : sum(y.sel) ? `${sum(y.sel)} pairs of posts at ${span(f)} UTC, at most 2 min apart`
     : `Posted at ${span(f)} UTC: older than the ${L * BIN_MIN} min on the map`;
   $('lgOthers').textContent = y ? `${sum(y.others)} pairs of the other ${S.list.length - 1} group${S.list.length === 2 ? '' : 's'}` : '';
-  $('lgCarpet').textContent = !y ? '' : S.mapAt ? `${sum(y.rest)} other pairs in the ${L * BIN_MIN} min before ${nowText()} UTC · not live`
+  $('lgCarpet').textContent = !y ? '' : S.drawnAt ? `${sum(y.rest)} other pairs in the ${L * BIN_MIN} min before ${nowText()} UTC · not live`
     : `${sum(y.rest)} other pairs in the last ${L * BIN_MIN} min`;
 
   const x = f.explanation;
@@ -680,10 +680,11 @@ function rewindFor(f) {
 // Moves the map so its origin is `at` (null = live now). One map from the server covers both the current
 // origin and the target, and the view scrolls over it, so the time axis slides instead of jumping.
 let scrollTw = null, mapSeq = 0;
+// S.mapAt = the moment asked for, S.drawnAt = the moment of the map on screen (null = live). They differ only
+// while a setMapAt request is in flight (S.mapPending); a failure goes back to what is drawn.
 async function setMapAt(at) {
-  if (at === S.mapAt && S.tmap) return;
-  const prev = S.mapAt;
-  S.mapAt = at; hideTip();
+  if (at === S.mapAt && at === S.drawnAt && S.tmap && !S.mapPending) return;
+  S.mapAt = at; S.mapPending = true; hideTip();
   const topic = S.topic, asked = S.alpha, seq = ++mapSeq;
   const target = at ? Date.parse(at) : Date.now(), from = S.tmap ? originMs() : target;
   const end = Math.max(from, target), live = !at;
@@ -692,8 +693,13 @@ async function setMapAt(at) {
   try {
     r = await api(`/api/timemap?topic=${encodeURIComponent(topic)}&minutes=${minutes}` +
       `${asked === DESIGN_ALPHA ? '' : `&alpha=${asked}`}${live ? '' : `&at=${encodeURIComponent(new Date(end).toISOString())}`}`);
-  } catch (e) { console.warn('timemap', e); if (seq === mapSeq) S.mapAt = prev; return; }  // keep state = what is drawn
+  } catch (e) {
+    console.warn('timemap', e);
+    if (seq === mapSeq) { S.mapAt = S.drawnAt; S.mapPending = false; }  // state = what is drawn; refresh retries
+    return;
+  }
   if (seq !== mapSeq || S.topic !== topic || S.alpha !== asked) return;
+  S.mapPending = false; S.drawnAt = at;
   scrollTw?.kill();
   const hadMap = !!S.tmap, endMs = Date.parse(r.now);
   const vTo = live ? 0 : Math.max(0, Math.round((endMs - target) / BIN_MS)), vFrom = Math.max(0, (endMs - from) / BIN_MS);
@@ -771,9 +777,10 @@ async function refresh() {
       if (ok) setField(shown());
       render();
       const want = rewindFor(shown());
-      if (shown()?.id !== cur && want !== S.mapAt) setMapAt(want);  // a new group on screen: bring its wave into view
+      if (!S.tmap || (shown()?.id !== cur && want !== S.mapAt)) setMapAt(want);  // a new group on screen (or no map yet)
       else loadMap();
-    } else if (!S.tmap || S.list.some(f => !S.tmap.groups[f.id]) || (!S.mapAt && Date.now() - Date.parse(S.tmap.now) > MAP_MAX_AGE_MS)) loadMap();  // also retries a map that never arrived  // keep "now" current; a rewound map stays put
+    } else if (!S.tmap) { if (!S.mapPending) setMapAt(rewindFor(shown())); }  // the first map never arrived: retry it
+    else if (S.list.some(f => !S.tmap.groups[f.id]) || (!S.drawnAt && Date.now() - Date.parse(S.tmap.now) > MAP_MAX_AGE_MS)) loadMap();  // keep "now" current; a rewound map stays put
   }
   return true;
 }
@@ -787,14 +794,14 @@ function showMap() {
 }
 // periodic reload of the current map: live = the last L bins, rewound = the same map again (new groups)
 async function loadMap() {
-  const topic = S.topic, asked = S.alpha, seq = mapSeq, rewound = S.mapAt && S.tmap;
-  if (!topic || S.mapBusy || scrollTw) return;
+  const topic = S.topic, asked = S.alpha, seq = mapSeq, base = S.tmap, rewound = !!(S.drawnAt && base);
+  if (!topic || !base || S.mapBusy || S.mapPending || scrollTw) return;  // no map yet: refresh goes through setMapAt
   S.mapBusy = true;
   try {
     const r = await api(`/api/timemap?topic=${encodeURIComponent(topic)}` +
       `&minutes=${rewound ? S.tmap.n_bins * BIN_MIN : L * BIN_MIN}${asked === DESIGN_ALPHA ? '' : `&alpha=${asked}`}` +
       `${rewound ? `&at=${encodeURIComponent(S.tmap.now)}` : ''}`);
-    if (seq !== mapSeq || scrollTw || S.topic !== topic || S.alpha !== asked || !!S.mapAt !== !!rewound) return;
+    if (seq !== mapSeq || S.tmap !== base || S.mapPending || scrollTw || S.topic !== topic || S.alpha !== asked) return;
     if (!rewound) S.view = 0;
     S.tmap = r; showMap();
   } catch (e) { console.warn('timemap', e); }
