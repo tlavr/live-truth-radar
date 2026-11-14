@@ -19,11 +19,15 @@ class AnalyzerConfig:
     # scale, so detect() switches to gemini_c_lo/gemini_c_hi when Gemini produced the vectors
     # (for_embedder). Gemini values: `python -m detect.calibrate_beam` on fixtures (sat 14.11):
     # off-topic q50 / q90 on the organic beam. The earlier 0.81/0.88 cut the gain of on-topic
-    # swarm posts in half (eval/report.json pd_by_size, 3 accounts: 0.28 -> 0.60). Recheck on the live sample (T15).
+    # swarm posts in half (eval/report.json pd_by_size, 3 accounts: 0.28 -> 0.60).
+    # T15 (sat 14.11): same rule on live data (--items items_live_sample.json + items_live_background.json,
+    # 289 organic posts, 6 topics) gives 0.78 / 0.80. Eval windows (alpha 2%): 0 / 313 background alarms
+    # either way; Pd of a 3 / 4-account swarm 0.57 / 0.86 -> 0.94 / 0.99 (0.81 / 0.83 left attack posts
+    # that name the topic at the edge of the beam).
     c_lo: float = 0.15
     c_hi: float = 0.35
-    gemini_c_lo: float = 0.81
-    gemini_c_hi: float = 0.83
+    gemini_c_lo: float = 0.78
+    gemini_c_hi: float = 0.80
     # Share of accounts (least aligned with the beam) dropped by the robust mean.
     beam_trim: float = 0.2
     # Whitening (3.3): residual norm below this -> zero vector ("pure topic" post).
