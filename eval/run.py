@@ -9,8 +9,10 @@ One trial = one 6-hour window of one topic (docs/signal-processing.md section 3.
         timeline (keeps real organic co-bursts such as reactions to news, the main source of false alarms).
     Pfa = share of background windows with any `coordinated` finding.
     Plus "real" windows: the topic's live timeline cut into consecutive, non-overlapping 6 h pieces with
-    the original timing (no resampling). Only these are independent experiments, so the operating points
-    also give Pfa and its 95% bound on them alone (n_independent).
+    the original timing (no resampling; pieces too small to ever alarm are skipped). Only these are
+    independent experiments, so the operating points also give Pfa and its 95% bound on them alone
+    (n_independent). The pooled Pfa and its bound mix them with resampled windows of the same items,
+    which are correlated, so the pooled bound is optimistic.
   * Inject windows: a background window plus `make_campaign` (held-out phrases), ROC_SWARM_ACCOUNTS
     accounts for the ROC, time to decision and purity.
     Pd = share of inject windows with a `coordinated` finding whose accounts are >= half injected
@@ -50,7 +52,8 @@ log = logging.getLogger("eval")
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURES_DIR = ROOT / "fixtures"
 EVAL_DIR = ROOT / "eval"
-BACKGROUND_FILES = ("items.json", "items_live_sample.json", "items_live_background.json")  # later files may repeat ids
+# The first copy of an id wins: the e-mail-masked live background goes before the older live sample.
+BACKGROUND_FILES = ("items.json", "items_live_background.json", "items_live_sample.json")
 
 WINDOW = timedelta(hours=6)
 WINDOW_BASE = datetime(2026, 11, 14, 0, 0, tzinfo=timezone.utc)  # window clock; only relative times matter
@@ -131,10 +134,12 @@ def background_window(items: list[Item], rng: np.random.Generator, mode: str) ->
     return [it.model_copy(update={"published_at": WINDOW_BASE + timedelta(seconds=when[it.id])}) for it in chosen]
 
 
-def real_windows(background: dict[str, list[Item]], topics: list[str]) -> list[Window]:
+def real_windows(background: dict[str, list[Item]], topics: list[str], min_authors: int = DEFAULT.min_swarm_accounts
+                 ) -> list[Window]:
     """Consecutive non-overlapping 6 h pieces of each topic's timeline, original timing (mode "real").
 
-    Pieces are [t0 + m*W, t0 + (m+1)*W) from the topic's first item; empty pieces are skipped. Each piece is
+    Pieces are [t0 + m*W, t0 + (m+1)*W) from the topic's first item. Pieces with fewer than min_authors
+    authors are skipped: they can never alarm, so counting them would only flatter the Pfa bound. Each piece is
     moved to the window clock (WINDOW_BASE) by one common shift, so cross-author alignment is untouched."""
     out: list[Window] = []
     width = WINDOW.total_seconds()
@@ -145,6 +150,8 @@ def real_windows(background: dict[str, list[Item]], topics: list[str]) -> list[W
         for it in items:
             pieces.setdefault(int((it.published_at - t0).total_seconds() // width), []).append(it)
         for m in sorted(pieces):
+            if len({it.author for it in pieces[m]}) < min_authors:
+                continue
             start = t0 + m * WINDOW
             out.append(Window(topic, "real", [it.model_copy(update={"published_at": WINDOW_BASE + (it.published_at - start)})
                                               for it in pieces[m]]))

@@ -7,6 +7,7 @@ E-mail addresses in the text are masked. Synthetic (injected) items are left out
 On the VPS (writes fixtures/items_live_sample.json locally):
     ssh $VPS 'cd live-truth-radar && docker compose -f infra/docker-compose.yml exec -T api \
         python -m ingest.export_sample --hours 6' > fixtures/items_live_sample.json
+The eval live background is the same export over 48 h, written to fixtures/items_live_background.json.
 """
 
 from __future__ import annotations

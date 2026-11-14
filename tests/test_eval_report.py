@@ -89,7 +89,8 @@ def test_real_windows_are_non_overlapping_pieces_with_original_timing():
 
     items = [_item(k, "t", f"a{k % 3}", 50 * k) for k in range(20)]  # ~16 h timeline, a post every 50 min
     items.append(_item(99, "t", "late", 50 * 19 + 720))  # after a 12 h gap: an empty piece is skipped
-    wins = real_windows({"t": items}, ["t"])
+    assert [len(w.items) for w in real_windows({"t": items}, ["t"])] == [8, 7, 5]  # 1 author: can never alarm
+    wins = real_windows({"t": items}, ["t"], min_authors=1)
     width = WINDOW.total_seconds()
     assert all(w.mode == "real" and not w.injected for w in wins)
     ids = [it.id for w in wins for it in w.items]

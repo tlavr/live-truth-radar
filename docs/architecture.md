@@ -53,6 +53,7 @@ CLAUDE.md                 общее: инструкции агентам
 contracts/models.py       ОБЩЕЕ — меняем только вдвоём
 fixtures/items.json       тестовые данные (генерирует `make fixtures`, руками не править)
 fixtures/items_live_sample.json  реальный сэмпл из БД (T2, обновляется на синках), авторы псевдонимизированы
+fixtures/items_live_background.json  живой фон для eval за 48 ч (T15), авторы псевдонимизированы, email замаскированы
 fixtures/findings.json    пример находок (их отдаёт мок-детектор P1 до I1)
 ingest/  api/  web/  infra/      P1
 detect/  synth/  eval/           P2
