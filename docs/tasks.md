@@ -64,7 +64,7 @@
 **Цель:** скелет сервисов, который поднимается одной командой.
 **Вход/выход:** `infra/docker-compose.yml` (caddy, api, worker, db=Postgres), `infra/Caddyfile`, `infra/schema.sql` (таблицы `actors`, `items`, `findings`, `labels`, `inject_requests`; без pgvector), `api/main.py` с `GET /health` → `{"status":"ok"}`, заглушка `ingest/worker.py`.
 **Готово, когда:** `docker compose -f infra/docker-compose.yml up` локально → `curl localhost/health` = 200 (через caddy, порт 80), схема применилась (таблицы видны в `psql`, включая `inject_requests`). Пути в compose считаются от `infra/`: build context `..`, mounts `../eval:/app/eval:ro` и `../cache:/app/cache`.
-**Тесты:** нет новых (схема БД → ревью вторым агентом, это рискованное).
+**Тесты:** нет новых (схема БД рискованная: петля проверки из workflow §3 обязательна, оба фокуса).
 **Зависит от:** T1
 
 ### T5 · P1 · сб 03:00
@@ -106,7 +106,7 @@
 **Цель:** полный детектор: коррелятор пар → CFAR по парам → рой → SPRT → `Finding`. Математика и параметры: [signal-processing.md §3.4–3.8](signal-processing.md#3-согласованный-дизайн-движка-v1-что-строить).
 **Вход/выход:** `detect/correlation.py` (векторный сигнал «время × смысл», `R_ij = max_τ w(τ)·R_ij(τ)`, `τ_max` = 10 мин, `Δ` = 30 с → матрицы `R` и `lag`), `detect/cfar.py` (фон по всем парам темы: `z_ij = (R_ij − медиана)/max(1.4826·MAD, 0.05)`; граф `z > k` → группы ≥ 3 аккаунтов; накопление `Z = Σz/√M`), `detect/sprt.py` (причинный признак «эхо», гауссова LLR с ограничителем [−1, +1.5] и полом σ, пороги из `alpha`/`beta`, трасса), `detect/news_echo.py` (статья `context_news` с тем же смыслом перед залпом → максимум `watching`), `detect/config.py` (дополнить параметрами коррелятора, CFAR, SPRT; можно запустить второй анализатор, «медленный»), `detect/pipeline.py`: `detect(items, *, alpha=0.02, beta=0.1) -> list[Finding]` (`id = finding_id(topic, accounts)`, `verdict` coordinated/organic/watching, `llr`, `snr_db = 20·lg Z`, `snr_db_single = 20·lg(средняя z_ij)`, `ambiguity` (сетка §3.9), `note` («эхо новости»), `sprt_trace` + `sprt_upper`/`sprt_lower`, `decided_at_item`, `first_seen`/`last_seen`, `correlation` и `lag_sec` квадратные в порядке `accounts`, `explanation=None`).
 **Готово, когда:** на `fixtures/items.json` синтетический рой → `coordinated`, органика → без `coordinated`; сжатый в 15 минут залп (как инжект) тоже → `coordinated`; на `fixtures/items_live_sample.json` (если уже есть) не падает и не даёт `coordinated` на органике; функция < 2 с на фикстурах.
-**Тесты:** 6–8 в `tests/test_detect_*.py`: пик корреляции на нужном лаге; независимые аккаунты без тревоги; SPRT верх/низ на известной последовательности «эхо»; CFAR молчит на ровном фоне и выделяет группу; пара аккаунтов (N = 2) не даёт роя; «эхо новости» не становится `coordinated`. Ревью вторым агентом (математика).
+**Тесты:** 6–8 в `tests/test_detect_*.py`: пик корреляции на нужном лаге; независимые аккаунты без тревоги; SPRT верх/низ на известной последовательности «эхо»; CFAR молчит на ровном фоне и выделяет группу; пара аккаунтов (N = 2) не даёт роя; «эхо новости» не становится `coordinated`. Петля проверки из workflow §3, фокус `logic` по §3.4–3.8.
 **Зависит от:** T7 (T9 не обязателен: в `fixtures/items.json` уже есть рой `swarm-001`)
 **Если не готово к 14:00:** S1 вырезаем, P1 подключается к P2 (см. [workflow §9](workflow.md#9-если-отстаём)).
 

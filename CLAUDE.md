@@ -23,12 +23,12 @@ Interfaces outside the contract: docs/HANDOFF.md §5.
 
 ## Rules
 1. Start every task by reading its card in `docs/tasks.md`. Then plan (files, functions, test, how to verify) before writing code; wait for human OK on the plan.
-2. After implementing, run the verification loop from `docs/workflow.md` §3: two `verifier` subagents (focus `logic` and `fit`, read-only) review the whole task diff; if they report a BLOCKER or SHOULD-FIX, the `analyzer` subagent reproduces and fixes, then the verifiers run again. At most 3 iterations; if problems remain after the third, stop and give the list to the human. Agent definitions: `.claude/agents/`. Docs-only changes may skip the loop.
+2. (Main agent only.) After implementing, with `make test` green, run the verification loop from `docs/workflow.md` §3: two read-only `verifier` subagents (focus `logic` and `fit`) review the whole task diff (working tree vs merge base, uncommitted and new files included); if they report a BLOCKER or SHOULD-FIX, the `analyzer` subagent reproduces and fixes, then the verifiers run again. One iteration = one verification round: at most 3 verification rounds and 2 fix rounds; if the third verification still reports a BLOCKER or SHOULD-FIX, stop without fixing and give the list to the human. Docs-only changes skip the loop; `web/`-only, tests-only or under ~30-line diffs use one verifier with focus `both` (table in `docs/workflow.md` §3). Agent definitions: `.claude/agents/`. Subagents never commit.
 3. Touch only your owner's dirs. Never edit the other person's dirs or `contracts/` without explicit agreement.
 4. Until I1, P1 uses the mock detector (fixtures/findings.json). P2 has no DB; network only for committed synth variations, the embedding cache in `cache/` (ignored) and `make eval`; never in tests.
 5. Secrets only in `.env` (git-ignored); see `.env.example`. Never print or commit keys. Real account handles never go into git: use `contracts.pseudonym()`; raw API responses live in `cache/` (ignored).
 6. No network calls in `make test`. Tests: detect/ math on synthetic data, contract parsing, smoke. No UI tests, no coverage goals.
-7. Small PRs to main every 1–2 h. Branches: `p1/<task-id>-slug`, `p2/<task-id>-slug`.
+7. Small PRs to main every 1–2 h. Branches: `p1/<task-id>-slug`, `p2/<task-id>-slug` (also `contract/<slug>` for contract changes; auto-named `claude/…` session branches are accepted).
 8. Never put AI model names in commit messages or PR titles (the tool name "Codex" in docs/codex-log.md and Codex-made PRs is fine). Codex reads AGENTS.md, which points here.
 9. Docs in Russian; code, identifiers, comments, commit messages in English.
 10. Cut scope rather than break the live demo. CUT list is in docs/architecture.md: do not build those things.
