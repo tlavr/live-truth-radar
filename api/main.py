@@ -20,11 +20,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 
 from contracts.models import AlertsResponse, Finding, Item, MetricsReport
+from detect import operating
 from ingest import store
 
 log = logging.getLogger("ltr.api")
 
 REPORT_PATH = Path(__file__).resolve().parent.parent / "eval" / "report.json"
+POINTS_PATH = operating.POINTS_PATH
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 MAX_ITEM_IDS = 200
 
@@ -56,10 +58,20 @@ def health() -> dict[str, str]:
 
 
 @app.get("/api/alerts", response_model=AlertsResponse)
-def alerts(topic: str | None = None) -> AlertsResponse:
-    """Latest detector run per topic (all topics, or one with ?topic=), newest first."""
+def alerts(
+    topic: str | None = None,
+    alpha: float | None = Query(None, gt=0, lt=1, description="T12c: SPRT alpha of the slider (default 0.02)"),
+) -> AlertsResponse:
+    """Latest detector run per topic (all topics, or one with ?topic=), newest first.
+
+    ?alpha= picks an operating point of the false-alarm slider: the design alpha (or none) reads the
+    findings table as before; another alpha reads what the worker stored for it (ALPHA_POINTS).
+    """
     with store.connect() as conn:
-        findings = store.load_findings(conn, topic)
+        if alpha is None or round(alpha, 6) == operating.DEFAULT_ALPHA:
+            findings = store.load_findings(conn, topic)
+        else:
+            findings = store.load_findings_alpha(conn, round(alpha, 6), topic)
         fake = store.synthetic_authors(conn, [i for f in findings for i in f.item_ids])
         last_poll = store.get_last_poll(conn)
     return AlertsResponse(
@@ -67,6 +79,12 @@ def alerts(topic: str | None = None) -> AlertsResponse:
         last_poll_at=last_poll,
         findings=[public_finding(f, fake) for f in findings],
     )
+
+
+@app.get("/api/operating_points", response_model=operating.OperatingPoints | None)
+def operating_points() -> operating.OperatingPoints | None:
+    """T12c: eval/operating_points.json (measured Pfa / Pd per slider alpha); null until make eval wrote it."""
+    return operating.load_points(POINTS_PATH)
 
 
 @app.get("/api/metrics", response_model=MetricsReport)

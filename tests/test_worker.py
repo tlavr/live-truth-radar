@@ -142,6 +142,72 @@ def test_real_detector_alerts_on_each_of_two_injects(monkeypatch):
         assert set(alerts[0].accounts) == {it.author for it in campaign}
 
 
+def test_detect_topic_stores_each_slider_alpha(monkeypatch):
+    from datetime import datetime, timezone
+
+    from synth.campaign import make_campaign
+
+    topic = "helsinki-tram-fares"
+    window = make_campaign(topic, datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc), n_accounts=3, seed=5)
+    main, extra, alphas_seen = {}, {}, []
+    monkeypatch.setattr(worker.store, "window_items", lambda conn, t, h: list(window))
+    monkeypatch.setattr(worker.store, "replace_findings", lambda conn, t, fs: main.__setitem__(t, fs))
+    monkeypatch.setattr(worker.store, "replace_findings_alpha", lambda conn, t, a, fs: extra.__setitem__((t, a), fs))
+    monkeypatch.setattr(worker.store, "ensure_schema", lambda conn: None)
+    monkeypatch.setattr(worker, "_with_explanation", lambda f, posts: f)
+    monkeypatch.setattr(worker.store, "get_items", lambda conn, ids: [], raising=False)
+    from detect.pipeline import detect
+
+    def detector(items, *, alpha=0.02):
+        alphas_seen.append(alpha)
+        return detect(items, alpha=alpha)
+
+    worker.detect_topic(FakeConn(), topic, detector, 6, alphas=(0.005, 0.05))
+    assert alphas_seen == [0.02, 0.005, 0.05]
+    assert set(extra) == {(topic, 0.005), (topic, 0.05)}
+    # the design point and the loose point catch this 3-account swarm, the strict point does not
+    verdicts = {a: [f.verdict for f in fs] for (_, a), fs in extra.items()}
+    assert "coordinated" in [f.verdict for f in main[topic]] and "coordinated" in verdicts[0.05]
+    assert "coordinated" not in verdicts[0.005]
+
+    # the production wrapper passes alpha through (a slider whose points all equal 2% must fail here)
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 11, 14, 12, 1, tzinfo=timezone.utc)  # 1 min after the click: not expired
+
+    monkeypatch.setattr(worker, "datetime", Frozen)
+    real = worker.load_detector()
+    assert "coordinated" in [f.verdict for f in real(window, alpha=0.05)]
+    assert "coordinated" not in [f.verdict for f in real(window, alpha=0.005)]
+
+
+def test_alpha_points_from_env(monkeypatch):
+    monkeypatch.delenv("ALPHA_POINTS", raising=False)
+    assert worker.alpha_points() == (0.01, 0.05)  # slider stops without the design alpha (findings table)
+    monkeypatch.setenv("ALPHA_POINTS", "0.05, 0.02,bad,1.5,0,0.1")
+    assert worker.alpha_points() == (0.05, 0.1)
+    monkeypatch.setenv("ALPHA_POINTS", "")
+    assert worker.alpha_points() == ()
+
+
+def test_failing_extra_alpha_never_loses_the_main_findings(monkeypatch):
+    stored, attempts = {}, []
+    monkeypatch.setattr(worker.store, "window_items", lambda conn, t, h: [])
+    monkeypatch.setattr(worker.store, "replace_findings", lambda conn, t, fs: stored.__setitem__(t, fs))
+
+    def broken(conn, t, a, fs):
+        attempts.append(a)
+        raise RuntimeError("findings_alpha missing")
+
+    monkeypatch.setattr(worker.store, "replace_findings_alpha", broken)
+    monkeypatch.setattr(worker.store, "ensure_schema", lambda conn: None)
+    conn = FakeConn()
+    worker.detect_topic(conn, "t", lambda items, alpha=0.02: [], 6, alphas=(0.01, 0.05))
+    assert "t" in stored and attempts == [0.01, 0.05]  # each point tried, the error swallowed
+    assert conn.commits >= 1  # the main findings are committed before the extra points run
+
+
 def test_reddit_source_is_off_by_default(monkeypatch):
     calls = []
 
@@ -174,3 +240,50 @@ def test_no_stale_cleanup_without_topics(monkeypatch):
     monkeypatch.setenv("TOPICS", "")
     worker.tick(FakeConn(), worker.LoopState(detector=lambda items: [], interval=300, window_hours=6), now=0.0)
     assert cleaned == []  # an empty TOPICS must never wipe every finding
+
+
+def test_stale_cleanup_also_covers_findings_alpha_and_survives_its_absence():
+    from contextlib import contextmanager
+
+    import psycopg
+
+    from ingest import store
+
+    class Cur:
+        rowcount = 2
+
+        def __init__(self, conn):
+            self.conn = conn
+
+        def execute(self, sql, params):
+            if "findings_alpha" in sql and self.conn.no_alpha_table:
+                raise psycopg.errors.UndefinedTable("findings_alpha")
+            self.conn.sql.append((sql.split()[2], params, self.conn.depth))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    class Conn:
+        def __init__(self, no_alpha_table):
+            self.sql, self.no_alpha_table, self.depth = [], no_alpha_table, 0
+
+        @contextmanager
+        def transaction(self):
+            self.depth += 1
+            try:
+                yield
+            finally:
+                self.depth -= 1
+
+        def cursor(self):
+            return Cur(self)
+
+    conn = Conn(no_alpha_table=False)
+    assert store.delete_findings_except(conn, ("a", "b")) == 4
+    # findings_alpha inside a nested savepoint: a missing table must not abort the findings DELETE
+    assert conn.sql == [("findings", (["a", "b"],), 1), ("findings_alpha", (["a", "b"],), 2)]
+    old = Conn(no_alpha_table=True)  # a DB volume from before T12c
+    assert store.delete_findings_except(old, ["a"]) == 2 and old.sql == [("findings", (["a"],), 1)]

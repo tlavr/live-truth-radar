@@ -1,0 +1,35 @@
+{
+ "generated_at": "2026-11-14T12:30:01Z",
+ "embedder": "gemini",
+ "cfar_k": 3.0,
+ "default_alpha": 0.02,
+ "points": [
+  {
+   "alpha": 0.01,
+   "pfa": 0.0,
+   "pfa_upper95": 0.003,
+   "pd": 1.0,
+   "pd_small": 0.8,
+   "posts_to_decision": 4.17,
+   "n_background": 1000
+  },
+  {
+   "alpha": 0.02,
+   "pfa": 0.0,
+   "pfa_upper95": 0.003,
+   "pd": 1.0,
+   "pd_small": 0.8275,
+   "posts_to_decision": 4.08,
+   "n_background": 1000
+  },
+  {
+   "alpha": 0.05,
+   "pfa": 0.0,
+   "pfa_upper95": 0.003,
+   "pd": 1.0,
+   "pd_small": 0.92,
+   "posts_to_decision": 3.07,
+   "n_background": 1000
+  }
+ ]
+}

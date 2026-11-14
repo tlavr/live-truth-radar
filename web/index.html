@@ -477,6 +477,9 @@ html:not([data-stage=home]) .feed{display:none}
 .corr div{aspect-ratio:1;border-radius:3px;background:rgba(99,207,151,var(--v));min-width:0}
 .corr div:hover{outline:1.5px solid var(--ink)}
 .span2{grid-column:1/-1}
+.alpha-pick{display:inline-flex;align-items:center;gap:6px}
+.alpha-pick select{font:inherit;color:inherit;background:transparent;border:1px solid currentColor;border-radius:6px;padding:1px 4px;opacity:.85}
+.alpha-pick select option{color:#000}
 @media (max-width:860px){.status{top:18px;font-size:12px;gap:10px}.span2{grid-column:auto}}
 </style>
 </head>
@@ -488,6 +491,8 @@ html:not([data-stage=home]) .feed{display:none}
     <button class="brand" id="brandBtn" type="button" aria-label="Live Truth Radar home">Live Truth Radar</button>
     <nav class="status" aria-label="Status">
       <span id="updated"><span class="live stale"></span>connecting…</span>
+      <label class="alpha-pick" title="False alarm target: SPRT alpha. Lower = fewer false alarms, later decisions, small swarms missed more often">False alarm
+        <select id="alphaSel" aria-label="False alarm target"></select></label>
       <a href="/metrics">Metrics</a>
     </nav>
 

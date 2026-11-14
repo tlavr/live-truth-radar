@@ -8,7 +8,7 @@ import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
 
 const POLL_MS = 15000, INJECT_POLL_MS = 4000, INJECT_TIMEOUT_MS = 120000;
 const WINDOW_HOURS = 6;            // DETECT_WINDOW_HOURS on the worker
-const DESIGN_ALPHA = 0.02;         // until eval/report.json has operating_pfa
+const DESIGN_ALPHA = 0.02;         // SPRT alpha of the findings table (T12c default point)
 const RANK = {coordinated: 0, watching: 1, organic: 2};
 
 const $ = id => document.getElementById(id);
@@ -36,14 +36,20 @@ async function api(path, opts) {
 
 /* ------------------------------------------------------------------ state */
 const S = {
-  topics: [], findings: [], lastPoll: null, metrics: null,
+  topics: [], findings: [], lastPoll: null, metrics: null, points: null, alpha: DESIGN_ALPHA,
   topic: null, list: [], sel: 0, items: new Map(),
 };
-const alpha = () => S.metrics?.operating_pfa ?? DESIGN_ALPHA;
-// measured Pfa at the operating threshold when eval/report.json has it, else the design alpha
-const pfaText = () => S.metrics?.operating_pfa != null
-  ? `False alarm rate at this threshold: ${pct(S.metrics.operating_pfa)} (target ≤ ${pct(DESIGN_ALPHA)})`
-  : `Target false alarm rate: ${pct(DESIGN_ALPHA)}`;
+// T12c: the false-alarm slider picks an SPRT alpha; /api/alerts?alpha= serves the findings at that point
+const SLIDER_ALPHAS = [0.01, 0.02, 0.05];  // fallback until eval/operating_points.json exists
+const alpha = () => S.alpha;
+const point = () => S.points?.points?.find(p => Math.abs(p.alpha - S.alpha) < 1e-9);
+// design alpha of the chosen point + the Pfa measured for it by make eval (with its 95% upper bound)
+const pfaText = () => {
+  const p = point();
+  return p
+    ? `False alarm target: ${pct(S.alpha)} (measured ${pct(p.pfa)}, ≤ ${pct(p.pfa_upper95)} at 95%)`
+    : `False alarm target: ${pct(S.alpha)}`;
+};
 const topicFindings = t => S.findings.filter(f => f.topic === t)
   .sort((a, b) => RANK[a.verdict] - RANK[b.verdict] || b.created_at.localeCompare(a.created_at));
 
@@ -292,7 +298,7 @@ const PHASES = [
   {title: 'Collecting posts', fact: (n, s) => `${Math.round(n * s.posts)} posts in groups from ${Math.round(n * s.accounts)} accounts (${WINDOW_HOURS}h)`, dur: 1.4},
   {title: 'Comparing meaning', fact: (n, s) => `${s.posts} posts embedded`, dur: 1.1},
   {title: 'Aligning timing', fact: (n, s) => `${Math.round(n * s.pairs)} post pairs`, dur: 1.4},
-  {title: 'Estimating noise', fact: () => `False alarm target ≤ ${pct(Math.max(alpha(), DESIGN_ALPHA))}`, dur: 1.1},
+  {title: 'Estimating noise', fact: () => `False alarm target ≤ ${pct(alpha())}`, dur: 1.1},
   {title: 'Deciding', fact: (n, s) => s.f?.decided_at_item != null ? `Decided at post ${s.f.decided_at_item + 1}` : s.f ? 'Still collecting evidence' : 'No groups flagged', dur: 1.4},
 ];
 const dots = [...document.querySelectorAll('#pipeTrack li')];
@@ -522,9 +528,11 @@ function renderStatus() {
 /* ------------------------------------------------------------------ data */
 async function refresh() {
   try {
-    const r = await api('/api/alerts');
+    const asked = S.alpha;
+    const r = await api(asked === DESIGN_ALPHA ? '/api/alerts' : `/api/alerts?alpha=${asked}`);
+    if (asked !== S.alpha) return false;  // the selector changed while this request was in flight
     S.findings = r.findings; S.lastPoll = r.last_poll_at;
-  } catch (e) { console.warn('alerts', e); return; }
+  } catch (e) { console.warn('alerts', e); return false; }
   renderStatus();
   if (root.dataset.stage === 'home') renderHome();
   else if (S.topic && root.dataset.stage === 'result') {
@@ -536,6 +544,7 @@ async function refresh() {
       render();
     }
   }
+  return true;
 }
 
 async function inject() {
@@ -599,13 +608,39 @@ for (const [tab, panel] of [['tabMain', 'panelMain'], ['tabDetails', 'panelDetai
     }
   });
 
+function setupAlpha() {
+  const sel = $('alphaSel');
+  const alphas = S.points?.points?.length ? S.points.points.map(p => p.alpha) : SLIDER_ALPHAS;
+  let saved = null;
+  try { saved = parseFloat(localStorage.getItem('ltr.alpha')); } catch {}
+  S.alpha = alphas.includes(saved) ? saved : (alphas.includes(DESIGN_ALPHA) ? DESIGN_ALPHA : alphas[0]);
+  sel.innerHTML = alphas.map(a => {
+    const p = S.points?.points?.find(q => q.alpha === a);
+    const hint = p ? ` · small swarms ${pct(p.pd_small)}` : '';
+    return `<option value="${a}"${a === S.alpha ? ' selected' : ''}>${pct(a)}${hint}</option>`;
+  }).join('');
+  sel.addEventListener('change', async () => {
+    S.alpha = parseFloat(sel.value);
+    try { localStorage.setItem('ltr.alpha', String(S.alpha)); } catch {}
+    const fresh = await refresh();
+    // any stage: a change during the scan animation must not leave the old point's list for showResult
+    if (fresh && S.topic) {
+      S.list = topicFindings(S.topic); S.sel = 0;
+      if (root.dataset.stage === 'result') { if (ok) setField(S.list[0]); render(); }
+    }
+  });
+}
+
 try { buildScene(); } catch (err) { ok = false; console.error(err); canvas.style.display = 'none'; }
 if (ok) { new ResizeObserver(resize).observe(stage); resize(); requestAnimationFrame(frame); }
 
 (async () => {
-  const [topics, metrics] = await Promise.allSettled([api('/api/topics'), api('/api/metrics')]);
+  const [topics, metrics, points] = await Promise.allSettled(
+    [api('/api/topics'), api('/api/metrics'), api('/api/operating_points')]);
   S.topics = topics.value ?? [];
   S.metrics = metrics.value ?? null;
+  S.points = points.value ?? null;
+  setupAlpha();
   await refresh();
   renderHome();
   const q = new URLSearchParams(location.search).get('q');

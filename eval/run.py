@@ -37,6 +37,7 @@ from pydantic import TypeAdapter
 
 from contracts.models import FailureExample, Finding, Item, MetricsReport
 from detect.config import DEFAULT, AnalyzerConfig
+from detect.operating import POINTS_PATH, SLIDER_ALPHAS, OperatingPoint, OperatingPoints, pfa_upper95, write_points
 from detect.pipeline import detect
 from synth.campaign import make_campaign
 from synth.variations import VARIATIONS_DIR
@@ -443,6 +444,56 @@ def build_report(
     )
 
 
+def build_operating_points(
+    *,
+    n_windows: int = 200,
+    alphas: tuple[float, ...] = SLIDER_ALPHAS,
+    seed: int = 20261114,
+    dev: bool = False,
+    fixtures_dir: Path = FIXTURES_DIR,
+    cfg: AnalyzerConfig = DEFAULT,
+) -> OperatingPoints:
+    """T12c slider: measured Pfa / Pd / decision time at each SPRT alpha, CFAR k as configured (live)."""
+    embedder = _embedder_name()
+    if embedder != "gemini" and not dev:
+        raise SystemExit(f"refusing to write operating points on LTR_EMBEDDER={embedder!r} (use --dev)")
+    background = load_background(fixtures_dir)
+    inject_topics = [t for t in background if (VARIATIONS_DIR / f"{t}.json").exists()]
+    if not background or not inject_topics:
+        raise SystemExit(f"no background / inject topics in {fixtures_dir}")
+    rng = np.random.default_rng(seed + 1)  # its own windows: the report's random stream is unchanged
+    bg_windows = make_windows(background, sorted(background), n_windows, rng)
+    inj_windows = make_windows(background, inject_topics, n_windows, rng, n_accounts=ROC_SWARM_ACCOUNTS)
+    small_windows = make_windows(background, inject_topics, n_windows, rng, n_accounts=min(SIZES))
+    _prefetch_embeddings(bg_windows + inj_windows + small_windows)
+
+    points = []
+    for alpha in alphas:
+        acfg = replace(cfg, alpha=alpha)
+        bg, inj, small = (run_trials(w, acfg) for w in (bg_windows, inj_windows, small_windows))
+        alarms = sum(t.alarm for t in bg)
+        costs = []
+        for t in inj:
+            f = t.best_hit()
+            c = None if f is None else decision_cost(f, {it.id: it for it in t.window.items})
+            if c is not None:
+                costs.append(c[0])
+        point = OperatingPoint(
+            alpha=alpha,
+            pfa=round(alarms / len(bg), 4),
+            pfa_upper95=round(pfa_upper95(alarms, len(bg)), 4),
+            pd=round(rate([t.best_hit() is not None for t in inj]), 4),
+            pd_small=round(rate([t.best_hit() is not None for t in small]), 4),
+            posts_to_decision=round(float(np.mean(costs)), 2) if costs else None,
+            n_background=len(bg),
+        )
+        log.info("alpha=%.3f  Pfa=%.3f (<= %.3f)  Pd=%.3f  Pd(%d acc)=%.3f  posts=%s", alpha, point.pfa,
+                 point.pfa_upper95, point.pd, min(SIZES), point.pd_small, point.posts_to_decision)
+        points.append(point)
+    return OperatingPoints(generated_at=datetime.now(timezone.utc).replace(microsecond=0), embedder=embedder,
+                           cfar_k=cfg.cfar_k, points=points)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Write eval/report.json (MetricsReport).")
     ap.add_argument("--dev", action="store_true", help="allow a non-production embedder (hash)")
@@ -450,12 +501,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--size-windows", type=int, default=100, help="inject windows per swarm size")
     ap.add_argument("--seed", type=int, default=20261114)
     ap.add_argument("--out", type=Path, default=EVAL_DIR / "report.json")
+    ap.add_argument("--points-out", type=Path, default=POINTS_PATH, help="T12c slider operating points")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     logging.getLogger("detect").setLevel(logging.WARNING)
     report = build_report(n_windows=args.windows, n_size_windows=args.size_windows, seed=args.seed, dev=args.dev)
     args.out.write_text(report.model_dump_json(indent=1) + "\n", encoding="utf-8")
     log.info("wrote %s", args.out)
+    points = build_operating_points(n_windows=args.windows, seed=args.seed, dev=args.dev)
+    write_points(points, args.points_out)
+    log.info("wrote %s", args.points_out)
     return 0
 
 
