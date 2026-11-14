@@ -163,7 +163,7 @@ const ROC_X_MAX = .15;
   try { ref = document.referrer ? new URL(document.referrer) : null; } catch {}
   const same = ref && ref.origin === location.origin && ref.pathname === '/';
   const q = same ? ref.searchParams.get('q') : null;
-  const label = q ? q.split('-').map((w, i) => i ? w : w[0].toUpperCase() + w.slice(1)).join(' ') : null;
+  const label = q ? q.split('-').filter(Boolean).map((w, i) => i ? w : w[0].toUpperCase() + w.slice(1)).join(' ') : null;
   $('backText').textContent = label ? `Back to ${label}` : 'Back to the radar';
   $('back').href = same ? ref.pathname + ref.search : '/';
   if (same && history.length > 1) $('back').addEventListener('click', e => { e.preventDefault(); history.back(); });

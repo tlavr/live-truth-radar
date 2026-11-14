@@ -4,7 +4,7 @@
 // brings the map back to live.
 
 const MIN_SPAN_MS = 10 * 60000;
-const NOW_W = 78;                               // right end kept for the "Now" button: the time axis stops before it                 // zoom in down to the map's own 10 minutes
+const NOW_W = 78;                               // right end kept for the "Now" button: the time axis stops before it
 const TICK_MIN = [1, 2, 5, 10, 15, 30, 60, 120, 180];
 const hm = ms => new Date(ms).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});   // the viewer's clock
 

@@ -106,7 +106,7 @@ h1{margin:0;font-size:clamp(34px,4.4vw,56px);font-weight:700;letter-spacing:-.04
   const same = ref && ref.origin === location.origin && ref.pathname !== location.pathname;
   const q = same && ref.pathname === '/' ? ref.searchParams.get('q') : null;
   const label = same && ref.pathname === '/metrics' ? 'Back to Radar in numbers'
-    : q ? `Back to ${q.split('-').map((w, i) => i ? w : w[0].toUpperCase() + w.slice(1)).join(' ')}` : 'Back to the radar';
+    : q ? `Back to ${q.split('-').filter(Boolean).map((w, i) => i ? w : w[0].toUpperCase() + w.slice(1)).join(' ')}` : 'Back to the radar';
   $('backText').textContent = label;
   $('back').href = same ? ref.pathname + ref.search : '/';
   if (same && history.length > 1) $('back').addEventListener('click', e => { e.preventDefault(); history.back(); });
