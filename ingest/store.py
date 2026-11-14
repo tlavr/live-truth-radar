@@ -92,11 +92,17 @@ def window_items(conn: psycopg.Connection, topic: str, hours: float, now: dateti
     return [_item(r) for r in rows]
 
 
-def latest_published(conn: psycopg.Connection, topic: str, source: str) -> datetime | None:
-    """Newest published_at of one topic from one source (None if nothing stored yet)."""
-    row = conn.execute(
-        "SELECT max(published_at) AS latest FROM items WHERE topic = %s AND source = %s", (topic, source)
-    ).fetchone()
+def latest_published(
+    conn: psycopg.Connection, topic: str, source: str, platform: str | None = None
+) -> datetime | None:
+    """Newest published_at of one topic from one source, optionally one platform of it (context_social holds
+    both Reddit and Bluesky); None if nothing stored yet."""
+    sql = "SELECT max(published_at) AS latest FROM items WHERE topic = %s AND source = %s"
+    params: tuple = (topic, source)
+    if platform is not None:
+        sql += " AND platform = %s"
+        params += (platform,)
+    row = conn.execute(sql, params).fetchone()
     return None if row is None else row["latest"]
 
 

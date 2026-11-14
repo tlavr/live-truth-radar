@@ -67,7 +67,7 @@ Docker Compose on a Hostinger VPS with a public HTTPS domain: FastAPI, a detecto
 
 ## Partner technology
 - **Hostinger**: VPS, domain and AI Router host the whole live system.
-- **Context.dev**: our antenna. Social scrape gives posts with authors and timestamps, which is what turns accounts into activity codes for despreading; news search gives the fresh articles, which also let us tell a real coordinated push from an honest reaction to breaking news. [SHOULD: Brand and company enrichment tells who is behind a domain.]
+- **Context.dev**: our antenna for the news. News search gives the fresh articles, which also let us tell a real coordinated push from an honest reaction to breaking news. Social posts with authors and timestamps, which turn accounts into activity codes for despreading, come from Bluesky public search on the same topics. [SHOULD: Brand and company enrichment tells who is behind a domain.]
 - **Gemini**: embeddings for the matched filters, and long-context reasoning over a whole swarm cluster to name the technique and explain the verdict with quoted evidence. It judges the group, not one post, which is exactly what despreading needs, and it also writes the synthetic test campaigns we inject. Without long context we could only explain single posts.
 - **[ONLY IF TRUE] OpenAI Codex**: wrote [the detectors]; see `docs/codex-log.md`.
 
@@ -77,7 +77,7 @@ Fact-checking with source fusion, cross-country geo echo, change watch for silen
 *Team The Kerfufflers · Junction 2026*
 ```
 
-**[ALT] для Context.dev, если на T2 у social scrape нет автора или времени:** заменить в пункте Context.dev предложение «Social scrape gives … breaking news.» на *"News search gives fresh articles with authors and timestamps, which become the activity codes for despreading."* И добавить в «Honest, measurable detection»: *"Swarm detection is demonstrated on injected synthetic accounts; in the live stream, 'accounts' are news authors and domains."*
+**[ALT] — только если на VPS остаётся `BLUESKY_ENABLED=0` (T6b, Bluesky выключен):** заменить в пункте Context.dev предложение «Social posts … same topics.» на *"News search gives fresh articles with authors and timestamps, which become the activity codes for despreading."* И добавить в «Honest, measurable detection»: *"Swarm detection is demonstrated on injected synthetic accounts; in the live stream, 'accounts' are news authors and domains."*
 
 ## Как текст закрывает критерии Hostinger
 | Критерий | Вес | Где |

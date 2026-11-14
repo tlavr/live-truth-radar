@@ -4,4 +4,5 @@ import os
 
 for _key in ("GEMINI_API_KEY", "CONTEXT_DEV_API_KEY", "HOSTINGER_AI_ROUTER_KEY", "DATABASE_URL"):
     os.environ.pop(_key, None)
+os.environ["BLUESKY_ENABLED"] = "0"  # no searchPosts calls from tests that run ingest_cycle
 os.environ["LTR_EMBEDDER"] = "hash"  # detect.embed must honour this (T7)

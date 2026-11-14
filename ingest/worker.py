@@ -2,6 +2,8 @@
 
 T4: heartbeat stub. T8: detect loop on the DB and inject handling. T6: Context.dev polling in
 `ingest_cycle()` (news search + Reddit search -> on-topic Items -> items/actors, then last_poll_at).
+T6b: Bluesky searchPosts as a second source (BLUESKY_ENABLED, default on); every source has its own client
+and lower bound, so one failing source (or a missing CONTEXT_DEV_API_KEY) never stops the others.
 
 Threads (T12d), so a slow Context.dev or LLM call never freezes the radar:
   * ingest (`ingest_loop`, own DB connection): every POLL_INTERVAL_SEC ingest_cycle(), which warms the
@@ -36,6 +38,7 @@ import psycopg
 from contracts.models import Finding, Item
 from detect.operating import DEFAULT_ALPHA, SLIDER_ALPHAS
 from ingest import radar, store
+from ingest.bluesky import BlueskyClient, BlueskyError, bsky_query, posts_to_items
 from ingest.contextdev import (
     ContextDevClient,
     ContextDevError,
@@ -49,6 +52,9 @@ log = logging.getLogger("ltr.worker")
 
 INJECT_CHECK_SEC = 10
 NEWS_OVERLAP = timedelta(minutes=15)
+BLUESKY_BACKFILL = timedelta(hours=48)  # first poll of a topic: background for eval (T6b)
+BLUESKY_BACKFILL_PAGES = 10
+BLUESKY_PAGES = 3  # per topic and cycle afterwards
 
 Detector = Callable[..., list[Finding]]  # detector(items) at the design alpha, detector(items, alpha=a)
 
@@ -354,6 +360,10 @@ def process_injects(conn, detector: Detector, window_hours: float, alphas: tuple
 
 
 _client: ContextDevClient | None = None
+_bsky: BlueskyClient | None = None
+# topics whose 48 h Bluesky backfill already ran in this process: a topic whose posts never pass the keyword gate
+# stores nothing, and without this it would repeat the backfill every cycle
+_bsky_backfilled: set[str] = set()
 
 
 def _get_client() -> ContextDevClient | None:
@@ -363,6 +373,13 @@ def _get_client() -> ContextDevClient | None:
         ttl = max(30.0, _positive("POLL_INTERVAL_SEC", 300) - 30)
         _client = ContextDevClient(os.environ["CONTEXT_DEV_API_KEY"], cache_ttl_sec=ttl)
     return _client
+
+
+def _get_bluesky() -> BlueskyClient:
+    global _bsky
+    if _bsky is None:
+        _bsky = BlueskyClient()
+    return _bsky
 
 
 def news_since(now: datetime, window_h: float, latest: datetime | None) -> datetime:
@@ -376,51 +393,130 @@ def news_since(now: datetime, window_h: float, latest: datetime | None) -> datet
     return since
 
 
+def _flag(name: str, default: bool) -> bool:
+    raw = (os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return default
+    return raw in ("1", "true", "yes", "on")
+
+
 def reddit_enabled() -> bool:
     """REDDIT_ENABLED=1/true/yes turns the reddit-search source on (default off)."""
-    return (os.environ.get("REDDIT_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on")
+    return _flag("REDDIT_ENABLED", False)
 
 
-def fetch_topic(client: ContextDevClient, topic: str, since: datetime) -> list[Item] | None:
-    """All sources for one topic, on-topic items only; None if every source failed."""
-    query = topic_query(topic)
+def bluesky_enabled() -> bool:
+    """BLUESKY_ENABLED=0/false/no/off turns the Bluesky source off (default on): quick fallback to news only."""
+    return _flag("BLUESKY_ENABLED", True)
+
+
+def bluesky_since(now: datetime, window_h: float, latest: datetime | None, backfilled: bool = False
+                  ) -> datetime | None:
+    """None on a topic's first poll (no Bluesky post stored yet, no backfill in this process): fetch_bluesky then
+    backfills BLUESKY_BACKFILL. Later polls: like news_since, from the newest stored Bluesky post of the topic
+    (the detector window if there is none)."""
+    if latest is None and not backfilled:
+        return None
+    return news_since(now, window_h, latest)
+
+
+def fetch_bluesky(client: BlueskyClient, topic: str, since: datetime | None, now: datetime | None = None
+                  ) -> list[Item]:
+    """searchPosts (newest first) -> Items. First poll: BLUESKY_BACKFILL back, up to BLUESKY_BACKFILL_PAGES pages
+    (background for eval); then BLUESKY_PAGES per cycle. Posts beyond the page cap are skipped, not queued."""
+    now = now or datetime.now(timezone.utc)
+    backfill = since is None
+    if backfill:
+        since, pages = now - BLUESKY_BACKFILL, BLUESKY_BACKFILL_PAGES
+    else:
+        pages = BLUESKY_PAGES
+    items = posts_to_items(client.search(bsky_query(topic), since, max_pages=pages), topic, now=now)
+    if backfill:
+        _bsky_backfilled.add(topic)  # only after a successful search: a failed backfill is retried next cycle
+    return items
+
+
+@dataclass(frozen=True)
+class Source:
+    """One ingest source with its own client and lower bound: `since(conn, topic, now)` reads the DB,
+    `fetch(topic, since)` calls the API and normalizes. whole_text: the keyword gate checks the full text
+    (social posts) instead of the headline (news)."""
+
+    name: str
+    since: Callable[[object, str, datetime], datetime | None]
+    fetch: Callable[[str, datetime | None], list[Item]]
+    whole_text: bool = False
+
+
+def active_sources(window_h: float) -> list[Source]:
+    """news (+ reddit) when CONTEXT_DEV_API_KEY is set; bluesky unless BLUESKY_ENABLED=0."""
+    out: list[Source] = []
+    client = _get_client()
+    if client is None:
+        log.warning("CONTEXT_DEV_API_KEY is empty: news source off")
+    else:
+        out.append(Source(
+            "news",
+            lambda conn, topic, now: news_since(now, window_h, store.latest_published(conn, topic, "context_news")),
+            lambda topic, since: news_to_items(client.news_search(topic_query(topic), since=since), topic),
+        ))
+        if reddit_enabled():  # off by default: reddit-search fails (WEBSITE_ACCESS_ERROR) and costs rate-limit units
+            out.append(Source(
+                "reddit",
+                lambda conn, topic, now: None,
+                lambda topic, since: reddit_to_items(client.reddit_search(topic_query(topic)), topic),
+            ))
+    if bluesky_enabled():
+        bsky = _get_bluesky()
+        out.append(Source(
+            "bluesky",
+            # by platform, not by the whole context_social: Reddit posts must not move Bluesky's lower bound
+            lambda conn, topic, now: bluesky_since(
+                now, window_h, store.latest_published(conn, topic, "context_social", "bluesky"),
+                topic in _bsky_backfilled),
+            lambda topic, since: fetch_bluesky(bsky, topic, since),
+            whole_text=True,
+        ))
+    return out
+
+
+def fetch_topic(sources: list[Source], topic: str, sinces: dict[str, datetime | None]) -> list[Item] | None:
+    """All sources for one topic, on-topic items only; None if every source failed (a failing source never
+    drops the others' items)."""
     items: list[Item] = []
     ok = False
-    sources = [("news", lambda: client.news_search(query, since=since), news_to_items)]
-    if reddit_enabled():  # off by default: reddit-search fails (WEBSITE_ACCESS_ERROR) and costs rate-limit units
-        sources.append(("reddit", lambda: client.reddit_search(query), reddit_to_items))
-    for name, call, norm in sources:
+    for src in sources:
         try:
-            got = norm(call(), topic)
-        except (ContextDevError, httpx.HTTPError, ValueError, OSError) as e:  # API, network, bad JSON, cache I/O
-            log.warning("topic=%s source=%s failed: %s", topic, name, e)
+            got = src.fetch(topic, sinces.get(src.name))
+        except (ContextDevError, BlueskyError, httpx.HTTPError, ValueError, OSError) as e:  # API, network, JSON, I/O
+            log.warning("topic=%s source=%s failed: %s", topic, src.name, e)
             continue
-        except Exception:  # one bad response must not stop the other source or topics
-            log.exception("topic=%s source=%s unexpected error", topic, name)
+        except Exception:  # one bad response must not stop the other sources or topics
+            log.exception("topic=%s source=%s unexpected error", topic, src.name)
             continue
         ok = True
-        kept = [it for it in got if on_topic(it.text, topic)]
-        log.info("topic=%s source=%s items=%d on_topic=%d", topic, name, len(got), len(kept))
+        kept = [it for it in got if on_topic(it.text, topic, whole=src.whole_text)]
+        log.info("topic=%s source=%s items=%d on_topic=%d", topic, src.name, len(got), len(kept))
         items += kept
     return items if ok else None
 
 
 def ingest_cycle(conn) -> list[Item]:
-    """Poll Context.dev for every topic and upsert its items (one commit per topic: a bad topic is rolled
-    back alone), then store.set_last_poll if at least one topic was fetched. Returns the fetched items.
+    """Poll every active source for every topic and upsert its items (one commit per topic: a bad topic is
+    rolled back alone), then store.set_last_poll if at least one topic was fetched. Returns the fetched items.
     A lost (broken/closed) connection propagates."""
-    client = _get_client()
-    if client is None:
-        log.warning("CONTEXT_DEV_API_KEY is empty: no ingest")
-        return []
     window_h = _positive("DETECT_WINDOW_HOURS", 6)
+    sources = active_sources(window_h)
+    if not sources:
+        log.warning("no ingest source (CONTEXT_DEV_API_KEY empty and BLUESKY_ENABLED=0)")
+        return []
     any_ok = False
     fetched: list[Item] = []
     for topic in topics():
         try:
             now = datetime.now(timezone.utc)
-            since = news_since(now, window_h, store.latest_published(conn, topic, "context_news"))
-            items = fetch_topic(client, topic, since)
+            sinces = {src.name: src.since(conn, topic, now) for src in sources}
+            items = fetch_topic(sources, topic, sinces)
             if items is None:
                 conn.rollback()  # ends the read transaction opened by latest_published
                 continue
