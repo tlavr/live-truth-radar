@@ -105,18 +105,27 @@ def gemini_embed(texts: list[str]) -> np.ndarray:
     return _normalize(np.stack([vectors[t] for t in texts]))
 
 
-def embed(texts: list[str]) -> np.ndarray:
-    """Embed texts -> array (n, d) with unit rows. Backend: LTR_EMBEDDER ("gemini" | "hash")."""
+def embed_with_backend(texts: list[str]) -> tuple[np.ndarray, str]:
+    """Like embed(), plus the backend that actually produced the vectors ("gemini" | "hash").
+
+    Beam thresholds depend on the backend (detect.config.AnalyzerConfig.for_embedder), and a
+    Gemini failure silently falls back to hashing, so callers that tune by backend use this.
+    """
     texts = list(texts)
-    if not texts:
-        return np.zeros((0, HASH_DIM), dtype=np.float64)
     backend = (os.environ.get("LTR_EMBEDDER") or "gemini").strip().lower()
-    if backend == "hash":
-        return hash_embed(texts)
-    if backend != "gemini":
+    if backend not in ("gemini", "hash"):
         raise ValueError(f"unknown LTR_EMBEDDER={backend!r} (expected 'gemini' or 'hash')")
+    if not texts:
+        return np.zeros((0, HASH_DIM), dtype=np.float64), backend
+    if backend == "hash":
+        return hash_embed(texts), "hash"
     try:
-        return gemini_embed(texts)
+        return gemini_embed(texts), "gemini"
     except Exception as exc:  # keep the live demo running: degrade, do not crash
         log.warning("Gemini embeddings unavailable (%s: %s); using the hashing embedder", type(exc).__name__, exc)
-        return hash_embed(texts)
+        return hash_embed(texts), "hash"
+
+
+def embed(texts: list[str]) -> np.ndarray:
+    """Embed texts -> array (n, d) with unit rows. Backend: LTR_EMBEDDER ("gemini" | "hash")."""
+    return embed_with_backend(texts)[0]

@@ -29,7 +29,7 @@ from contracts.models import AmbiguityMap, Finding, Item, finding_id
 from detect import cfar, sprt
 from detect.config import DEFAULT, AnalyzerConfig
 from detect.correlation import TopicSignal, n_lag_steps, pair_correlation, topic_signal
-from detect.embed import embed
+from detect.embed import embed_with_backend
 from detect.news_echo import news_echo_note
 
 MISMATCH_EDGES = [round(0.1 * k, 1) for k in range(11)]
@@ -54,7 +54,8 @@ def detect(
 
     ordered = {topic: sorted(group, key=lambda it: (it.published_at, it.id)) for topic, group in by_topic.items()}
     flat = [it for group in ordered.values() for it in group]
-    E = embed([it.text for it in flat])
+    E, backend = embed_with_backend([it.text for it in flat])
+    cfg = cfg.for_embedder(backend)
     now = datetime.now(timezone.utc)
 
     findings: list[Finding] = []
