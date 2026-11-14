@@ -227,7 +227,7 @@ const AXES = [
   {t: '0s', p: [X(0), 0, Z(0) + .7], a: 'c'},
   {t: 'Time between posts', p: [X(L / 2), 0, Z(0) + 1.05], a: 'c', title: 1},
   {t: '10m', p: [X(L), 0, Z(0) + .7], a: 'c'},
-  {t: 'same words', p: [X(0) - .75, 0, Z(0)], a: 'r'},
+  {t: 'same meaning', p: [X(0) - .75, 0, Z(0)], a: 'r'},
   {t: 'Wording gap', p: [X(0) - 1, 0, Z(M / 2)], a: 'r', title: 1},
   {t: 'unrelated', p: [X(0) - .75, 0, Z(M)], a: 'r'},
 ].map(d => { const el = document.createElement('span'); el.textContent = d.t; if (d.title) el.className = 't'; $('axes').append(el); return {...d, el, v: new THREE.Vector3()}; });
@@ -264,7 +264,7 @@ function hover(e) {
   if (l < 0 || m < 0 || l >= amb.lag_edges_sec.length - 1 || m >= amb.mismatch_edges.length - 1) return hideTip();
   const mine = amb.counts[m]?.[l] ?? 0, others = amb.background?.[m]?.[l] ?? 0;
   U.uHover.value.set(X(l), X(l + 1), Z(m + 1), Z(m));
-  tip.innerHTML = `<b>${fmtLag(amb.lag_edges_sec[l])}–${fmtLag(amb.lag_edges_sec[l + 1])} lag, ${Math.round(amb.mismatch_edges[m] * 100)}–${Math.round(amb.mismatch_edges[m + 1] * 100)}% gap</b>
+  tip.innerHTML = `<b>${fmtLag(amb.lag_edges_sec[l])}–${fmtLag(amb.lag_edges_sec[l + 1])} lag, ${Math.round(amb.mismatch_edges[m] * 100)}–${Math.round(amb.mismatch_edges[m + 1] * 100)}% wording gap</b>
     <span>${mine} group, ${others} background</span>`;
   const x = e.clientX - b.left, y = e.clientY - b.top;
   tip.style.transform = `translate(${Math.min(Math.max(8, x + 14), b.width - 256)}px,${Math.max(8, y - 66)}px)`;
@@ -423,7 +423,7 @@ function render() {
     ` <small>${pfaText()} · ${snr}</small>` +
     ` <a class="how" href="/explain?id=${encodeURIComponent(f.id)}&topic=${encodeURIComponent(f.topic)}&alpha=${S.alpha}">How we got here →</a>`;
   const pairs = sum(f.ambiguity?.counts);
-  $('lgSpike').textContent = hit ? `${pairs} pairs of this group, close in time and wording` : `${pairs} pairs of this group`;
+  $('lgSpike').textContent = hit ? `${pairs} pairs of this group, close in time and meaning` : `${pairs} pairs of this group`;
   $('lgCarpet').textContent = `${sum(f.ambiguity?.background)} other pairs in the topic across 10m`;
 
   const x = f.explanation;

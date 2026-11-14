@@ -33,6 +33,9 @@ them (1-2 sentences, under 240 characters, casual social-media style, same meani
 
 Rules:
 - Talking points are opinions, slogans or calls to action (share, boycott, sign, don't believe the hype).
+- Every talking point and every variation names the topic's main subject (the company, person, place
+  or event) in its own words, so a reader without context still sees what it is about. The detector
+  keeps only posts that read as on topic; a generic slogan that never names the subject is dropped.
 - Do NOT state or imply unverified factual allegations about real, named people or organisations
   (no claims about crimes, private life, health, espionage and the like).
 - No hate speech, no calls for violence, no real @handles, no URLs.

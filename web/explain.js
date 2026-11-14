@@ -6,7 +6,7 @@ import {topicLabel} from './labels.js';
 
 // detect/config.py defaults, shown in the plain-language hints
 const CFAR_K = 3, TAU_MAX_MIN = 10, NEWS_ECHO_MIN = 60, DESIGN_ALPHA = 0.02, MAX_IDS = 200;
-const CLOSE_MISMATCH_BINS = 3;  // ambiguity rows 0..0.3 of semantic mismatch = "near-identical wording"
+const CLOSE_MISMATCH_BINS = 3;  // ambiguity rows 0..0.3 of semantic mismatch = "nearly the same meaning"
 const PAL = {cool: '#63CF97', warm: '#B7F063', peak: '#FFE066', muted: '#A3B8AA', grid: 'rgba(218,240,224,.12)'};
 
 const $ = id => document.getElementById(id);
@@ -133,7 +133,7 @@ function render(f, items, points) {
     hit || f.verdict === 'watching'
       ? `Yes. The pairs that link these accounts stand more than ${CFAR_K} noise widths above a typical pair in this topic, and all pairs together are louder than an average pair.`
       : `These accounts passed the threshold, but the post-by-post test (step 4) cleared them.`,
-    bars(f) + `<p class="hint">${g.all ? `${pct(g.share)} of this group's close-in-time post pairs use near-identical wording` : 'No close-in-time post pairs inside the group'}` +
+    bars(f) + `<p class="hint">${g.all ? `${pct(g.share)} of this group's close-in-time post pairs say nearly the same thing` : 'No close-in-time post pairs inside the group'}` +
       `${bg.all ? `, vs ${pct(bg.share)} for all other pairs in the topic.` : '.'}</p>`,
     `One whisper is lost in the crowd noise, but a choir of ${n} voices singing the same line stands out. ` +
     `The "Average pair" bar is a typical pair of the group; "All ${n} accounts" adds every pair up.`));
