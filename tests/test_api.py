@@ -266,11 +266,12 @@ def test_attack_is_public_once_per_5_min_per_topic_and_reveals_posts_over_time(c
 
     c, fake = client
     monkeypatch.setenv("TOPICS", "helsinki-tram-fares")
-    body = {"topic": "helsinki-tram-fares", "n_accounts": 12}
+    body = {"topic": "helsinki-tram-fares", "n_accounts": 12, "posts_per_bot": 2}
     assert c.get("/api/attack/topics").json() == ["helsinki-tram-fares"]  # monitored and with variations
-    assert c.post("/api/attack", json={**body, "n_accounts": 50}).status_code == 422  # 12 / 25 only (CFAR self-masking)
+    assert c.post("/api/attack", json={**body, "n_accounts": 50}).status_code == 422  # 12 / 25 / 40 (CFAR self-masking)
+    assert c.post("/api/attack", json={**body, "posts_per_bot": 3}).status_code == 422
     r0 = c.post("/api/attack", json={"topic": "helsinki-tram-fares"})
-    assert r0.status_code == 200 and r0.json()["n_items"] == 50  # default: 25 bots x 2 volleys
+    assert r0.status_code == 200 and r0.json()["n_items"] == 100  # default: 25 bots x 4 posts
     fake.attacks.clear()
     assert c.post("/api/attack", json={**body, "topic": "jensen-huang-resignation"}).status_code == 400
 
@@ -352,3 +353,14 @@ def test_attack_rejects_unknown_scenario(client, monkeypatch):
     c, _ = client
     monkeypatch.setenv("TOPICS", "helsinki-tram-fares")
     assert c.post("/api/attack", json={"topic": "helsinki-tram-fares", "scenario": "nope"}).status_code == 422
+
+
+def test_more_posts_per_bot_repeat_the_volleys_with_the_same_bots():
+    click = datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc)
+    two = main._attack_campaign("helsinki-tram-fares", click, 25)
+    four = main._attack_campaign("helsinki-tram-fares", click, 25, posts_per_bot=4)
+    assert len(two) == 50 and len(four) == 100 and len({it.id for it in four}) == 100
+    assert {it.author for it in four} == {it.author for it in two}  # more posts, not more bots
+    assert {it.campaign_id for it in four} == {two[0].campaign_id}
+    times = [it.published_at for it in four]
+    assert times == sorted(times) and times[49] < times[50]  # extra volleys come after the first two

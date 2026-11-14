@@ -30,18 +30,21 @@ const say = t => { $('msg').textContent = t; };
 
 // what each scenario does and where it should land on the radar's 3D field (time between posts x wording gap)
 const SCENARIOS = {
-  paraphrase: 'Paraphrase: every bot rewords the same message. Demo speed: 4× faster than the real schedule the metrics are measured on (~2.5 min). Expect a peak near zero lag, small wording gap.',
-  copypasta: 'Copypasta: every bot posts the very same text. Demo speed 4× (~2.5 min). Expect a sharp peak in the corner: zero lag, “same meaning”.',
-  drift: 'Drift: the text drifts further from the first post over time. Real speed (~10 min). Expect a ridge along the diagonal: the longer between two posts, the bigger the wording gap; late posts may slip out of the swarm.',
+  paraphrase: 'Paraphrase: every bot rewords the same message. Demo speed: 4× faster than the real schedule the metrics are measured on (~2.5 min for 2 posts per bot, ~6.5 min for 4). Expect a peak near zero lag, small wording gap.',
+  copypasta: 'Copypasta: in each volley every bot posts the very same text. Demo speed 4×. Expect a sharp peak in the corner: zero lag, “same meaning”.',
+  drift: 'Drift: the text drifts further from the first post over time. Real speed (~10 min for 2 posts per bot, longer for more). Expect a ridge along the diagonal: the longer between two posts, the bigger the wording gap; late posts may slip out of the swarm.',
 };
-const showScenario = () => { $('scenarioHint').textContent = SCENARIOS[$('scenario').value]; };
+const showScenario = () => {
+  $('scenarioHint').textContent = SCENARIOS[$('scenario').value];
+  $('total').textContent = `= ${+$('size').value * +$('ppb').value} posts`;
+};
 
 async function init() {
   try {
     const topics = await api('/api/attack/topics');
     $('topic').innerHTML = topics.map(t => `<option value="${esc(t)}">${esc(topicLabel(t))}</option>`).join('');
     const ready = topics.length > 0;
-    for (const id of ['topic', 'size', 'scenario', 'attack']) $(id).disabled = !ready;
+    for (const id of ['topic', 'size', 'ppb', 'scenario', 'attack']) $(id).disabled = !ready;
     say(ready ? 'Ready.' : 'No monitored topic has prepared bot messages yet.');
     if (S.campaign) follow(S.campaign);
   } catch (e) {
@@ -53,7 +56,7 @@ async function attack() {
   $('attack').disabled = true;
   try {
     const r = await api('/api/attack', {method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({topic: $('topic').value, n_accounts: +$('size').value, scenario: $('scenario').value})});
+      body: JSON.stringify({topic: $('topic').value, n_accounts: +$('size').value, posts_per_bot: +$('ppb').value, scenario: $('scenario').value})});
     say(`Campaign ${r.campaign_id} launched: ${r.n_items} posts until ${hms(r.ends_at)} UTC.`);
     $('log').innerHTML = '';
     S.firstHit = null;
@@ -112,6 +115,6 @@ async function tick() {
 }
 
 $('attack').addEventListener('click', attack);
-$('scenario').addEventListener('change', showScenario);
+for (const id of ['scenario', 'size', 'ppb']) $(id).addEventListener('change', showScenario);
 showScenario();
 init();

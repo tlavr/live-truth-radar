@@ -54,9 +54,17 @@ select{background:#0C080E;border:1px solid var(--line);border-radius:4px;padding
       <select id="topic" disabled></select>
       <label for="size">Bots</label>
       <select id="size" disabled>
+        <option value="40">40</option>
         <option value="25" selected>25</option>
         <option value="12">12</option>
       </select>
+      <label for="ppb">Posts per bot</label>
+      <select id="ppb" disabled>
+        <option value="2">2</option>
+        <option value="4" selected>4</option>
+        <option value="6">6</option>
+      </select>
+      <span class="hint" id="total"></span>
       <label for="scenario">Scenario</label>
       <select id="scenario" disabled>
         <option value="paraphrase" selected>Paraphrase</option>
@@ -67,7 +75,8 @@ select{background:#0C080E;border:1px solid var(--line);border-radius:4px;padding
     </div>
     <p class="msg" id="msg" aria-live="polite"></p>
     <p class="hint" id="scenarioHint"></p>
-    <p class="hint">Each bot posts twice, in two volleys. One attack per topic every 5 minutes. Watch it on the radar:
+    <p class="hint">Each bot posts in volleys (posts per bot = number of volleys). Up to 40 bots: with ~50 the swarm hides
+      itself from the detector (its own pairs become the noise estimate). One attack per topic every 5 minutes. Watch it on the radar:
       open the topic on the main page and press Check.</p>
   </section>
   <section class="box stats" aria-live="polite">

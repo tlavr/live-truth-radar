@@ -32,7 +32,7 @@ POINTS_PATH = operating.POINTS_PATH
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 MAX_ITEM_IDS = 200
 INJECT_MIN_GAP = timedelta(minutes=5)  # T12d: inject API and red team attack, each once per 5 min per topic
-DEMO_SPEED = 4  # T12d red team attack: the agreed schedule="future" campaign played 4x faster (~2.5 min, not ~10)
+DEMO_SPEED = 4  # T12d red team attack: the agreed schedule="future" campaign played 4x faster (2 posts per bot: ~2.5 min, not ~10)
 RADAR_DEFAULT_SINCE = timedelta(minutes=15)
 
 @asynccontextmanager
@@ -263,7 +263,21 @@ def _drift_texts(topic: str, posts: list[Item]) -> list[Item]:
     return [it.model_copy(update={"text": ladder[round(r * (len(ladder) - 1) / last)]}) for r, it in enumerate(posts)]
 
 
-def _attack_campaign(topic: str, click: datetime, n_accounts: int, scenario: str = "paraphrase") -> list[Item]:
+def _more_rounds(base: list[Item], n_accounts: int, posts_per_bot: int) -> list[Item]:
+    """posts_per_bot > 2: the same bots post more volleys, repeating P2's two volleys (texts, lags) one volley
+    period later each time. Extra posts add no new account pairs, so a big campaign does not blind CFAR."""
+    base = sorted(base, key=lambda it: (it.published_at, it.id))
+    v1, v2 = base[:n_accounts], base[n_accounts:]
+    period = 2 * (v2[0].published_at - v1[0].published_at)  # one pair of volleys
+    posts, cid = list(base), base[0].campaign_id
+    for r in range(2, posts_per_bot):
+        for it in (v1 if r % 2 == 0 else v2):
+            posts.append(it.model_copy(update={"id": f"{cid}-{len(posts)}", "published_at": it.published_at + (r // 2) * period}))
+    return posts
+
+
+def _attack_campaign(topic: str, click: datetime, n_accounts: int, scenario: str = "paraphrase",
+                     posts_per_bot: int = 2) -> list[Item]:
     """make_campaign(schedule="future") (P2: same swarm shape, accounts and lags as eval), then per scenario:
     * paraphrase: P2's texts (rewordings of one message per volley), clock DEMO_SPEED x faster from the click
       (lags 15-120 s -> 4-30 s, second volley after ~2 min);
@@ -273,8 +287,8 @@ def _attack_campaign(topic: str, click: datetime, n_accounts: int, scenario: str
     from synth.campaign import make_campaign
 
     speed = SCENARIO_SPEED[scenario]
-    posts = [it.model_copy(update={"published_at": click + (it.published_at - click) / speed})
-             for it in make_campaign(topic, click, n_accounts=n_accounts, schedule="future")]
+    base = _more_rounds(make_campaign(topic, click, n_accounts=n_accounts, schedule="future"), n_accounts, posts_per_bot)
+    posts = [it.model_copy(update={"published_at": click + (it.published_at - click) / speed}) for it in base]
     posts.sort(key=lambda it: (it.published_at, it.id))
     if scenario == "copypasta":
         # one identical text per volley (n_accounts posts each): with a single text for the whole campaign every
@@ -287,9 +301,10 @@ def _attack_campaign(topic: str, click: datetime, n_accounts: int, scenario: str
 
 class AttackRequest(BaseModel):
     topic: str = Field(min_length=1, max_length=64)
-    # <= 25: with ~50 bots the swarm's own pairs fill most of the 2000 CFAR reference cells
-    # (cfar_min_ref_cells) and raise the threshold above the swarm itself, so it is not detected
-    n_accounts: Literal[12, 25] = 25
+    # <= 40: with ~50 bots the swarm's own pairs fill most of the 2000 CFAR reference cells
+    # (cfar_min_ref_cells) and raise the threshold above the swarm itself, so it is not detected (40 still is)
+    n_accounts: Literal[12, 25, 40] = 25
+    posts_per_bot: Literal[2, 4, 6] = 4  # more posts, not more bots: e.g. 25 x 4 = 100 posts
     scenario: Scenario = "paraphrase"
 
 
@@ -324,13 +339,13 @@ def attack_topics() -> list[str]:
 @app.post("/api/attack", response_model=AttackResponse)
 def attack(req: AttackRequest) -> AttackResponse:
     """Red team console (public; the product itself has no inject button): a synthetic swarm whose posts appear one
-    by one from now on (~2.5 min at DEMO_SPEED); one attack per 5 min per topic (429 with Retry-After)."""
+    by one from now on (at DEMO_SPEED ~2.5 / 6.5 / 10.5 min for 2 / 4 / 6 posts per bot); one attack per 5 min per topic (429 with Retry-After)."""
     if req.topic not in _attack_topics():
         raise HTTPException(status_code=400, detail=f"topic {req.topic!r} is not monitored or has no variations")
     click = datetime.now(timezone.utc)
     with store.connect() as conn:
         _rate_limit("attack", store.last_attack_at(conn, req.topic), click)
-        campaign = _attack_campaign(req.topic, click, req.n_accounts, req.scenario)
+        campaign = _attack_campaign(req.topic, click, req.n_accounts, req.scenario, req.posts_per_bot)
         cid = campaign[0].campaign_id
         starts, ends = min(it.published_at for it in campaign), max(it.published_at for it in campaign)
         if store.upsert_items(conn, campaign) == 0:  # same-second campaign: every id already exists

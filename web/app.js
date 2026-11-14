@@ -9,7 +9,6 @@ import {topicLabel, platformLabel} from './labels.js';
 
 const POLL_MS = 15000;
 const LIVE_MS = 2500;              // T12d: Check starts a live scan of the topic; frames + findings every 2.5 s
-const LIVE_HIST = 90;              // frames kept for the live chart (~15 min at one frame per 10 s)
 const WINDOW_HOURS = 6;            // DETECT_WINDOW_HOURS on the worker
 const DESIGN_ALPHA = 0.02;         // SPRT alpha of the findings table (T12c default point)
 const RANK = {coordinated: 0, watching: 1, organic: 2};
@@ -41,7 +40,7 @@ async function api(path, opts) {
 const S = {
   topics: [], findings: [], lastPoll: null, metrics: null, points: null, served: null, alpha: DESIGN_ALPHA,
   topic: null, list: [], sel: 0, items: new Map(),
-  live: null,  // T12d live scan: {topic, session, since, frame, hist, timer, busy, error}
+  live: null,  // T12d live scan: {topic, session, since, frame, timer, busy, error}
   weak: false, pickedWeak: false,  // T12d: groups below the alert threshold are folded into one line
 };
 // T12c: the false-alarm slider picks an SPRT alpha; /api/alerts?alpha= serves the findings at that point
@@ -580,7 +579,7 @@ const closeSession = id => fetch(`/api/scan/${id}/stop`, {method: 'POST', keepal
 
 async function liveStart(topic) {
   liveStop();
-  const L = {topic, session: null, since: null, frame: null, hist: [], timer: null, busy: false, error: null};
+  const L = {topic, session: null, since: null, frame: null, timer: null, busy: false, error: null};
   S.live = L; renderLive();
   try {
     L.session = (await api('/api/scan', post({topics: [topic]}))).session_id;
@@ -615,10 +614,7 @@ async function liveTick(L) {
       return;
     }
     if (S.live !== L) return;
-    if (frames.length) {
-      L.frame = frames.at(-1); L.since = L.frame.at;
-      L.hist.push(...frames); L.hist.splice(0, Math.max(0, L.hist.length - LIVE_HIST));
-    }
+    if (frames.length) { L.frame = frames.at(-1); L.since = L.frame.at; }
     if (!(await refresh())) throw new Error('alerts unavailable');
     L.error = null;
   } catch (e) {
@@ -644,29 +640,6 @@ function renderLive(msg, last) {
   // the live frame is the design alpha; other slider points are recomputed on the worker's slow pass only
   if (S.alpha !== DESIGN_ALPHA) bits.push(`live at ${pct(DESIGN_ALPHA)}; the ${pct(S.alpha)} view refreshes every ~5 min`);
   out.innerHTML = `<span class="live-dot on"></span>Live · ${esc(bits.join(' · '))}${L.error ? ` · ${esc(L.error)}` : ''}`;
-  $('liveChart').innerHTML = liveChart(L.hist);
-}
-
-// One bar per detector scan (~10 s): accounts in the strongest group; yellow = alert (coordinated),
-// grey = a weaker group (news echo / not sure yet). A swarm shows up as bars growing until they turn yellow.
-function liveChart(hist) {
-  if (!hist.length) return '';
-  const w = 480, h = 92, top = 16, n = Math.max(hist.length, 30), bw = w / n;
-  const val = f => f.top_n_accounts ?? 0, max = Math.max(5, ...hist.map(val));
-  const y = v => h - v / max * (h - top);
-  const first = hist.findIndex(f => f.top_verdict === 'coordinated');
-  const bars = hist.map((f, k) => {
-    const v = val(f), hit = f.top_verdict === 'coordinated', x = (n - hist.length + k) * bw;
-    return `<rect x="${(x + bw * .15).toFixed(1)}" y="${y(v).toFixed(1)}" width="${(bw * .7).toFixed(1)}" height="${(h - y(v)).toFixed(1)}" rx="1.5"
-      fill="${hit ? PAL.peak : PAL.muted}" fill-opacity="${hit ? 1 : .35}"><title>${f.at.slice(11, 19)} UTC: ${v} accounts${hit ? ' — alert' : f.top_verdict ? ` — ${f.top_verdict}` : ''}</title></rect>`;
-  }).join('');
-  const mark = first < 0 ? '' : (() => { const x = (n - hist.length + first + .5) * bw;
-    return `<line x1="${x}" x2="${x}" y1="${top - 6}" y2="${h}" stroke="${PAL.peak}" stroke-opacity=".5" stroke-dasharray="2 3"/>
-      <text x="${Math.min(x + 4, w - 70)}" y="${top - 6}" fill="${PAL.peak}" font-size="11">alert at ${hist[first].at.slice(11, 19)}</text>`; })();
-  return `<p class="live-cap">Accounts in the strongest group, per scan · <b>yellow = alert</b>, grey = weaker group</p>
-    <svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Accounts in the strongest group per detector scan">
-      <line x1="0" x2="${w}" y1="${h - .5}" y2="${h - .5}" stroke="${PAL.cool}" stroke-opacity=".25"/>
-      <text x="0" y="10" fill="${PAL.muted}" font-size="11">${max}</text>${bars}${mark}</svg>`;
 }
 
 /* ------------------------------------------------------------------ wiring */

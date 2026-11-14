@@ -473,11 +473,6 @@ html:not([data-stage=home]) .feed{display:none}
 .live-dot.on{background:var(--cool);animation:livePulse 1.6s ease-out infinite}
 @keyframes livePulse{0%{box-shadow:0 0 0 0 rgba(99,207,151,.55)}100%{box-shadow:0 0 0 8px rgba(99,207,151,0)}}
 @media (prefers-reduced-motion:reduce){.live-dot.on{animation:none}}
-.live-chart{width:min(480px,100%);margin:8px auto 0;position:relative;z-index:1}
-.live-chart:not(:empty){padding:8px 12px 10px;border:1px solid var(--hairline);border-radius:14px;background:var(--surface-solid)}
-.live-chart svg{display:block;width:100%;height:auto}
-.live-cap{margin:0 0 4px;font-size:12px;color:var(--tertiary);text-align:center}
-.live-cap b{color:var(--peak);font-weight:600}
 .groups .weak{opacity:.6}
 .groups .weak-toggle{color:var(--muted);border-style:dashed}
 .tabs{max-width:980px;margin:0 auto 28px;display:flex;gap:6px}
@@ -611,7 +606,6 @@ html:not([data-stage=home]) .fa{display:none}
           <button class="live-btn" id="liveBtn" type="button" data-on="false">Stop</button>
           <span class="live-msg" id="liveMsg" aria-live="polite"></span>
         </div>
-        <div class="live-chart" id="liveChart"></div>
       </div>
 
       <div class="legend-bar" id="legend">
