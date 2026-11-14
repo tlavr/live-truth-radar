@@ -74,10 +74,27 @@ def seed_fixtures(conn) -> list[str]:
     return list(dict.fromkeys(it.topic for it in items))
 
 
+def _needs_explanation(f: Finding) -> bool:
+    return f.verdict == "coordinated" and f.explanation is None
+
+
+def _with_explanation(f: Finding, posts: list[Item]) -> Finding:
+    """T11: coordinated findings get an LLM explanation (cached by id); never fails the detect step."""
+    from ingest.explain import explain_safe
+
+    exp = explain_safe(f, posts)
+    return f if exp is None else f.model_copy(update={"explanation": exp})
+
+
 def detect_topic(conn, topic: str, detector: Detector, window_hours: float) -> int:
     """Run the detector on the topic window and replace its findings; returns the number of findings."""
     items = store.window_items(conn, topic, window_hours)
     findings = detector(items)  # detect.pipeline.detect([]) == []; the mock ignores its input
+    # posts by id, not from the window: mock findings point at fixture posts older than the window
+    posts = {f.id: store.get_items(conn, f.item_ids) for f in findings if _needs_explanation(f)}
+    if posts:
+        conn.commit()  # end the read-only transaction: no idle-in-transaction during slow LLM calls
+        findings = [_with_explanation(f, posts[f.id]) if f.id in posts else f for f in findings]
     # the mock ignores its input and may return other topics: store each under its own topic
     by_topic: dict[str, list[Finding]] = defaultdict(list)
     for f in findings:
