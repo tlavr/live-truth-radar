@@ -1,0 +1,74 @@
+# CD (T15): every push to main is tested, the tested commit is deployed to the VPS (as `make deploy`) and smoke-checked.
+# Repo settings (Actions): secrets VPS_SSH_KEY (private deploy key), VPS_KNOWN_HOSTS (ssh-keyscan of the VPS),
+# VPS_HOST (user@host); variable PUBLIC_URL (https://<domain>).
+name: deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["docs/**", "**.md"]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: make test
+
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: SSH key and pinned host key
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          test -n "$VPS_SSH_KEY" && test -n "$VPS_KNOWN_HOSTS" || { echo "VPS_SSH_KEY / VPS_KNOWN_HOSTS secrets are missing"; exit 1; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+          printf 'Host *\n  StrictHostKeyChecking yes\n  BatchMode yes\n' > ~/.ssh/config
+      - name: Deploy exactly the tested commit (as make deploy, but merge GITHUB_SHA instead of pulling main)
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_DIR: live-truth-radar  # keep in sync with REMOTE_DIR in the Makefile
+        run: |
+          test -n "$VPS_HOST" || { echo "VPS_HOST secret is missing"; exit 1; }
+          # a newer run may have deployed already: then GITHUB_SHA is an ancestor and the merge is a no-op
+          ssh "$VPS_HOST" "cd $REMOTE_DIR && git fetch -q origin main && git merge --ff-only $GITHUB_SHA \
+            && docker compose -f infra/docker-compose.yml --env-file .env up -d --build"
+      - name: Wait for /health
+        env:
+          PUBLIC_URL: ${{ vars.PUBLIC_URL }}
+        run: |
+          test -n "$PUBLIC_URL" || { echo "PUBLIC_URL variable is missing"; exit 1; }
+          for i in $(seq 1 30); do curl -fsS --max-time 5 "$PUBLIC_URL/health" && exit 0; sleep 3; done
+          echo "/health did not answer in 90 s"; exit 1
+      - run: pip install -r requirements.txt
+      - name: Smoke
+        env:
+          PUBLIC_URL: ${{ vars.PUBLIC_URL }}
+        run: make smoke URL="$PUBLIC_URL"
