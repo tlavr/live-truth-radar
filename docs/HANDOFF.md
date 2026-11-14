@@ -99,9 +99,9 @@
 ## 6. Открытые вопросы
 *Заполняем на T0 и T2.*
 - Роли: P1 «Труба» = Никита (`makarovns`), включая T4 и референс фронтенда; P2 «Мозг» = Тимур (`tlavr`).
-- Темы для поллинга (решено 14.11, 6 шт., `TOPICS` в `.env` локально и на VPS): `jensen-huang-resignation`, `france-riots`, `us-midterms-ai-fakes`, `europe-bomb-threat-hoaxes`, `microsoft-global-outage`, `ukraine-peace-talks`. Slug → поисковый запрос Context.dev решаем в T6.
+- Темы для поллинга (решено 14.11, 6 шт., `TOPICS` в `.env` локально и на VPS): `jensen-huang-resignation`, `france-riots`, `us-midterms-ai-fakes`, `europe-bomb-threat-hoaxes`, `microsoft-global-outage`, `ukraine-peace-talks`. Slug → запрос Context.dev и ключевые слова фильтра — таблица `TOPIC_SPECS` в `ingest/contextdev.py` (проба 14.11, заголовков по теме из 50 за 6 ч: outage 43, resignation 9, bomb-hoaxes 9, ukraine 5, france-riots 0, midterms 0 — у последних двух живого потока сейчас нет); для slug вне таблицы запрос = slug через пробелы. `helsinki-tram-fares` живых новостей не даёт, только синтетика/инжект. Соль `LTR_HASH_SALT` — общая для команды, передаётся лично (не в git).
 - Codex: пока нет (код пишем с Claude). Подключаем ли позже — решить не позже Сб 11:00; иначе в сабмит не идёт.
-- Результат T2: что реально отдают news search и social scrape Context.dev (автор? время?): ?
+- Результат T2 (14.11): **news search** (`natural_language`) отдаёт `published_at` 100/100, `authors` 74/100 (часто пусто) → аккаунт = домен издателя; поиск ранжирует по релевантности и добивает лимит (50) свежими нерелевантными новостями → worker (и для news, и для Reddit) оставляет только элементы, у которых **заголовок** проходит фильтр темы (в описании часто блок «похожие статьи»): для тем из `TOPIC_SPECS` в тексте должно быть хотя бы одно слово из каждой группы ключевых слов, для остальных — ≥ половины слов запроса длиной ≥ 3 букв; 5 кредитов за запрос. **Social:** отдельного поиска по теме нет; Reddit через `/web/scrape` (`reddit-search`, `reddit-subreddit`) сейчас даёт `WEBSITE_ACCESS_ERROR` на всех URL (0 кредитов), TikTok/Instagram — только профили/посты, не по теме. Итог: fallback — news + синтетический рой (код Reddit оставлен, подхватится, если доступ появится).
 
 ## 7. Промпт для нового AI-ассистента
 ```
