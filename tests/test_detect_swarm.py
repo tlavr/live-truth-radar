@@ -1,6 +1,7 @@
 """T10: pair correlator, CFAR, SPRT, news echo and the full detect() on fixtures (offline, hash embedder)."""
 
 import time
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -12,7 +13,7 @@ from contracts.models import Item
 from detect import cfar, sprt
 from detect.config import DEFAULT, SLOW
 from detect.correlation import TopicSignal, build_signal, pair_correlation
-from detect.pipeline import detect
+from detect.pipeline import detect, drop_expired_synthetic
 from synth.campaign import make_campaign
 
 FIX = Path(__file__).resolve().parent.parent / "fixtures"
@@ -174,7 +175,7 @@ def test_news_echo_rule_can_be_switched_off():
 
 
 def test_cfar_subtracts_the_background_median():
-    n = 25  # 300 pairs: enough reference cells, no padding
+    n = 70  # 2415 pairs: enough reference cells, no padding
     R = np.full((n, n), 0.2)
     np.fill_diagonal(R, 1.0)
     assert cfar.swarm_groups(cfar.pair_z(R)) == []  # uniformly busy topic: nothing stands out
@@ -373,3 +374,81 @@ def test_large_window_needs_no_post_by_post_matrices():
     # held several (n, n) matrices at once (> 700 MB)
     assert peak < 250 * 2**20
     assert len(sig.pair_p) < n * n / 20  # only pairs within the lag window
+
+
+def test_two_injects_in_a_row_stay_coordinated():
+    # Two campaigns 16 s apart in a quiet topic: 24 swarm accounts, more pairs than the old cfar_min_ref_cells=200.
+    organic = [it for it in _items("items.json") if not it.synthetic]
+    quiet = sorted({it.author for it in organic})[:2]
+    t = datetime(2026, 11, 13, 19, 30, tzinfo=timezone.utc)
+    first = make_campaign(TOPIC, t, n_accounts=12, seed=3)
+    second = make_campaign(TOPIC, t + timedelta(seconds=16), n_accounts=12, seed=4)
+    items = [it for it in organic if it.author in quiet] + first + second
+    hits = [f for f in detect(items) if f.verdict == "coordinated"]
+    assert len(hits) == 1 and hits[0].synthetic
+    assert set(hits[0].accounts) == {it.author for it in first + second}
+
+
+def test_injected_campaign_expires_after_ttl_in_live_runs():
+    organic = [it for it in _items("items.json") if not it.synthetic]
+    click = datetime(2026, 11, 13, 19, 30, tzinfo=timezone.utc)
+    injected = make_campaign(TOPIC, click, n_accounts=12, seed=1)
+    t = max(it.published_at for it in injected)  # the TTL runs from the newest campaign post
+    ttl = timedelta(seconds=DEFAULT.synthetic_ttl_sec)
+
+    def coordinated(now):
+        return [f for f in detect(organic + injected, now=now) if f.verdict == "coordinated"]
+
+    # the newest post is 4-6 min before the click, so the inject lasts at least 9 min after the click
+    assert [f.synthetic for f in coordinated(click + timedelta(minutes=9))] == [True]
+    assert [f.synthetic for f in coordinated(t + ttl - timedelta(seconds=1))] == [True]
+    assert not [f for f in coordinated(t + ttl + timedelta(seconds=1)) if f.synthetic]
+    assert [f.synthetic for f in coordinated(None)] == [True]  # tests and eval keep every item
+
+
+def test_naive_now_is_rejected():
+    with pytest.raises(ValueError, match="timezone-aware"):
+        detect(_items("items.json"), now=datetime(2026, 11, 13, 19, 30))
+
+
+def test_synthetic_items_without_campaign_id_expire_one_by_one():
+    now = datetime(2026, 11, 13, 19, 30, tzinfo=timezone.utc)
+    old, fresh = make_campaign(TOPIC, now, n_accounts=3, seed=1)[:2]
+    old = old.model_copy(update={"campaign_id": None, "published_at": now - timedelta(hours=1)})
+    fresh = fresh.model_copy(update={"campaign_id": None, "published_at": now})
+    kept = drop_expired_synthetic([old, fresh], now, DEFAULT.synthetic_ttl_sec)
+    assert [it.id for it in kept] == [fresh.id]
+
+
+def _wire_story(with_social: bool = True) -> list[Item]:
+    # Outlets reprint one wire story within about a minute (the live microsoft-global-outage false alarm):
+    # the _news_burst headline, posted by context_news outlets instead of readers. with_social=False
+    # drops the organic social posts: the news-only [ALT] stream, where the news-echo rule is off.
+    burst = [it for it in _news_burst(with_article=False) if it.author.startswith("reader_")]
+    news = [it.model_copy(update={"source": "context_news", "author": f"outlet{it.author[-1]}.example"}) for it in burst]
+    organic = [it for it in _items("items.json") if not it.synthetic]
+    background = organic if with_social else [it.model_copy(update={"source": "context_news"}) for it in organic]
+    return background + news
+
+
+def test_news_reprint_is_capped_at_watching():
+    for with_social in (True, False):
+        control = [f for f in detect(_wire_story(with_social), cfg=replace(DEFAULT, news_reprint_enabled=False))
+                   if any(a.startswith("outlet") for a in f.accounts)]
+        assert [f for f in control if f.verdict == "coordinated"], with_social  # the rule is what caps it
+        findings = [f for f in detect(_wire_story(with_social)) if any(a.startswith("outlet") for a in f.accounts)]
+        assert findings, with_social
+        for f in findings:
+            assert f.verdict != "coordinated"
+            if all(a.startswith("outlet") for a in f.accounts):
+                by_id = {it.id: it for it in _wire_story(with_social)}
+                earliest = min((by_id[i] for i in f.item_ids), key=lambda it: (it.published_at, it.id))
+                assert f.note == "news reprint: " + earliest.text[:80], f.note
+
+
+def test_inject_into_news_only_topic_stays_coordinated():
+    news = _wire_story(with_social=False)
+    injected = make_campaign(TOPIC, datetime(2026, 11, 13, 19, 30, tzinfo=timezone.utc), n_accounts=12, seed=2)
+    hits = [f for f in detect(news + injected) if f.verdict == "coordinated"]
+    assert len(hits) == 1 and hits[0].synthetic and hits[0].note is None
+    assert set(hits[0].accounts) == {it.author for it in injected}

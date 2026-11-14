@@ -39,7 +39,10 @@ class AnalyzerConfig:
     cfar_sigma_floor: float = 0.05
     # Minimum reference cells: a sparse topic is padded with R = 0 pairs (the H0 value of
     # two unrelated accounts), so a swarm that is most of a quiet topic cannot become its own background.
-    cfar_min_ref_cells: int = 200
+    # 2000 (was 200): two or three demo injects in one live topic (24-36 accounts, 276-630 pairs) are
+    # still a "quiet" topic, otherwise the swarm pairs outnumber the padding and become the background.
+    # Topics above ~1000 pairs (~45 accounts) keep the background median (busy topic, test_detect_swarm).
+    cfar_min_ref_cells: int = 2000
     min_swarm_accounts: int = 3
 
     # SPRT (3.7).
@@ -52,10 +55,18 @@ class AnalyzerConfig:
     # padded with echo = 0 (an isolated post) up to this many posts in a quiet topic.
     sprt_min_ref_posts: int = 30
 
+    # Injected campaigns count for detection this long after their newest post, then drop out, so
+    # repeated demo injects do not pile up in the window. Applied only when detect() gets `now`.
+    # Measured from the newest post, which make_campaign puts ~4-6 min before the click: 900 s keeps
+    # an inject in effect ~9-11 min after the click (target ~10 min).
+    synthetic_ttl_sec: float = 900.0
+
     # News echo (3.8).
     news_echo_cos: float = 0.8
     news_echo_max_age_sec: float = 3600.0
     news_echo_enabled: bool = True
+    # News reprint (3.8): a group made only of context_news articles is capped at "watching".
+    news_reprint_enabled: bool = True
 
     def for_embedder(self, backend: str) -> AnalyzerConfig:
         """Same config with the beam thresholds of the embedder that produced the vectors."""
