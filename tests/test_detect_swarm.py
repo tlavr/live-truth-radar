@@ -516,3 +516,61 @@ def test_viral_echo_needs_accounts_outside_the_group():
     # one copypasta wave of real accounts with nobody else repeating it: the group's own posts are no "spread"
     [f] = [f for f in detect(_meme_waves(n_waves=1)) if any(a.startswith("fan_") for a in f.accounts)]
     assert f.verdict == "coordinated" and f.note is None
+
+
+def test_news_reprint_share_rule_unit():
+    from detect.news_echo import news_reprint_note
+
+    texts = ["post A", "Wire story headline", "post B", "Wire story again"]
+    is_news = np.array([False, True, False, True])
+    posts = np.arange(4)
+    assert news_reprint_note(is_news, texts, posts) == "news reprint: Wire story headline"  # 2/4 >= 0.5, earliest article
+    assert news_reprint_note(is_news, texts, posts, replace(DEFAULT, news_reprint_min_share=1.0)) is None  # old rule
+    assert news_reprint_note(np.array([True, False, False, False]), texts, posts) is None  # 1/4 articles: people lead
+    assert news_reprint_note(np.zeros(4, dtype=bool), texts, posts) is None
+    synth = np.array([False, False, True, False])
+    assert news_reprint_note(is_news, texts, posts, is_synthetic=synth) is None  # an inject is never capped here
+    assert news_reprint_note(is_news, texts, posts, replace(DEFAULT, news_reprint_enabled=False)) is None
+
+
+def _wire_story_with_outlet_posts() -> list[Item]:
+    """The live 15.11 false alarm (spacex-starship, faa-ground-stop): outlets publish one wire story as articles
+    and, within the same minutes, as their own social posts; the articles are at least half of the group."""
+    items = _wire_story(with_social=True)
+    outlets = [it for it in items if it.author.startswith("outlet")]
+    posts = [it.model_copy(update={"id": it.id + "-social", "source": "context_social", "platform": "bluesky",
+                                   "author": it.author.replace(".example", ".bsky.social"),
+                                   "published_at": it.published_at + timedelta(seconds=20)})
+             for it in outlets[: max(1, len(outlets) // 2)]]
+    return items + posts
+
+
+def test_wire_story_with_outlets_social_posts_is_capped():
+    # news echo off: on live Gemini vectors its whitened cosine to such articles is ~0 (the hashing embedder of
+    # the tests would catch this group by news echo and hide what the reprint rule does)
+    items = _wire_story_with_outlet_posts()
+    no_echo = replace(DEFAULT, news_echo_enabled=False)
+    old = replace(no_echo, news_reprint_min_share=1.0)
+    mixed = lambda fs: [f for f in fs if any(a.startswith("outlet") for a in f.accounts)]  # noqa: E731
+    assert [f for f in mixed(detect(items, cfg=old)) if f.verdict == "coordinated"]  # the old rule missed it
+    findings = mixed(detect(items, cfg=no_echo))
+    assert findings and all(f.verdict != "coordinated" for f in findings)
+    assert any((f.note or "").startswith("news reprint: ") for f in findings)
+
+
+def test_inject_that_lands_with_an_article_stays_coordinated():
+    # Outlets syndicate each injected post 5 s later, so the inject's group is at least half articles: only the
+    # synthetic guard keeps it from being marked a news reprint.
+    news = _wire_story(with_social=False)
+    injected = make_campaign(TOPIC, datetime(2026, 11, 13, 19, 30, tzinfo=timezone.utc), n_accounts=6, seed=2)
+    reprints = [
+        it.model_copy(update={"id": it.id + "-a", "source": "context_news", "synthetic": False,
+                              "author": f"wire{i}.example", "published_at": it.published_at + timedelta(seconds=5)})
+        for i, it in enumerate(injected)
+    ]
+    findings = [f for f in detect(news + injected + reprints) if f.synthetic]
+    assert len(findings) == 1
+    hit = findings[0]
+    articles = {it.id for it in reprints} & set(hit.item_ids)
+    assert 2 * len(articles) >= len(hit.item_ids)
+    assert hit.verdict == "coordinated" and hit.note is None

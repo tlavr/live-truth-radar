@@ -65,15 +65,27 @@ def news_echo_note(
 
 
 def news_reprint_note(
-    is_news: np.ndarray, texts: list[str], group_posts: np.ndarray, cfg: AnalyzerConfig = DEFAULT
+    is_news: np.ndarray,
+    texts: list[str],
+    group_posts: np.ndarray,
+    cfg: AnalyzerConfig = DEFAULT,
+    is_synthetic: np.ndarray | None = None,
 ) -> str | None:
-    """Note "news reprint: <first 80 chars of the earliest article>" if every post of the group is
-    a context_news article (outlets syndicating one wire story), else None.
+    """Note "news reprint: <first 80 chars of the earliest article>" if at least news_reprint_min_share of the
+    group's posts are context_news articles (outlets syndicating one wire story, plus the outlets' own social
+    posts of it), else None.
 
-    Works in the news-only [ALT] stream too: outlets are not people, so a group of outlets alone is
-    never a coordinated swarm. A group with any synthetic or social post is left alone.
-    group_posts is in time order, so its first post is the earliest article.
+    Works in the news-only [ALT] stream too: outlets are not people, so a group led by outlets is never a
+    coordinated swarm. A group with any synthetic post is left alone (an inject into a news topic stays
+    coordinated). group_posts is in time order, so its first article is the earliest one.
+    Live 15.11 (50 topics): wire stories gave coordinated groups of 30 articles + 1 post, 14 + 12, 4 + 2; the
+    whitened news-echo cosine of such articles to the posts is ~0 (raw ~0.9), so news echo does not catch them.
     """
-    if not cfg.news_reprint_enabled or len(group_posts) == 0 or not is_news[group_posts].all():
+    if not cfg.news_reprint_enabled or len(group_posts) == 0:
         return None
-    return REPRINT_PREFIX + texts[int(group_posts[0])][:NOTE_CHARS]
+    if is_synthetic is not None and is_synthetic[group_posts].any():
+        return None
+    news = is_news[group_posts]
+    if not news.any() or news.mean() < cfg.news_reprint_min_share:
+        return None
+    return REPRINT_PREFIX + texts[int(group_posts[np.flatnonzero(news)[0]])][:NOTE_CHARS]

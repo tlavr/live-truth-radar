@@ -75,8 +75,10 @@ class AnalyzerConfig:
     news_echo_cos: float = 0.8
     news_echo_max_age_sec: float = 3600.0
     news_echo_enabled: bool = True
-    # News reprint (3.8): a group made only of context_news articles is capped at "watching".
+    # News reprint (3.8): a group with no synthetic post whose posts are mostly context_news is capped at "watching".
     news_reprint_enabled: bool = True
+    # ... or a group whose posts are at least this share articles (1.0 = only all-article groups, as before 15.11).
+    news_reprint_min_share: float = 0.5
     # Viral echo (3.8, T6b): >= viral_echo_min_accounts outside accounts of the live stream posted the group's
     # message (cos > viral_echo_cos) within viral_echo_max_age_sec of its first non-news post, before or after -> "watching".
     viral_echo_cos: float = 0.8

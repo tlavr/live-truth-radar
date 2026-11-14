@@ -199,7 +199,7 @@ def _detect_topic(
         x = sprt.echo(sig, members, cfg)[posts]
         res = sprt.run(x, mu0, sigma, alpha=cfg.alpha, beta=cfg.beta, cfg=cfg)
         note = (
-            news_reprint_note(is_news, texts, posts, cfg)
+            news_reprint_note(is_news, texts, posts, cfg, is_synthetic=~is_stream)
             or news_echo_note(sig, is_news, texts, posts, cfg, has_social=has_social)
             or viral_echo_note(sig, is_news, is_stream, texts, posts, members, cfg, has_social=has_social)
         )
