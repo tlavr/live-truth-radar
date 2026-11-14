@@ -24,6 +24,10 @@ class FakeStore:
         self.findings = TypeAdapter(list[Finding]).validate_json((FIX / "findings.json").read_text())
         self.injects: list[tuple[str, str]] = []
         self.pending: set[str] = set()
+        self.inject_at: dict[str, datetime] = {}
+        self.sessions: dict[int, dict] = {}
+        self.frames: list[dict] = []
+        self.attacks: dict[str, dict] = {}
 
     @contextmanager
     def connect(self):
@@ -41,8 +45,47 @@ class FakeStore:
     def get_last_poll(self, conn):
         return datetime(2026, 11, 14, 4, 0, tzinfo=timezone.utc)
 
-    def get_items(self, conn, ids):
-        return [self.items[i] for i in ids if i in self.items]
+    def get_items(self, conn, ids, until=None):
+        return [self.items[i] for i in ids if i in self.items and (until is None or self.items[i].published_at <= until)]
+
+    def last_inject_at(self, conn, topic):
+        return self.inject_at.get(topic)
+
+    def open_scan(self, conn, topics):
+        sid = len(self.sessions) + 1
+        self.sessions[sid] = {"topics": list(topics), "open": True}
+        return sid
+
+    def touch_scan(self, conn, sid, stale_sec):
+        s = self.sessions.get(sid)
+        return list(s["topics"]) if s and s["open"] else None
+
+    def stop_scan(self, conn, sid):
+        s = self.sessions.get(sid)
+        if not s or not s["open"]:
+            return False
+        s["open"] = False
+        return True
+
+    def scanned_topics(self, conn, stale_sec):
+        return {t for s in self.sessions.values() if s["open"] for t in s["topics"]}
+
+    def load_frames(self, conn, topic, since):
+        return [f for f in self.frames if f["topic"] == topic]
+
+    def add_attack(self, conn, cid, topic, n, starts, ends):
+        self.attacks[cid] = {"campaign_id": cid, "topic": topic, "n_accounts": n, "starts_at": starts, "ends_at": ends,
+                             "created_at": main.datetime.now(timezone.utc)}
+
+    def last_attack_at(self, conn, topic):
+        return max((a["created_at"] for a in self.attacks.values() if a["topic"] == topic), default=None)
+
+    def get_attack(self, conn, cid):
+        return self.attacks.get(cid)
+
+    def campaign_items(self, conn, cid, until):
+        return sorted((it for it in self.items.values() if it.campaign_id == cid and it.published_at <= until),
+                      key=lambda it: (it.published_at, it.id))
 
     def has_pending_inject(self, conn, topic):
         return topic in self.pending
@@ -55,6 +98,7 @@ class FakeStore:
     def add_inject_request(self, conn, topic, campaign_id):
         self.injects.append((topic, campaign_id))
         self.pending.add(topic)
+        self.inject_at[topic] = main.datetime.now(timezone.utc)
         return len(self.injects)
 
 
@@ -62,7 +106,9 @@ class FakeStore:
 def client(monkeypatch):
     fake = FakeStore()
     for name in ("connect", "load_findings", "load_findings_alpha", "synthetic_authors", "get_last_poll", "get_items",
-                 "has_pending_inject", "upsert_items", "add_inject_request"):
+                 "has_pending_inject", "upsert_items", "add_inject_request", "last_inject_at", "open_scan",
+                 "touch_scan", "stop_scan", "scanned_topics", "load_frames", "add_attack", "last_attack_at", "get_attack",
+                 "campaign_items"):
         monkeypatch.setattr(main.store, name, getattr(fake, name))
     return TestClient(main.app), fake
 
@@ -93,8 +139,26 @@ def test_alerts_items_and_metrics_validate_and_mask_real_handles(client, monkeyp
     assert MetricsReport.model_validate(c.get("/api/metrics").json()).roc
 
 
+class _Clock:
+    """Patches api.main.datetime with a settable clock."""
+
+    def __init__(self, monkeypatch, at):
+        clock = self
+        self.at = at
+
+        class Frozen(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return clock.at
+
+        monkeypatch.setattr(main, "datetime", Frozen)
+
+
 def test_inject_adds_synthetic_items_and_rejects_bad_or_repeated_requests(client, monkeypatch):
+    from datetime import timedelta
+
     c, fake = client
+    clock = _Clock(monkeypatch, datetime(2026, 11, 14, 12, 0, 0, tzinfo=timezone.utc))
     before = len(fake.items)
     r = c.post("/api/inject", json={"topic": "helsinki-tram-fares"})
     assert r.status_code == 200
@@ -103,17 +167,13 @@ def test_inject_adds_synthetic_items_and_rejects_bad_or_repeated_requests(client
     assert body["n_items"] == len(new) == len(fake.items) - before > 0
     assert all(it.synthetic and it.source == "synthetic" for it in new)
     assert fake.injects == [("helsinki-tram-fares", body["campaign_id"])]
-    # still pending -> 429; after the worker processed it a second inject adds new items
+    # still pending -> 429; processed but within 5 min -> 429 with Retry-After (T12d public limit)
     assert c.post("/api/inject", json={"topic": "helsinki-tram-fares"}).status_code == 429
     fake.pending.clear()
-    later = datetime(2026, 11, 14, 12, 34, 56, tzinfo=timezone.utc)
-
-    class Later(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return later
-
-    monkeypatch.setattr(main, "datetime", Later)
+    clock.at += timedelta(minutes=4)
+    r = c.post("/api/inject", json={"topic": "helsinki-tram-fares"})
+    assert r.status_code == 429 and 0 < int(r.headers["Retry-After"]) <= 61
+    clock.at += timedelta(minutes=2)  # 6 min after the first: a new campaign
     mid = len(fake.items)
     r2 = c.post("/api/inject", json={"topic": "helsinki-tram-fares"})
     assert r2.status_code == 200
@@ -122,13 +182,13 @@ def test_inject_adds_synthetic_items_and_rejects_bad_or_repeated_requests(client
     new2 = [it for it in fake.items.values() if it.campaign_id == body2["campaign_id"]]
     assert body2["n_items"] == len(new2) == len(fake.items) - mid > 0
     assert all(it.synthetic for it in new2)
-    # same second again -> every id collides -> 409 instead of a fake "n_items"
+    # same second without the limit (e.g. its row gone) -> every id collides -> 409 instead of a fake "n_items"
     fake.pending.clear()
+    fake.inject_at.clear()
     assert c.post("/api/inject", json={"topic": "helsinki-tram-fares"}).status_code == 409
     fake.pending.clear()
     assert c.post("/api/inject", json={"topic": "no-such-topic"}).status_code == 400
     assert c.post("/api/inject", json={"topic": ""}).status_code == 422
-
 
 
 def test_inject_rejects_topics_outside_topics(client, monkeypatch):
@@ -182,3 +242,78 @@ def test_served_alphas_follow_worker_env(client, monkeypatch):
     assert c.get("/api/alphas").json() == [0.02]
     monkeypatch.delenv("ALPHA_POINTS")
     assert c.get("/api/alphas").json() == [0.005, 0.01, 0.02, 0.05, 0.1]
+
+
+def test_scan_sessions_cap_the_union_of_topics_and_answer_410_when_closed(client, monkeypatch):
+    c, fake = client
+    monkeypatch.setenv("TOPICS", "a,b,c,d,e")
+    assert c.post("/api/scan", json={"topics": ["x"]}).status_code == 400  # not monitored
+    assert c.post("/api/scan", json={"topics": ["a", "b", "c"]}).status_code == 422  # > 2 per session
+    sid = c.post("/api/scan", json={"topics": ["a", "b"]}).json()["session_id"]
+    assert c.post("/api/scan", json={"topics": ["c", "d"]}).status_code == 200
+    assert c.post("/api/scan", json={"topics": ["a", "b"]}).status_code == 200  # already scanned: always accepted
+    assert c.post("/api/scan", json={"topics": ["e"]}).status_code == 429  # a 5th topic
+    fake.frames.append({"topic": "a", "at": "2026-11-14T12:00:00+00:00"})
+    assert c.get(f"/api/radar?session={sid}&topic=a").json() == fake.frames
+    assert c.post(f"/api/scan/{sid}/stop").json() == {"stopped": True}
+    assert c.get(f"/api/radar?session={sid}&topic=a").status_code == 410
+    assert c.get("/api/radar?session=999&topic=a").status_code == 410
+    assert c.get(f"/api/radar?session={sid}&topic=a&since=2026-11-14T12:00:00").status_code == 422  # naive
+
+
+def test_attack_is_public_once_per_5_min_per_topic_and_reveals_posts_over_time(client, monkeypatch):
+    from datetime import timedelta
+
+    c, fake = client
+    monkeypatch.setenv("TOPICS", "helsinki-tram-fares")
+    body = {"topic": "helsinki-tram-fares", "n_accounts": 12}
+    assert c.get("/api/attack/topics").json() == ["helsinki-tram-fares"]  # monitored and with variations
+    assert c.post("/api/attack", json={**body, "n_accounts": 50}).status_code == 422  # 12 / 25 only (CFAR self-masking)
+    r0 = c.post("/api/attack", json={"topic": "helsinki-tram-fares"})
+    assert r0.status_code == 200 and r0.json()["n_items"] == 50  # default: 25 bots x 2 volleys
+    fake.attacks.clear()
+    assert c.post("/api/attack", json={**body, "topic": "jensen-huang-resignation"}).status_code == 400
+
+    click = datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc)
+    clock = _Clock(monkeypatch, click)
+    r = c.post("/api/attack", json=body)
+    assert r.status_code == 200
+    a = r.json()
+    starts, ends = datetime.fromisoformat(a["starts_at"]), datetime.fromisoformat(a["ends_at"])
+    # demo speed: the future campaign (first post 15-60 s, last <= 600 s) played 4x faster
+    assert click < starts <= click + timedelta(seconds=15) and ends <= click + timedelta(seconds=150)
+    assert a["n_items"] == 24  # 12 accounts x 2 volleys
+    clock.at = click + timedelta(minutes=4)
+    again = c.post("/api/attack", json=body)
+    assert again.status_code == 429 and 0 < int(again.headers["Retry-After"]) <= 61
+
+    cid = a["campaign_id"]
+    clock.at = click
+    assert c.get(f"/api/attack/{cid}").json()["posts"] == []  # nothing published yet
+    ids = [it.id for it in fake.items.values() if it.campaign_id == cid]
+    assert c.get(f"/api/items?ids={','.join(ids)}").json() == []  # future posts hidden from the public API too
+    clock.at = ends
+    status = c.get(f"/api/attack/{cid}").json()
+    assert len(status["posts"]) == 24 and not any(p["detected"] for p in status["posts"])
+    assert status["n_detected_accounts"] == 0 and status["now"].startswith("2026-11-14T12:")
+    assert len(c.get(f"/api/items?ids={','.join(ids)}").json()) == 24
+
+    fake.findings = [fake.findings[0].model_copy(update={"topic": "helsinki-tram-fares", "verdict": "coordinated",
+                                                         "item_ids": ids[:4]})]
+    status = c.get(f"/api/attack/{cid}").json()
+    assert sum(p["detected"] for p in status["posts"]) == 4
+    assert c.get("/api/attack/nope").status_code == 404
+
+    clock.at = click + timedelta(minutes=6)  # 5 min later: the next attack on the topic is accepted
+    assert c.post("/api/attack", json=body).status_code == 200
+
+
+def test_scan_dedups_topics_and_radar_rejects_a_topic_outside_the_session(client, monkeypatch):
+    c, fake = client
+    monkeypatch.setenv("TOPICS", "a,b,c")
+    r = c.post("/api/scan", json={"topics": ["a", "a", " a"]})
+    assert r.status_code == 200 and r.json()["topics"] == ["a"]  # duplicates are not "> 2 per session"
+    assert c.post("/api/scan", json={"topics": ["a", "x", "x"]}).status_code == 400  # still: not monitored
+    sid = r.json()["session_id"]
+    assert c.get(f"/api/radar?session={sid}&topic=b").status_code == 400  # monitored, but not in this session
+    assert c.get(f"/api/radar?session={sid}&topic=a").status_code == 200

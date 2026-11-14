@@ -463,9 +463,23 @@ html:not([data-stage=home]) .feed{display:none}
 .risk a.how{display:inline-block;margin-top:8px;font-size:14px;color:var(--salat);text-decoration:none;pointer-events:auto}
 .risk a.how:hover{text-decoration:underline}
 .actions{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:10px;margin-top:12px}
-.inject-btn{height:32px;padding:0 14px;border-radius:999px;background:var(--salat);color:var(--bg);font-weight:600;font-size:13px}
-.inject-btn:disabled{opacity:.5;cursor:wait}
-.inject-msg{font-size:13px;color:var(--muted)}
+/* T12d live scan: Check keeps the topic scanning until Stop */
+.live-row{margin-top:10px}
+.live-btn{height:32px;padding:0 14px;border-radius:999px;border:1px solid var(--hairline);background:var(--surface-hi);font-weight:600;font-size:13px}
+.live-btn[data-on=true]{border-color:rgba(232,128,107,.55);color:#F2A08F}
+.live-btn:disabled{opacity:.5;cursor:wait}
+.live-msg{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.live-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--tertiary);margin-right:6px;vertical-align:1px}
+.live-dot.on{background:var(--cool);animation:livePulse 1.6s ease-out infinite}
+@keyframes livePulse{0%{box-shadow:0 0 0 0 rgba(99,207,151,.55)}100%{box-shadow:0 0 0 8px rgba(99,207,151,0)}}
+@media (prefers-reduced-motion:reduce){.live-dot.on{animation:none}}
+.live-chart{width:min(480px,100%);margin:8px auto 0;position:relative;z-index:1}
+.live-chart:not(:empty){padding:8px 12px 10px;border:1px solid var(--hairline);border-radius:14px;background:var(--surface-solid)}
+.live-chart svg{display:block;width:100%;height:auto}
+.live-cap{margin:0 0 4px;font-size:12px;color:var(--tertiary);text-align:center}
+.live-cap b{color:var(--peak);font-weight:600}
+.groups .weak{opacity:.6}
+.groups .weak-toggle{color:var(--muted);border-style:dashed}
 .tabs{max-width:980px;margin:0 auto 28px;display:flex;gap:6px}
 .tabs button{padding:6px 14px;border-radius:999px;border:1px solid var(--hairline);color:var(--muted);font-size:13.5px}
 .tabs button[aria-selected=true]{background:var(--ink);border-color:var(--ink);color:var(--bg);font-weight:500}
@@ -593,10 +607,11 @@ html:not([data-stage=home]) .fa{display:none}
         <p id="vText"></p>
         <p class="risk" id="vRisk" aria-live="polite"></p>
         <div class="groups" id="groups" role="group" aria-label="Groups in this topic"></div>
-        <div class="actions">
-          <button class="inject-btn" id="inject" type="button">Inject test campaign</button>
-          <span class="inject-msg" id="injectMsg" aria-live="polite"></span>
+        <div class="actions live-row">
+          <button class="live-btn" id="liveBtn" type="button" data-on="false">Stop</button>
+          <span class="live-msg" id="liveMsg" aria-live="polite"></span>
         </div>
+        <div class="live-chart" id="liveChart"></div>
       </div>
 
       <div class="legend-bar" id="legend">

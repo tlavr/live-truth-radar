@@ -7,7 +7,9 @@ import {UnrealBloomPass} from 'three/addons/postprocessing/UnrealBloomPass.js';
 import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
 import {topicLabel, platformLabel} from './labels.js';
 
-const POLL_MS = 15000, INJECT_POLL_MS = 4000, INJECT_TIMEOUT_MS = 120000;
+const POLL_MS = 15000;
+const LIVE_MS = 2500;              // T12d: Check starts a live scan of the topic; frames + findings every 2.5 s
+const LIVE_HIST = 90;              // frames kept for the live chart (~15 min at one frame per 10 s)
 const WINDOW_HOURS = 6;            // DETECT_WINDOW_HOURS on the worker
 const DESIGN_ALPHA = 0.02;         // SPRT alpha of the findings table (T12c default point)
 const RANK = {coordinated: 0, watching: 1, organic: 2};
@@ -30,7 +32,7 @@ async function api(path, opts) {
   if (!r.ok) {
     let detail = `${r.status}`;
     try { detail = (await r.json()).detail ?? detail; } catch {}
-    throw new Error(detail);
+    throw Object.assign(new Error(detail), {status: r.status});
   }
   return r.json();
 }
@@ -39,6 +41,8 @@ async function api(path, opts) {
 const S = {
   topics: [], findings: [], lastPoll: null, metrics: null, points: null, served: null, alpha: DESIGN_ALPHA,
   topic: null, list: [], sel: 0, items: new Map(),
+  live: null,  // T12d live scan: {topic, session, since, frame, hist, timer, busy, error}
+  weak: false, pickedWeak: false,  // T12d: groups below the alert threshold are folded into one line
 };
 // T12c: the false-alarm slider picks an SPRT alpha; /api/alerts?alpha= serves the findings at that point
 const SLIDER_ALPHAS = [0.005, 0.01, 0.02, 0.05, 0.1];  // fallback until eval/operating_points.json exists
@@ -51,8 +55,13 @@ const pfaText = () => {
     ? `False alarm target: ${pct(S.alpha)} (measured ${pct(p.pfa)}, ≤ ${pct(p.pfa_upper95)} at 95%)`
     : `False alarm target: ${pct(S.alpha)}`;
 };
+// alerts first, the largest first (a big swarm can split into several groups), then the newest
 const topicFindings = t => S.findings.filter(f => f.topic === t)
-  .sort((a, b) => RANK[a.verdict] - RANK[b.verdict] || b.created_at.localeCompare(a.created_at));
+  .sort((a, b) => RANK[a.verdict] - RANK[b.verdict] || b.accounts.length - a.accounts.length || b.created_at.localeCompare(a.created_at));
+
+// the group the result view shows: an alert (coordinated), or a weaker group only if the user opened it
+const shown = () => { const f = S.list[S.sel]; return f && (f.verdict === 'coordinated' || S.pickedWeak) ? f : null; };
+const SIM = 'simulated attack';
 
 const PAL = {bg: '#0C100E', cool: '#63CF97', muted: '#A3B8AA', warm: '#B7F063', peak: '#FFE066'};
 
@@ -248,7 +257,7 @@ const heightAt = (x, z) => {
 };
 const fmtLag = s => s < 60 ? `${s}s` : `${s / 60}m`.replace('.5', '½');
 function hover(e) {
-  const amb = S.list[S.sel]?.ambiguity;
+  const amb = shown()?.ambiguity;
   if (root.dataset.stage !== 'result' || dragging || !amb) return hideTip();
   const b = canvas.getBoundingClientRect();
   ndc.set((e.clientX - b.left) / b.width * 2 - 1, -((e.clientY - b.top) / b.height) * 2 + 1);
@@ -312,9 +321,10 @@ function setPhase(i, s) {
 }
 
 function openTopic(topic, {instant = false, findingId = null} = {}) {
+  liveStart(topic);
   S.topic = topic; S.list = topicFindings(topic);
   S.sel = Math.max(0, S.list.findIndex(f => f.id === findingId));
-  $('injectMsg').textContent = '';
+  S.weak = false; S.pickedWeak = S.list[S.sel]?.verdict !== 'coordinated' && !!findingId;
   history.replaceState(null, '', `?q=${encodeURIComponent(topic)}`);
   tl?.kill(); selTl?.kill();
   root.dataset.stage = 'scan'; scrollTo(0, 0); hideTip();
@@ -322,7 +332,7 @@ function openTopic(topic, {instant = false, findingId = null} = {}) {
   if (!ok) return showResult(true);
   gsap.killTweensOf([U.uCarpet, U.uPeak, U.uNoise, U.uGlow, U.uSweep, U.uSweepOn, axisMat, cam]);
   U.uCarpet.value = 0; U.uPeak.value = 0; axisMat.opacity = 0;
-  setField(S.list[S.sel]);
+  setField(shown());
   const s = topicStats();
   gsap.set('#pipe', {autoAlpha: 0}); gsap.set('#pipeBar', {scaleX: 0}); gsap.set('#axes', {opacity: 0});
   const now = $('pipeNow');
@@ -370,6 +380,7 @@ function showResult(instant) {
   gsap.to(axisMat, {opacity: .42, duration: .55 * d, delay: .2 * d});
 }
 function goHome() {
+  liveStop();
   tl?.kill(); selTl?.kill();
   gsap.killTweensOf('#pipe,#pipeNow,#vTitle,#vText,#vRisk,#groups,#legend,#axes');
   S.topic = null; history.replaceState(null, '', location.pathname);
@@ -394,18 +405,28 @@ const VERDICT = {
   organic: {title: 'Organic', light: '🟢'},
 };
 
+function groupBtn(g, k) {
+  const on = k === S.sel && !!shown();
+  return `<button type="button" class="${g.verdict === 'coordinated' ? '' : 'weak'}" aria-pressed="${on}" data-g="${k}">${VERDICT[g.verdict].light} ${g.accounts.length} accounts · ${g.verdict}${g.synthetic ? ` · ${SIM}` : ''}</button>`;
+}
+
 function render() {
-  const f = S.list[S.sel];
+  const f = shown();
   const vt = $('vTitle');
-  $('groups').innerHTML = S.list.map((g, k) =>
-    `<button type="button" aria-pressed="${k === S.sel}" data-g="${k}">${VERDICT[g.verdict].light} ${g.accounts.length} accounts · ${g.verdict}${g.synthetic ? ' · test' : ''}</button>`).join('');
+  const idx = S.list.map((g, k) => k);
+  const alerts = idx.filter(k => S.list[k].verdict === 'coordinated'), weak = idx.filter(k => S.list[k].verdict !== 'coordinated');
+  $('groups').innerHTML = alerts.map(k => groupBtn(S.list[k], k)).join('') +
+    (weak.length ? `<button type="button" class="weak-toggle" data-weak="1" aria-expanded="${S.weak}">${S.weak ? '−' : '+'} ${weak.length} weaker group${weak.length === 1 ? '' : 's'} · not alerts</button>` : '') +
+    (S.weak ? weak.map(k => groupBtn(S.list[k], k)).join('') : '');
   $('legend').style.display = f ? '' : 'none';
   if (!f) {
     vt.dataset.v = 'organic'; vt.textContent = 'Quiet';
-    $('vText').textContent = `No groups of look-alike accounts in the last ${WINDOW_HOURS} h of ${topicLabel(S.topic)}.`;
+    $('vText').textContent = weak.length
+      ? `No coordinated group in the last ${WINDOW_HOURS} h of ${topicLabel(S.topic)}; ${weak.length} weaker look-alike group${weak.length === 1 ? ' stays' : 's stay'} below the alert threshold.`
+      : `No groups of look-alike accounts in the last ${WINDOW_HOURS} h of ${topicLabel(S.topic)}.`;
     $('vRisk').innerHTML = `🟢 Nothing above the detector threshold. <small>${pfaText()}</small>`;
     for (const id of ['evSay', 'evWho', 'evPosts', 'evCorr', 'evDecision', 'evSignal']) $(id).innerHTML = '';
-    $('evSay').innerHTML = `<h3>Nothing to show</h3><p>Try “Inject test campaign” to see what a swarm looks like.</p>`;
+    $('evSay').innerHTML = `<h3>Nothing to show</h3><p>No look-alike groups right now; the live scan keeps watching this topic.</p>`;
     return;
   }
   const hit = f.verdict === 'coordinated', n = f.accounts.length;
@@ -432,7 +453,7 @@ function render() {
     : `<h3>Technique</h3><p>${hit ? 'Explanation is being generated.' : 'Only coordinated groups get an explanation.'}</p>`) +
     (f.note ? `<p class="note">${esc(f.note)}</p>` : '');
   $('evWho').innerHTML = `<h3>Accounts</h3><ul class="who">${f.accounts.map(a => `<li>${esc(handle(a))}</li>`).join('')}</ul>
-    <p>${f.item_ids.length} posts, ${hm(f.first_seen)}–${hm(f.last_seen)} UTC${f.synthetic ? ' · injected test campaign' : ''}</p>`;
+    <p>${f.item_ids.length} posts, ${hm(f.first_seen)}–${hm(f.last_seen)} UTC${f.synthetic ? ` · ${SIM} (red team console)` : ''}</p>`;
   renderPosts(f);
   $('evCorr').innerHTML = corrGrid(f);
   $('evDecision').innerHTML = `<h3>Sequential test (SPRT)</h3>${trace(f)}<p>${f.decided_at_item != null
@@ -452,13 +473,13 @@ async function renderPosts(f) {
   if (want.length) {
     $('evPosts').innerHTML = '<h3>Posts</h3><p>Loading…</p>';
     try { for (const it of await api(`/api/items?ids=${want.map(encodeURIComponent).join(',')}`)) S.items.set(it.id, it); }
-    catch (e) { if (S.list[S.sel] === f) $('evPosts').innerHTML = `<h3>Posts</h3><p>Could not load posts (${esc(e.message)}).</p>`; return; }
+    catch (e) { if (shown() === f) $('evPosts').innerHTML = `<h3>Posts</h3><p>Could not load posts (${esc(e.message)}).</p>`; return; }
   }
-  if (S.list[S.sel] !== f) return;                       // the user moved on meanwhile
+  if (shown() !== f) return;                              // the user moved on meanwhile
   const its = f.item_ids.map(i => S.items.get(i)).filter(Boolean).sort((a, b) => a.published_at.localeCompare(b.published_at));
-  const shown = its.slice(0, 8);
-  $('evPosts').innerHTML = `<h3>Posts</h3><ul class="posts">${shown.map(it => `<li><span class="meta">${esc(handle(it.author))} · ${hm(it.published_at)} UTC${it.platform ? ' · ' + esc(platformLabel(it.platform)) : ''}${it.synthetic ? '<span class="syn">test</span>' : ''}</span>${esc(it.text)}${/^https?:\/\//i.test(it.url ?? '') ? ` <a href="${esc(it.url)}" target="_blank" rel="noopener">source</a>` : ''}</li>`).join('')}</ul>
-    <p>${shown.length < its.length ? `First ${shown.length} of ${its.length} posts.` : `${its.length} posts.`}</p>`;
+  const first = its.slice(0, 8);
+  $('evPosts').innerHTML = `<h3>Posts</h3><ul class="posts">${first.map(it => `<li><span class="meta">${esc(handle(it.author))} · ${hm(it.published_at)} UTC${it.platform ? ' · ' + esc(platformLabel(it.platform)) : ''}${it.synthetic ? `<span class="syn">${SIM}</span>` : ''}</span>${esc(it.text)}${/^https?:\/\//i.test(it.url ?? '') ? ` <a href="${esc(it.url)}" target="_blank" rel="noopener">source</a>` : ''}</li>`).join('')}</ul>
+    <p>${first.length < its.length ? `First ${first.length} of ${its.length} posts.` : `${its.length} posts.`}</p>`;
 }
 
 function corrGrid(f) {
@@ -490,14 +511,14 @@ function trace(f) {
 }
 
 function select(i, instant) {
-  if (i === S.sel) return;
-  S.sel = i; hideTip(); selTl?.kill();
+  if (i === S.sel && shown()) return;  // in the Quiet view index 0 is "selected" but not shown: open it
+  S.sel = i; S.pickedWeak = S.list[i]?.verdict !== 'coordinated'; hideTip(); selTl?.kill();
   const d = reduced || instant ? 0 : 1;
   selTl = gsap.timeline().to('#vTitle,#vText,#vRisk', {autoAlpha: 0, duration: .14 * d}).call(render).to('#vTitle,#vText,#vRisk', {autoAlpha: 1, duration: .26 * d});
   if (!ok) return;
   gsap.timeline()
     .to([U.uPeak, U.uCarpet], {value: 0, duration: .25 * d, overwrite: true})
-    .call(() => setField(S.list[S.sel]))
+    .call(() => setField(shown()))
     .to([U.uPeak, U.uCarpet], {value: 1, duration: .7 * d, ease: 'power2.out'});
   setLegend(null); camTo('over', 1.3 * d);
 }
@@ -516,7 +537,7 @@ function renderHome() {
     .sort((a, b) => RANK[a.verdict] - RANK[b.verdict] || b.created_at.localeCompare(a.created_at)).slice(0, 6);
   $('feed').innerHTML = feed.length ? feed.map(f =>
     `<li><button type="button" data-topic="${esc(f.topic)}" data-fid="${esc(f.id)}"><span>${VERDICT[f.verdict].light} ${VERDICT[f.verdict].title}</span>
-      <span>${esc(topicLabel(f.topic))} · ${f.accounts.length} accounts${f.synthetic ? ' · test' : ''}</span><span class="t">${ago(f.created_at)}</span></button></li>`).join('')
+      <span>${esc(topicLabel(f.topic))} · ${f.accounts.length} accounts${f.synthetic ? ` · ${SIM}` : ''}</span><span class="t">${ago(f.created_at)}</span></button></li>`).join('')
     : '<li class="empty">No alerts in the current window.</li>';
 }
 
@@ -538,40 +559,114 @@ async function refresh() {
   renderStatus();
   if (root.dataset.stage === 'home') renderHome();
   else if (S.topic && root.dataset.stage === 'result') {
-    const cur = S.list[S.sel]?.id, next = topicFindings(S.topic);
+    const cur = shown()?.id, next = topicFindings(S.topic);
     const sig = l => l.map(f => `${f.id}:${f.verdict}:${f.item_ids.length}:${f.explanation ? 1 : 0}`).join();
     if (sig(next) !== sig(S.list)) {
-      S.list = next; S.sel = Math.max(0, next.findIndex(f => f.id === cur));
-      if (ok) setField(S.list[S.sel]);
+      const at = next.findIndex(f => f.id === cur);
+      S.list = next; S.sel = Math.max(0, at);
+      if (at < 0) S.pickedWeak = false;                    // the opened group is gone: back to the alert (or Quiet)
+      if (ok) setField(shown());
       render();
     }
   }
   return true;
 }
 
-async function inject() {
-  const topic = S.topic, btn = $('inject'), msg = $('injectMsg'), t0 = Date.now();
-  btn.disabled = true; msg.textContent = 'Injecting…';
+/* ------------------------------------------------------------------ live scan (T12d) */
+// Check = a scan session on the topic: the worker re-runs the detector every ~10 s while this page polls
+// /api/radar (also the session heartbeat) and /api/alerts; every panel of the result view re-renders from them.
+const post = body => ({method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+const closeSession = id => fetch(`/api/scan/${id}/stop`, {method: 'POST', keepalive: true}).catch(() => {});
+
+async function liveStart(topic) {
+  liveStop();
+  const L = {topic, session: null, since: null, frame: null, hist: [], timer: null, busy: false, error: null};
+  S.live = L; renderLive();
   try {
-    await refresh();                                      // findings already there are not the new swarm
-    const seen = new Set(S.findings.filter(f => f.topic === topic && f.synthetic).map(f => f.id));
-    const r = await api('/api/inject', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({topic})});
-    msg.textContent = `Injected ${r.n_items} synthetic posts. Waiting for the detector…`;
-    while (Date.now() - t0 < INJECT_TIMEOUT_MS && S.topic === topic) {
-      await new Promise(res => setTimeout(res, INJECT_POLL_MS));
-      await refresh();
-      const f = S.list.find(f => f.synthetic && f.verdict === 'coordinated' && !seen.has(f.id));
-      if (f) {
-        msg.textContent = `Swarm detected in ${Math.round((Date.now() - t0) / 1000)} s.`;
-        const i = S.list.indexOf(f);
-        if (i !== S.sel) { S.sel = -1; select(i); } else render();
-        return;
-      }
-    }
-    if (S.topic === topic) msg.textContent = 'No detection yet — the worker may be busy; the feed keeps updating.';
+    L.session = (await api('/api/scan', post({topics: [topic]}))).session_id;
   } catch (e) {
-    msg.textContent = e.message.startsWith('no variations') ? 'No test campaign prepared for this topic yet.' : `Inject failed: ${e.message}`;
-  } finally { btn.disabled = false; }
+    if (S.live === L) { L.error = `Live scan unavailable (${e.message}); results refresh every ${POLL_MS / 1000} s.`; S.live = null; renderLive(L.error); }
+    return;
+  }
+  if (S.live !== L) { closeSession(L.session); return; }  // stopped or another topic meanwhile
+  L.timer = setInterval(() => liveTick(L), LIVE_MS);
+  liveTick(L);
+}
+
+function liveStop(msg) {
+  const L = S.live;
+  if (!L) return;
+  clearInterval(L.timer); S.live = null;
+  if (L.session) closeSession(L.session);
+  renderLive(msg, L);
+}
+
+async function liveTick(L) {
+  if (L.busy || S.live !== L) return;
+  L.busy = true;
+  try {
+    let frames;
+    try {
+      frames = await api(`/api/radar?session=${L.session}&topic=${encodeURIComponent(L.topic)}${L.since ? `&since=${encodeURIComponent(L.since)}` : ''}`);
+    } catch (e) {
+      if (e.status !== 410) throw e;                     // tab slept > 60 s: the session closed, open a new one
+      const id = (await api('/api/scan', post({topics: [L.topic]}))).session_id;
+      if (S.live === L) L.session = id; else closeSession(id);  // stopped while reopening
+      return;
+    }
+    if (S.live !== L) return;
+    if (frames.length) {
+      L.frame = frames.at(-1); L.since = L.frame.at;
+      L.hist.push(...frames); L.hist.splice(0, Math.max(0, L.hist.length - LIVE_HIST));
+    }
+    if (!(await refresh())) throw new Error('alerts unavailable');
+    L.error = null;
+  } catch (e) {
+    L.error = `connection problem (${e.message}), retrying…`;
+  } finally {
+    L.busy = false;
+    if (S.live === L) renderLive();
+  }
+}
+
+function renderLive(msg, last) {
+  const L = S.live, btn = $('liveBtn'), out = $('liveMsg');
+  btn.dataset.on = String(!!L);
+  btn.textContent = L ? 'Stop' : 'Resume live scan';
+  btn.disabled = !L && !S.topic;
+  if (!L) { out.innerHTML = `<span class="live-dot"></span>${esc(msg ?? (last ? 'Live scan stopped.' : ''))}`; return; }
+  const f = L.frame;
+  const bits = f
+    ? [`frame ${f.at.slice(11, 19)} UTC`, `${f.n_items} posts from ${f.n_accounts} accounts in ${WINDOW_HOURS} h`,
+       ...(f.n_watching ? [`${f.n_watching} news echo${f.n_watching === 1 ? '' : 'es'} on watch`] : []),
+       ...(f.top_verdict === 'coordinated' ? [`swarm of ${f.top_n_accounts} accounts`] : [])]
+    : ['starting the scan…'];
+  // the live frame is the design alpha; other slider points are recomputed on the worker's slow pass only
+  if (S.alpha !== DESIGN_ALPHA) bits.push(`live at ${pct(DESIGN_ALPHA)}; the ${pct(S.alpha)} view refreshes every ~5 min`);
+  out.innerHTML = `<span class="live-dot on"></span>Live · ${esc(bits.join(' · '))}${L.error ? ` · ${esc(L.error)}` : ''}`;
+  $('liveChart').innerHTML = liveChart(L.hist);
+}
+
+// One bar per detector scan (~10 s): accounts in the strongest group; yellow = alert (coordinated),
+// grey = a weaker group (news echo / not sure yet). A swarm shows up as bars growing until they turn yellow.
+function liveChart(hist) {
+  if (!hist.length) return '';
+  const w = 480, h = 92, top = 16, n = Math.max(hist.length, 30), bw = w / n;
+  const val = f => f.top_n_accounts ?? 0, max = Math.max(5, ...hist.map(val));
+  const y = v => h - v / max * (h - top);
+  const first = hist.findIndex(f => f.top_verdict === 'coordinated');
+  const bars = hist.map((f, k) => {
+    const v = val(f), hit = f.top_verdict === 'coordinated', x = (n - hist.length + k) * bw;
+    return `<rect x="${(x + bw * .15).toFixed(1)}" y="${y(v).toFixed(1)}" width="${(bw * .7).toFixed(1)}" height="${(h - y(v)).toFixed(1)}" rx="1.5"
+      fill="${hit ? PAL.peak : PAL.muted}" fill-opacity="${hit ? 1 : .35}"><title>${f.at.slice(11, 19)} UTC: ${v} accounts${hit ? ' — alert' : f.top_verdict ? ` — ${f.top_verdict}` : ''}</title></rect>`;
+  }).join('');
+  const mark = first < 0 ? '' : (() => { const x = (n - hist.length + first + .5) * bw;
+    return `<line x1="${x}" x2="${x}" y1="${top - 6}" y2="${h}" stroke="${PAL.peak}" stroke-opacity=".5" stroke-dasharray="2 3"/>
+      <text x="${Math.min(x + 4, w - 70)}" y="${top - 6}" fill="${PAL.peak}" font-size="11">alert at ${hist[first].at.slice(11, 19)}</text>`; })();
+  return `<p class="live-cap">Accounts in the strongest group, per scan · <b>yellow = alert</b>, grey = weaker group</p>
+    <svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Accounts in the strongest group per detector scan">
+      <line x1="0" x2="${w}" y1="${h - .5}" y2="${h - .5}" stroke="${PAL.cool}" stroke-opacity=".25"/>
+      <text x="0" y="10" fill="${PAL.muted}" font-size="11">${max}</text>${bars}${mark}</svg>`;
 }
 
 /* ------------------------------------------------------------------ wiring */
@@ -593,13 +688,17 @@ $('clear').addEventListener('click', () => {
 $('brandBtn').addEventListener('click', () => { if (root.dataset.stage !== 'home') goHome(); });
 $('resetCam').addEventListener('click', () => { setLegend(null); camTo('over', 1.0); });
 addEventListener('keydown', e => { if (e.key === 'Escape' && root.dataset.stage !== 'home') goHome(); });
-$('groups').addEventListener('click', e => { const b = e.target.closest('button'); if (b) select(+b.dataset.g); });
+$('groups').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.weak) { S.weak = !S.weak; render(); } else select(+b.dataset.g);
+});
 $('legend').addEventListener('click', e => {
   const b = e.target.closest('.lg-btn'); if (!b || !ok) return;
   const on = b.getAttribute('aria-pressed') === 'true';
   setLegend(on ? null : b); camTo(on ? 'over' : b.dataset.cam);
 });
-$('inject').addEventListener('click', inject);
+$('liveBtn').addEventListener('click', () => { if (S.live) liveStop(); else if (S.topic) liveStart(S.topic); });
+addEventListener('pagehide', () => { if (S.live?.session) navigator.sendBeacon?.(`/api/scan/${S.live.session}/stop`); });
 for (const ev of ['click', 'pointerover']) $('evCorr').addEventListener(ev, e => {
   const c = e.target.closest('.corr div'), out = $('evCorr').querySelector('.corr-pick');
   if (c && out) out.textContent = c.getAttribute('aria-label');
@@ -616,9 +715,10 @@ const per = a => `~${Math.round(1 / a)}`;
 function alphaHint(a) {
   const p = S.points?.points?.find(q => Math.abs(q.alpha - a) < 1e-9);
   const lim = `Design target: <b>1 false alarm per ${per(a)}</b> quiet windows (6 h of one topic)`;
-  if (!p) return [`${lim}. Not measured yet.`, ''];
+  if (!p) return [`${lim}. Not measured yet.${a !== DESIGN_ALPHA ? ` Live scan updates at ${pct(DESIGN_ALPHA)}; this point refreshes every ~5 min.` : ''}`, ''];
   const dec = p.posts_to_decision != null ? ` · decides after <b>~${p.posts_to_decision.toFixed(1)} posts</b>` : '';
-  const hint = `${lim} · catches <b>${pct(p.pd_small)}</b> of 3-account swarms${dec}`;
+  const lag = a !== DESIGN_ALPHA ? ` · live scan updates at ${pct(DESIGN_ALPHA)}; this point refreshes every ~5 min` : '';
+  const hint = `${lim} · catches <b>${pct(p.pd_small)}</b> of 3-account swarms${dec}${lag}`;
   const alarms = Math.round(p.pfa * p.n_background);
   let meas = `Measured: ${alarms} false alarm${alarms === 1 ? '' : 's'} in ${p.n_background} test windows (≤ ${pct(p.pfa_upper95)} at 95%)`;
   if (p.n_independent) {
@@ -661,8 +761,8 @@ function setupAlpha() {
     const fresh = await refresh();
     // any stage: a change during the scan animation must not leave the old point's list for showResult
     if (fresh && S.topic) {
-      S.list = topicFindings(S.topic); S.sel = 0;
-      if (root.dataset.stage === 'result') { if (ok) setField(S.list[0]); render(); }
+      S.list = topicFindings(S.topic); S.sel = 0; S.pickedWeak = false;
+      if (root.dataset.stage === 'result') { if (ok) setField(shown()); render(); }
     }
   };
   range.addEventListener('input', () => show(+range.value));  // live hint while dragging

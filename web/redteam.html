@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Red Team Console</title>
+<link rel="icon" href="data:,">
+<style>
+:root{
+  --bg:#08060A;--panel:#120D14;--line:#2A1E2C;--ink:#EDE3EE;--muted:#9C8AA0;--dim:#5F5063;
+  --red:#FF4D6D;--amber:#FFB547;--ok:#5BE49B;--mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html{background:var(--bg);color:var(--ink);font-family:var(--mono);font-size:14px;line-height:1.5}
+body{margin:0;overflow-x:hidden}
+button,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+header{padding:16px clamp(16px,3vw,32px);border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+header h1{margin:0;font-size:16px;letter-spacing:.08em;text-transform:uppercase;color:var(--red)}
+header span{color:var(--dim);font-size:12px}
+main{max-width:980px;margin:0 auto;padding:18px clamp(16px,3vw,32px) 60px}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px;margin-bottom:14px}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+label{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+select{background:#0C080E;border:1px solid var(--line);border-radius:4px;padding:7px 9px;min-width:0}
+.btn{background:var(--red);color:#12060A;border:0;border-radius:4px;padding:8px 18px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;cursor:pointer}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.msg{color:var(--amber);min-height:1.5em;margin-top:8px}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.stat b{display:block;font-size:22px;color:var(--ink)}
+.stat span{color:var(--dim);font-size:12px}
+.stat.hit b{color:var(--ok)}
+#log{list-style:none;margin:0;padding:0;max-height:55vh;overflow:auto}
+#log li{padding:6px 0;border-top:1px dashed var(--line);display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:start}
+#log time{color:var(--dim)}
+#log .who{color:var(--amber)}
+#log .txt{color:var(--ink);word-break:break-word}
+#log .det{color:var(--dim);white-space:nowrap}
+#log .det.on{color:var(--ok)}
+.hint{color:var(--dim);font-size:12px;margin:8px 0 0}
+@media (max-width:640px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}#log li{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>▌Red Team Console</h1>
+  <span>synthetic swarm simulator · posts are flagged synthetic in the data</span>
+</header>
+<main>
+  <section class="box">
+    <div class="row">
+      <label for="topic">Target topic</label>
+      <select id="topic" disabled></select>
+      <label for="size">Bots</label>
+      <select id="size" disabled>
+        <option value="25" selected>25</option>
+        <option value="12">12</option>
+      </select>
+      <button class="btn" id="attack" type="button" disabled>Attack</button>
+    </div>
+    <p class="msg" id="msg" aria-live="polite"></p>
+    <p class="hint">Each bot posts a rewording of the same message in two volleys. Demo speed: bots post 4× faster than the
+      real schedule the metrics are measured on (the whole attack takes ~2.5 min). One attack per topic every 5 minutes.
+      Watch it on the radar: open the topic on the main page and press Check.</p>
+  </section>
+  <section class="box stats" aria-live="polite">
+    <div class="stat"><b id="sPosted">—</b><span>posts published</span></div>
+    <div class="stat"><b id="sBots">—</b><span>bots active</span></div>
+    <div class="stat hit"><b id="sCaught">—</b><span>bots caught by the radar</span></div>
+    <div class="stat"><b id="sTime">—</b><span>time to first detection</span></div>
+  </section>
+  <section class="box"><ul id="log" aria-label="Campaign posts"></ul></section>
+</main>
+<script type="module" src="/redteam.js"></script>
+</body>
+</html>
