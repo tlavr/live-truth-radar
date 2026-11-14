@@ -39,7 +39,8 @@ def test_failing_topic_does_not_stall_other_topics_injects_or_poll_interval(monk
     fake = FakeWorkerStore([{"id": 1, "topic": "good"}, {"id": 2, "topic": "bad"}])
     for name in ("window_items", "replace_findings", "pending_injects", "mark_injects_processed"):
         monkeypatch.setattr(worker.store, name, getattr(fake, name))
-    calls = {"ingest": 0, "detect": []}
+    calls = {"ingest": 0, "detect": [], "cleanup": []}
+    monkeypatch.setattr(worker.store, "delete_findings_except", lambda conn, keep: calls["cleanup"].append(keep))
 
     def ingest_cycle(conn):
         calls["ingest"] += 1
@@ -59,6 +60,7 @@ def test_failing_topic_does_not_stall_other_topics_injects_or_poll_interval(monk
         worker.tick(conn, st, now=10.0 * k)
 
     assert calls["ingest"] == 1  # a failed cycle is not retried every tick
+    assert calls["cleanup"] == [["bad", "good"]]  # stale topics' findings removed once per poll
     assert calls["detect"].count("good") == 2  # poll + inject
     assert calls["detect"].count("bad") == 2
     assert "good" in fake.replaced and "bad" not in fake.replaced
@@ -138,3 +140,37 @@ def test_real_detector_alerts_on_each_of_two_injects(monkeypatch):
         alerts = [f for f in stored[topic] if f.verdict == "coordinated" and f.synthetic]
         assert len(alerts) == 1  # the earlier inject (20 min ago) has expired
         assert set(alerts[0].accounts) == {it.author for it in campaign}
+
+
+def test_reddit_source_is_off_by_default(monkeypatch):
+    calls = []
+
+    class Client:
+        def news_search(self, query, since):
+            calls.append("news")
+            return {}
+
+        def reddit_search(self, query):
+            calls.append("reddit")
+            return {}
+
+    monkeypatch.setattr(worker, "news_to_items", lambda resp, topic: [])
+    monkeypatch.setattr(worker, "reddit_to_items", lambda resp, topic: [])
+    monkeypatch.delenv("REDDIT_ENABLED", raising=False)
+    assert worker.fetch_topic(Client(), "jensen-huang-resignation", since=None) == []
+    assert calls == ["news"]  # no Context.dev request units spent on the failing reddit scrape
+
+    calls.clear()
+    monkeypatch.setenv("REDDIT_ENABLED", "1")
+    worker.fetch_topic(Client(), "jensen-huang-resignation", since=None)
+    assert calls == ["news", "reddit"]
+
+
+def test_no_stale_cleanup_without_topics(monkeypatch):
+    cleaned = []
+    monkeypatch.setattr(worker.store, "delete_findings_except", lambda conn, keep: cleaned.append(keep))
+    monkeypatch.setattr(worker, "ingest_cycle", lambda conn: None)
+    monkeypatch.setattr(worker, "process_injects", lambda conn, d, h: 0)
+    monkeypatch.setenv("TOPICS", "")
+    worker.tick(FakeConn(), worker.LoopState(detector=lambda items: [], interval=300, window_hours=6), now=0.0)
+    assert cleaned == []  # an empty TOPICS must never wipe every finding
