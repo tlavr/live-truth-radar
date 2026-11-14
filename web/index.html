@@ -602,7 +602,7 @@ html:not([data-stage=home]) .fa{display:none}
       <div class="legend-bar" id="legend">
         <button class="lg-btn" type="button" data-cam="peak"><i class="sw-spike"></i><div><b>Spike</b><span id="lgSpike"></span></div></button>
         <button class="lg-btn" type="button" data-cam="carpet"><i class="sw-carpet"></i><div><b>Carpet</b><span id="lgCarpet"></span></div></button>
-        <button class="lg-btn" type="button" data-cam="top"><i class="sw-floor"></i><div><b>Axes</b><span>Lag (0–10m), wording gap, pair count</span></div></button>
+        <button class="lg-btn" type="button" data-cam="top" title="Wording gap = 1 − cosine similarity of the two posts' text embeddings after the shared topic is removed: 0% = same meaning, 100% = unrelated or opposite"><i class="sw-floor"></i><div><b>Axes</b><span>Lag (0–10m), wording gap (0% same meaning → 100% unrelated), pair count</span></div></button>
         <button class="cam-reset" id="resetCam" type="button">Reset</button>
       </div>
     </div>
