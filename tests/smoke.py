@@ -13,7 +13,9 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from contracts.models import AlertsResponse  # noqa: E402
+from pydantic import TypeAdapter  # noqa: E402
+
+from contracts.models import AlertsResponse, Item, MetricsReport  # noqa: E402
 
 
 def main(base: str) -> int:
@@ -27,6 +29,18 @@ def main(base: str) -> int:
             r.raise_for_status()
             resp = AlertsResponse.model_validate(r.json())
             print(f"OK  /api/alerts {len(resp.findings)} findings, generated_at={resp.generated_at.isoformat()}")
+            r = c.get(f"{base}/api/metrics")
+            r.raise_for_status()
+            rep = MetricsReport.model_validate(r.json())
+            print(f"OK  /api/metrics roc={len(rep.roc)} points, embedder={rep.embedder}, generated_at={rep.generated_at.isoformat()}")
+            ids = [i for f in resp.findings for i in f.item_ids][:20]
+            if ids:
+                r = c.get(f"{base}/api/items", params={"ids": ",".join(ids)})
+                r.raise_for_status()
+                got = TypeAdapter(list[Item]).validate_python(r.json())
+                if not got:
+                    raise RuntimeError("/api/items returned no items for ids taken from /api/alerts")
+                print(f"OK  /api/items {len(got)}/{len(ids)} items")
     except Exception as e:  # noqa: BLE001
         print(f"FAIL {type(e).__name__}: {e}", file=sys.stderr)
         return 1
