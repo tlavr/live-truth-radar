@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 from detect.config import DEFAULT
 
 POINTS_PATH = Path(__file__).resolve().parent.parent / "eval" / "operating_points.json"
-SLIDER_ALPHAS = (0.01, 0.02, 0.05)  # slider stops; 0.02 is the design alpha (main findings table)
+SLIDER_ALPHAS = (0.005, 0.01, 0.02, 0.05, 0.1)  # slider stops; 0.02 is the design alpha (main findings table)
 DEFAULT_ALPHA = DEFAULT.alpha  # the design alpha: what detect() uses unless told otherwise
 
 

@@ -184,7 +184,7 @@ def test_detect_topic_stores_each_slider_alpha(monkeypatch):
 
 def test_alpha_points_from_env(monkeypatch):
     monkeypatch.delenv("ALPHA_POINTS", raising=False)
-    assert worker.alpha_points() == (0.01, 0.05)  # slider stops without the design alpha (findings table)
+    assert worker.alpha_points() == (0.005, 0.01, 0.05, 0.1)  # slider stops without the design alpha (findings table)
     monkeypatch.setenv("ALPHA_POINTS", "0.05, 0.02,bad,1.5,0,0.1")
     assert worker.alpha_points() == (0.05, 0.1)
     monkeypatch.setenv("ALPHA_POINTS", "")

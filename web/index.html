@@ -479,9 +479,49 @@ html:not([data-stage=home]) .feed{display:none}
 .corr div{aspect-ratio:1;border-radius:3px;background:rgba(99,207,151,var(--v));min-width:0}
 .corr div:hover{outline:1.5px solid var(--ink)}
 .span2{grid-column:1/-1}
-.alpha-pick{display:inline-flex;align-items:center;gap:6px}
-.alpha-pick select{font:inherit;color:inherit;background:transparent;border:1px solid currentColor;border-radius:6px;padding:1px 4px;opacity:.85}
-.alpha-pick select option{color:#000}
+/* ---------- false-alarm slider (T12c) ---------- */
+.alpha-chip{font-size:inherit;color:var(--muted);padding:3px 10px;border-radius:999px;border:1px solid var(--hairline);background:var(--surface)}
+.alpha-chip b{color:var(--salat);font-weight:600;margin-left:3px;font-variant-numeric:tabular-nums}
+.alpha-chip:hover{border-color:rgba(142,232,123,.45)}
+html[data-stage=home] .alpha-chip{display:none}
+.fa{margin:18px auto 0;width:min(560px,100%);padding:12px 16px 10px;border-radius:16px;background:var(--surface);border:1px solid var(--hairline);text-align:left}
+html:not([data-stage=home]) .fa{display:none}
+.fa-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.fa-title{font-size:12.5px;font-weight:600;letter-spacing:.02em;color:var(--tertiary);text-transform:uppercase}
+.fa-val{font-size:22px;font-weight:600;color:var(--salat);font-variant-numeric:tabular-nums;text-shadow:0 0 18px rgba(142,232,123,.45)}
+.fa-track{position:relative;height:34px;margin:4px 0 0}
+.fa-track input{--p:50%;position:absolute;inset:0;width:100%;height:100%;margin:0;background:transparent;-webkit-appearance:none;appearance:none;cursor:pointer;touch-action:pan-y;z-index:1}
+.fa-track input:focus-visible{outline:none}
+.fa-track input::-webkit-slider-runnable-track{height:6px;border-radius:999px;background:linear-gradient(90deg,var(--cool),var(--salat) var(--p),rgba(218,240,224,.14) var(--p));box-shadow:0 0 14px rgba(142,232,123,.28)}
+.fa-track input::-moz-range-track{height:6px;border-radius:999px;background:rgba(218,240,224,.14)}
+.fa-track input::-moz-range-progress{height:6px;border-radius:999px;background:linear-gradient(90deg,var(--cool),var(--salat));box-shadow:0 0 14px rgba(142,232,123,.28)}
+.fa-track input::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;margin-top:-8px;border-radius:50%;background:var(--ink);border:3px solid var(--salat);box-shadow:0 0 0 6px rgba(142,232,123,.14),0 0 16px rgba(142,232,123,.6);transition:transform .16s var(--ease-out),box-shadow .16s var(--ease-out)}
+.fa-track input::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:var(--ink);border:3px solid var(--salat);box-shadow:0 0 0 6px rgba(142,232,123,.14),0 0 16px rgba(142,232,123,.6)}
+.fa-track input:active::-webkit-slider-thumb{transform:scale(1.12)}
+.fa-track input:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 4px var(--bg),0 0 0 6px var(--salat),0 0 16px rgba(142,232,123,.6)}
+.fa-track input:focus-visible::-moz-range-thumb{box-shadow:0 0 0 4px var(--bg),0 0 0 6px var(--salat)}
+.fa-stops{position:absolute;left:11px;right:11px;top:calc(50% + 19px);height:16px}
+.fa-stops button{position:absolute;transform:translateX(-50%);font-size:11.5px;color:var(--tertiary);font-variant-numeric:tabular-nums;padding:0 4px;z-index:2}
+.fa-stops button.on{color:var(--salat);font-weight:600}
+.fa-stops button:hover{color:var(--ink)}
+.fa-ends{display:flex;justify-content:space-between;margin-top:20px;font-size:12px;color:var(--muted)}
+.fa-hint{margin:6px 0 0;font-size:13.5px;color:var(--ink);line-height:1.45}
+.fa-hint b{color:var(--salat);font-weight:600}
+.fa-meas{margin:4px 0 0;font-size:12px;color:var(--tertiary);font-variant-numeric:tabular-nums}
+@media (prefers-reduced-motion:reduce){.fa-track input::-webkit-slider-thumb{transition:none}}
+/* phones and short desktop screens: the home column (search, slider, feed) is taller than the screen,
+   so it flows and scrolls; tall screens keep it centered */
+@media (max-width:860px),(max-height:900px){
+  html[data-stage=home] body{overflow:auto}
+  html[data-stage=home] .topbar{position:relative;inset:auto;align-items:flex-start;padding:64px var(--gutter) 28px}
+  html[data-stage=home] .search-shell{transform:none}
+}
+@media (max-width:860px){
+  .fa{padding:12px 14px 10px}
+  .fa-val{font-size:19px}
+  .fa-hint{font-size:13px}
+}
+@media (max-width:560px){html:not([data-stage=home]) #updated{display:none}}
 @media (max-width:860px){.status{top:18px;font-size:12px;gap:10px}.span2{grid-column:auto}}
 </style>
 </head>
@@ -493,8 +533,7 @@ html:not([data-stage=home]) .feed{display:none}
     <button class="brand" id="brandBtn" type="button" aria-label="Live Swarm Radar home">Live Swarm Radar</button>
     <nav class="status" aria-label="Status">
       <span id="updated"><span class="live stale"></span>connecting…</span>
-      <label class="alpha-pick" title="False alarm target: SPRT alpha. Lower = fewer false alarms, later decisions, small swarms missed more often">False alarm
-        <select id="alphaSel" aria-label="False alarm target"></select></label>
+      <button class="alpha-chip" id="alphaChip" type="button" title="Change the false alarm limit">False alarm <b id="alphaChipVal">2%</b></button>
       <a href="/metrics">Metrics</a>
     </nav>
 
@@ -513,6 +552,19 @@ html:not([data-stage=home]) .feed{display:none}
           <button class="submit-btn" type="submit">Check</button>
         </div>
         <div class="samples" id="samples" role="group" aria-label="Monitored topics"></div>
+        <div class="fa" id="fa">
+          <div class="fa-head">
+            <label class="fa-title" for="alphaRange">False alarm limit</label>
+            <output class="fa-val" id="alphaVal" for="alphaRange">2%</output>
+          </div>
+          <div class="fa-track">
+            <input id="alphaRange" type="range" min="0" max="4" step="1" value="2" aria-describedby="alphaHint">
+            <div class="fa-stops" id="alphaStops" aria-hidden="true"></div>
+          </div>
+          <div class="fa-ends" aria-hidden="true"><span>Strict</span><span>Sensitive</span></div>
+          <p class="fa-hint" id="alphaHint"></p>
+          <p class="fa-meas" id="alphaMeas"></p>
+        </div>
         <section class="feed" aria-label="Latest alerts">
           <h2>Latest alerts</h2>
           <ul id="feed"><li class="empty">Loading…</li></ul>

@@ -37,11 +37,11 @@ async function api(path, opts) {
 
 /* ------------------------------------------------------------------ state */
 const S = {
-  topics: [], findings: [], lastPoll: null, metrics: null, points: null, alpha: DESIGN_ALPHA,
+  topics: [], findings: [], lastPoll: null, metrics: null, points: null, served: null, alpha: DESIGN_ALPHA,
   topic: null, list: [], sel: 0, items: new Map(),
 };
 // T12c: the false-alarm slider picks an SPRT alpha; /api/alerts?alpha= serves the findings at that point
-const SLIDER_ALPHAS = [0.01, 0.02, 0.05];  // fallback until eval/operating_points.json exists
+const SLIDER_ALPHAS = [0.005, 0.01, 0.02, 0.05, 0.1];  // fallback until eval/operating_points.json exists
 const alpha = () => S.alpha;
 const point = () => S.points?.points?.find(p => Math.abs(p.alpha - S.alpha) < 1e-9);
 // design alpha of the chosen point + the Pfa measured for it by make eval (with its 95% upper bound)
@@ -611,38 +611,80 @@ for (const [tab, panel] of [['tabMain', 'panelMain'], ['tabDetails', 'panelDetai
     }
   });
 
+// T12c false-alarm slider: one stop per SPRT alpha, hint from the measured point (/api/operating_points)
+const per = a => `~${Math.round(1 / a)}`;
+function alphaHint(a) {
+  const p = S.points?.points?.find(q => Math.abs(q.alpha - a) < 1e-9);
+  const lim = `Design target: <b>1 false alarm per ${per(a)}</b> quiet windows (6 h of one topic)`;
+  if (!p) return [`${lim}. Not measured yet.`, ''];
+  const dec = p.posts_to_decision != null ? ` · decides after <b>~${p.posts_to_decision.toFixed(1)} posts</b>` : '';
+  const hint = `${lim} · catches <b>${pct(p.pd_small)}</b> of 3-account swarms${dec}`;
+  const alarms = Math.round(p.pfa * p.n_background);
+  let meas = `Measured: ${alarms} false alarm${alarms === 1 ? '' : 's'} in ${p.n_background} test windows (≤ ${pct(p.pfa_upper95)} at 95%)`;
+  if (p.n_independent) {
+    const ia = Math.round((p.pfa_independent ?? 0) * p.n_independent);
+    meas += ` · ${ia} in ${p.n_independent} independent live windows` +
+      (p.pfa_independent_upper95 != null ? ` (≤ ${pct(p.pfa_independent_upper95)})` : '');
+  }
+  return [hint, meas];
+}
+
 function setupAlpha() {
-  const sel = $('alphaSel');
-  const alphas = S.points?.points?.length ? S.points.points.map(p => p.alpha) : SLIDER_ALPHAS;
+  const range = $('alphaRange');
+  // only the alphas the worker computes (/api/alphas, from its ALPHA_POINTS): any other stop would show an
+  // empty feed; SLIDER_ALPHAS if unknown. A stop without a measured point says so in its hint
+  const alphas = [...(S.served ?? SLIDER_ALPHAS)].sort((x, y) => x - y);
   let saved = null;
   try { saved = parseFloat(localStorage.getItem('ltr.alpha')); } catch {}
   S.alpha = alphas.includes(saved) ? saved : (alphas.includes(DESIGN_ALPHA) ? DESIGN_ALPHA : alphas[0]);
-  sel.innerHTML = alphas.map(a => {
-    const p = S.points?.points?.find(q => q.alpha === a);
-    const hint = p ? ` · small swarms ${pct(p.pd_small)}` : '';
-    return `<option value="${a}"${a === S.alpha ? ' selected' : ''}>${pct(a)}${hint}</option>`;
-  }).join('');
-  sel.addEventListener('change', async () => {
-    S.alpha = parseFloat(sel.value);
-    try { localStorage.setItem('ltr.alpha', String(S.alpha)); } catch {}
+  range.max = String(alphas.length - 1);
+  $('fa').hidden = alphas.length < 2;  // one served stop: nothing to choose
+  range.value = String(alphas.indexOf(S.alpha));
+  const at = i => i / Math.max(1, alphas.length - 1) * 100;
+  $('alphaStops').innerHTML = alphas.map((a, i) =>
+    `<button type="button" tabindex="-1" data-i="${i}" style="left:${at(i)}%">${pct(a)}</button>`).join('');
+  const show = i => {
+    const a = alphas[i];
+    range.style.setProperty('--p', `${at(i)}%`);
+    range.setAttribute('aria-valuetext', `${pct(a)} false alarm limit`);
+    $('alphaVal').textContent = pct(a);
+    $('alphaChipVal').textContent = pct(a);
+    for (const b of $('alphaStops').children) b.classList.toggle('on', +b.dataset.i === i);
+    const [hint, meas] = alphaHint(a);
+    $('alphaHint').innerHTML = hint; $('alphaMeas').textContent = meas;
+  };
+  const commit = async () => {
+    const a = alphas[+range.value];
+    if (a === S.alpha) return;
+    S.alpha = a;
+    try { localStorage.setItem('ltr.alpha', String(a)); } catch {}
     const fresh = await refresh();
     // any stage: a change during the scan animation must not leave the old point's list for showResult
     if (fresh && S.topic) {
       S.list = topicFindings(S.topic); S.sel = 0;
       if (root.dataset.stage === 'result') { if (ok) setField(S.list[0]); render(); }
     }
+  };
+  range.addEventListener('input', () => show(+range.value));  // live hint while dragging
+  range.addEventListener('change', commit);                    // fetch alerts on release / key press
+  $('alphaStops').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    range.value = b.dataset.i; show(+b.dataset.i); commit(); range.focus();
   });
+  $('alphaChip').addEventListener('click', () => { goHome(); setTimeout(() => range.focus({preventScroll: true}), 50); });
+  show(+range.value);
 }
 
 try { buildScene(); } catch (err) { ok = false; console.error(err); canvas.style.display = 'none'; }
 if (ok) { new ResizeObserver(resize).observe(stage); resize(); requestAnimationFrame(frame); }
 
 (async () => {
-  const [topics, metrics, points] = await Promise.allSettled(
-    [api('/api/topics'), api('/api/metrics'), api('/api/operating_points')]);
+  const [topics, metrics, points, served] = await Promise.allSettled(
+    [api('/api/topics'), api('/api/metrics'), api('/api/operating_points'), api('/api/alphas')]);
   S.topics = topics.value ?? [];
   S.metrics = metrics.value ?? null;
   S.points = points.value ?? null;
+  S.served = Array.isArray(served.value) && served.value.length ? served.value : null;
   setupAlpha();
   await refresh();
   renderHome();
