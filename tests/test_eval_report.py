@@ -12,8 +12,23 @@ from eval.run import WINDOW, WINDOW_BASE, background_window, build_report, load_
 SMALL_BACKGROUND = ("items.json", "items_live_sample.json")  # tests stay < 5 s without the 48 h live export
 
 
+def _two_inject_topics(monkeypatch, tmp_path):
+    """Inject windows only on the two original topics: every new synth/variations file would
+    otherwise add a topic's worth of inject windows to these tests (make test < 5 s)."""
+    import shutil
+
+    import eval.run as run
+
+    keep = tmp_path / "variations"
+    keep.mkdir(exist_ok=True)
+    for topic in ("helsinki-tram-fares", "jensen-huang-resignation"):
+        shutil.copy(run.VARIATIONS_DIR / f"{topic}.json", keep / f"{topic}.json")
+    monkeypatch.setattr(run, "VARIATIONS_DIR", keep)  # eval's "has variations" check only
+
+
 def test_report_valid_roc_monotone_values_in_unit_interval(tmp_path, monkeypatch):
     monkeypatch.setattr("eval.run.BACKGROUND_FILES", SMALL_BACKGROUND)
+    _two_inject_topics(monkeypatch, tmp_path)
     (tmp_path / "labels.csv").write_text(
         "account,topic,alerted,verdict,label,note\n"
         "acct-1,helsinki-tram-fares,1,coordinated,suspicious,\n"

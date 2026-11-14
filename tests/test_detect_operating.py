@@ -55,7 +55,9 @@ def test_points_round_trip_and_missing_file(tmp_path):
     assert load_points(tmp_path / "bad.json") is None
 
 
-def test_eval_operating_points_on_fixtures(monkeypatch):
+def test_eval_operating_points_on_fixtures(monkeypatch, tmp_path):
+    from tests.test_eval_report import _two_inject_topics
+
     import eval.run as run
 
     seen = []
@@ -67,6 +69,7 @@ def test_eval_operating_points_on_fixtures(monkeypatch):
 
     monkeypatch.setattr(run, "run_trials", spy)
     monkeypatch.setattr(run, "BACKGROUND_FILES", ("items.json", "items_live_sample.json"))  # small, fast
+    _two_inject_topics(monkeypatch, tmp_path)
     pts = build_operating_points(n_windows=3, alphas=(0.005, 0.05), dev=True)
     assert seen == [0.005] * 3 + [0.05] * 3  # background, ROC swarm, small swarm at each alpha
     assert [p.alpha for p in pts.points] == [0.005, 0.05]

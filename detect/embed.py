@@ -59,12 +59,16 @@ def _cache_path(model: str, text: str) -> Path:
     return CACHE_DIR / safe_model / (hashlib.sha1(text.encode("utf-8")).hexdigest() + ".npy")
 
 
+GEMINI_TIMEOUT_MS = 20_000
+
+
 def _gemini_call(texts: list[str], model: str, api_key: str) -> list[list[float]]:
     """One network round per batch; the only place that talks to Gemini."""
     from google import genai
     from google.genai import types
 
-    client = genai.Client(api_key=api_key)
+    # explicit timeout (ms): a hung request must not freeze the worker's radar frames (T12d)
+    client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=GEMINI_TIMEOUT_MS))
     out: list[list[float]] = []
     for start in range(0, len(texts), GEMINI_BATCH):
         resp = client.models.embed_content(
