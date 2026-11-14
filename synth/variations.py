@@ -81,51 +81,78 @@ def save_variations(vs: VariationSet) -> Path:
     return path
 
 
+def _parse_reply(text: str, *, n_held_out: int, n_variations: int) -> list[Message]:
+    """Turn the model's JSON reply into messages; ValueError if it has the wrong shape.
+
+    Types are checked explicitly, so a bug in this function is never mistaken for a bad reply.
+    """
+    data = json.loads(text)  # JSONDecodeError is a ValueError
+    raw_messages = data.get("messages") if isinstance(data, dict) else None
+    if not isinstance(raw_messages, list) or not raw_messages:
+        raise ValueError("'messages' is missing, empty or not a list")
+    # the last n_held_out messages are kept away from any tuning (count what the model
+    # actually returned, not what we asked for)
+    if len(raw_messages) <= n_held_out:
+        raise ValueError(f"only {len(raw_messages)} messages, cannot hold out {n_held_out}")
+    messages = []
+    for k, raw in enumerate(raw_messages):
+        if not isinstance(raw, dict):
+            raise ValueError(f"message {k} is not an object")
+        claim, variations = raw.get("claim"), raw.get("variations")
+        if not isinstance(claim, str) or not claim.strip():
+            raise ValueError(f"message {k}: 'claim' is missing or not a non-empty string")
+        if not isinstance(variations, list) or not all(isinstance(t, str) for t in variations):
+            raise ValueError(f"message {k}: 'variations' is not a list of strings")
+        texts = list(dict.fromkeys(t.strip() for t in variations if t.strip()))
+        if len(texts) < n_variations * 2 // 3:
+            warnings.warn(f"message {k} has only {len(texts)} distinct variations (asked for {n_variations})",
+                          stacklevel=3)  # point at the caller of generate()
+        # pydantic's ValidationError (fewer than 2 variations) is a ValueError too
+        messages.append(Message(claim=claim.strip(), variations=texts, held_out=k >= len(raw_messages) - n_held_out))
+    return messages
+
+
 def generate(topic: str, description: str, *, n_messages: int = 5, n_variations: int = 30,
              n_held_out: int = 2) -> VariationSet:
-    """Ask Gemini for talking points and their rewordings (network; needs GEMINI_API_KEY)."""
+    """Ask Gemini for talking points and their rewordings (network; needs GEMINI_API_KEY).
+
+    Bad arguments raise ValueError before any request; a missing key, a failed request or an
+    unusable reply raise RuntimeError with a one-line reason.
+    """
     check_slug(topic)  # fail before spending a request
     if n_messages < 1 or not 0 <= n_held_out < n_messages:
         raise ValueError(f"need n_messages >= 1 and 0 <= n_held_out < n_messages (got {n_messages}, {n_held_out}):"
                          " keep at least one message for tuning")
+    if n_variations < 2:
+        raise ValueError(f"need n_variations >= 2 (got {n_variations}): a message needs at least two rewordings")
+    import httpx
     from google import genai
-    from google.genai import types
+    from google.genai import errors, types
 
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is not set (see .env.example)")
     model = os.environ.get("GEMINI_LLM_MODEL") or DEFAULT_LLM_MODEL
-    # Keep the client in a `with`: a temporary Client is garbage-collected (and its HTTP
-    # session closed) while the request is still running.
-    with genai.Client(api_key=api_key) as client:
-        resp = client.models.generate_content(
-            model=model,
-            contents=PROMPT.format(description=description, n_messages=n_messages, n_variations=n_variations),
-            config=types.GenerateContentConfig(response_mime_type="application/json", temperature=1.0),
-        )
+    try:
+        # Keep the client in a `with`: a temporary Client is garbage-collected (and its HTTP
+        # session closed) while the request is still running.
+        with genai.Client(api_key=api_key) as client:
+            resp = client.models.generate_content(
+                model=model,
+                contents=PROMPT.format(description=description, n_messages=n_messages, n_variations=n_variations),
+                config=types.GenerateContentConfig(response_mime_type="application/json", temperature=1.0),
+            )
+    except errors.APIError as e:  # auth, quota, unknown model
+        raise RuntimeError(f"request to {model} failed: {e.code} {e.status}: {e.message}") from e
+    except (errors.UnknownApiResponseError, httpx.HTTPError) as e:  # garbled response, network
+        raise RuntimeError(f"request to {model} failed: {type(e).__name__}: {e}") from e
     if not resp.text:
         raise RuntimeError(f"{model} returned no text (blocked or empty response)")
     try:
-        raw_messages = json.loads(resp.text)["messages"]
-        if not isinstance(raw_messages, list) or not raw_messages:
-            raise ValueError("'messages' is empty or not a list")
-        # the last n_held_out messages are kept away from any tuning (count what the model
-        # actually returned, not what we asked for)
-        if len(raw_messages) <= n_held_out:
-            raise ValueError(f"only {len(raw_messages)} messages, cannot hold out {n_held_out}")
-        messages = []
-        for k, raw in enumerate(raw_messages):
-            if not isinstance(raw["variations"], list):
-                raise ValueError(f"message {k}: 'variations' is not a list")
-            texts = list(dict.fromkeys(t.strip() for t in raw["variations"] if t.strip()))
-            if len(texts) < n_variations * 2 // 3:
-                warnings.warn(f"message {k} has only {len(texts)} distinct variations (asked for {n_variations})",
-                              stacklevel=2)
-            messages.append(Message(claim=raw["claim"].strip(), variations=texts,
-                                    held_out=k >= len(raw_messages) - n_held_out))
-    except (ValueError, KeyError, TypeError, AttributeError) as e:  # JSONDecodeError and pydantic's ValidationError are ValueErrors
+        messages = _parse_reply(resp.text, n_held_out=n_held_out, n_variations=n_variations)
+    except ValueError as e:
         raise RuntimeError(f"{model} returned an unusable reply: {type(e).__name__}: {e}") from e
-    return VariationSet(topic=check_slug(topic), description=description, source=model, messages=messages)
+    return VariationSet(topic=topic, description=description, source=model, messages=messages)
 
 
 def main() -> None:
