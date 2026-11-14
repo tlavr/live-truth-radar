@@ -32,6 +32,8 @@ class FakeClient:
 
     def generate_content(self, **kwargs):
         assert not self.closed, "client used after it was closed"
+        if isinstance(FakeClient.reply, Exception):
+            raise FakeClient.reply
         return type("Resp", (), {"text": FakeClient.reply})()
 
 
@@ -83,36 +85,73 @@ def _msgs(*entries) -> str:
 
 
 _OK = {"claim": "c", "variations": ["a", "b"]}
-UNUSABLE = [
-    "not json", "{}", '{"messages": []}', '{"messages": "x"}',
-    _msgs(_OK, _OK, {"claim": "c"}),                         # KeyError: no variations
-    _msgs(_OK, _OK, {"variations": ["a", "b"]}),             # KeyError: no claim
-    _msgs(_OK, _OK, "just a string"),                        # TypeError: message is not an object
-    _msgs(_OK, _OK, {"claim": "c", "variations": ["a", 1]}),  # AttributeError: non-string variation
-    _msgs(_OK, _OK, {"claim": 5, "variations": ["a", "b"]}),  # AttributeError: non-string claim
-    _msgs(_OK, _OK, {"claim": "c", "variations": "abcdef"}),  # string instead of a list
-    _msgs(_OK, _OK, {"claim": "c", "variations": ["only one"]}),  # pydantic: < 2 variations
+UNUSABLE = [  # (reply, expected reason)
+    ("not json", "JSONDecodeError"),
+    ("[]", "'messages' is missing"),
+    ("{}", "'messages' is missing"),
+    ('{"messages": []}', "'messages' is missing"),
+    ('{"messages": "x"}', "'messages' is missing"),
+    (_msgs(_OK, _OK), "cannot hold out"),
+    (_msgs(_OK, _OK, {"claim": "c"}), "'variations' is not a list"),
+    (_msgs(_OK, _OK, {"variations": ["a", "b"]}), "'claim' is missing"),
+    (_msgs(_OK, _OK, {"claim": "  ", "variations": ["a", "b"]}), "'claim' is missing"),
+    (_msgs(_OK, _OK, {"claim": 5, "variations": ["a", "b"]}), "'claim' is missing"),
+    (_msgs(_OK, _OK, "just a string"), "message 2 is not an object"),
+    (_msgs(_OK, _OK, {"claim": "c", "variations": ["a", 1]}), "'variations' is not a list"),
+    (_msgs(_OK, _OK, {"claim": "c", "variations": "abcdef"}), "'variations' is not a list"),
+    (_msgs(_OK, _OK, {"claim": "c", "variations": ["only one", " only one "]}), "ValidationError"),
 ]
 
 
-@pytest.mark.parametrize("reply", UNUSABLE)
-def test_unusable_replies_raise_one_clear_error(fake_gemini, reply):
+@pytest.mark.parametrize(("reply", "reason"), UNUSABLE)
+def test_unusable_replies_raise_one_clear_error(fake_gemini, reply, reason):
     fake_gemini.reply = reply
-    with pytest.raises(RuntimeError, match="unusable reply"):
+    with pytest.raises(RuntimeError, match="unusable reply") as err:
         sv.generate("some-topic", "desc")
+    assert reason in str(err.value)
+
+
+def test_request_failures_become_one_clear_error(fake_gemini):
+    import httpx
+    from google.genai import errors
+
+    api_error = errors.ClientError(400, {"error": {"code": 400, "status": "INVALID_ARGUMENT", "message": "bad key"}})
+    for exc, reason in [
+        (api_error, f"{api_error.code} {api_error.status}: {api_error.message}"),
+        (errors.UnknownApiResponseError("garbled"), "UnknownApiResponseError: garbled"),
+        (json.JSONDecodeError("Expecting value", "<html>", 0), "JSONDecodeError: Expecting value"),
+        (httpx.ConnectError("no route"), "ConnectError: no route"),
+    ]:
+        fake_gemini.reply = exc
+        with pytest.raises(RuntimeError, match="request to .* failed") as err:
+            sv.generate("some-topic", "desc")
+        assert reason in str(err.value)
 
 
 def test_bad_arguments_fail_before_any_request(fake_gemini):
     with pytest.raises(ValueError, match="slug"):
         sv.generate("Bad Slug", "desc")
-    with pytest.raises(ValueError, match="n_messages"):
-        sv.generate("some-topic", "desc", n_messages=0, n_held_out=0)
+    for n_messages, n_held_out in [(0, 0), (2, 2), (5, 0), (5, -1), (5, 5)]:
+        with pytest.raises(ValueError, match="n_held_out"):
+            sv.generate("some-topic", "desc", n_messages=n_messages, n_held_out=n_held_out)
+    for n in (1, 0, -3):
+        with pytest.raises(ValueError, match="n_variations"):
+            sv.generate("some-topic", "desc", n_variations=n)
     assert not fake_gemini.instances  # no client was even created
 
 
-def test_cli_prints_a_clean_error(fake_gemini, monkeypatch):
-    monkeypatch.setattr("sys.argv", ["synth.variations", "some-topic", "desc", "--messages", "2", "--held-out", "2"])
-    with pytest.raises(SystemExit, match="error: .*n_held_out"):
+@pytest.mark.parametrize(("extra", "reply", "expected"), [
+    (["--messages", "2", "--held-out", "2"], "", "error: .*n_held_out"),
+    (["--variations", "1"], "", "error: .*n_variations"),
+    ([], "not json", "error: .*unusable reply"),
+    ([], ConnectionError, "error: request to .* failed"),
+])
+def test_cli_prints_a_clean_error(fake_gemini, monkeypatch, extra, reply, expected):
+    import httpx
+
+    fake_gemini.reply = httpx.ConnectError("no route") if reply is ConnectionError else reply
+    monkeypatch.setattr("sys.argv", ["synth.variations", "some-topic", "desc", *extra])
+    with pytest.raises(SystemExit, match=expected):
         sv.main()
 
 
@@ -124,9 +163,7 @@ def test_full_sized_reply_does_not_warn(fake_gemini):
         assert len(sv.generate("some-topic", "desc").messages) == 5
 
 
-def test_cannot_hold_out_every_message(fake_gemini):
-    with pytest.raises(ValueError, match="n_held_out"):
-        sv.generate("some-topic", "desc", n_messages=2, n_held_out=2)
+def test_cannot_hold_out_every_returned_message(fake_gemini):
     fake_gemini.reply = _reply(2)  # the model returned fewer messages than asked
     with pytest.raises(RuntimeError, match="cannot hold out"):
         sv.generate("some-topic", "desc", n_held_out=2)
@@ -134,8 +171,9 @@ def test_cannot_hold_out_every_message(fake_gemini):
 
 def test_warns_when_model_returns_few_variations(fake_gemini):
     fake_gemini.reply = _reply(5)  # 2 distinct variations each, 30 requested
-    with pytest.warns(UserWarning, match="distinct variations"):
+    with pytest.warns(UserWarning, match="distinct variations") as record:
         sv.generate("some-topic", "desc")
+    assert {w.filename for w in record} == {__file__}  # points at the caller of generate()
 
 
 @pytest.mark.parametrize("topic", sv.available_topics())
