@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 import re
+import warnings
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -83,6 +84,10 @@ def save_variations(vs: VariationSet) -> Path:
 def generate(topic: str, description: str, *, n_messages: int = 5, n_variations: int = 30,
              n_held_out: int = 2) -> VariationSet:
     """Ask Gemini for talking points and their rewordings (network; needs GEMINI_API_KEY)."""
+    check_slug(topic)  # fail before spending a request
+    if n_messages < 1 or not 0 <= n_held_out < n_messages:
+        raise ValueError(f"need n_messages >= 1 and 0 <= n_held_out < n_messages (got {n_messages}, {n_held_out}):"
+                         " keep at least one message for tuning")
     from google import genai
     from google.genai import types
 
@@ -100,14 +105,26 @@ def generate(topic: str, description: str, *, n_messages: int = 5, n_variations:
         )
     if not resp.text:
         raise RuntimeError(f"{model} returned no text (blocked or empty response)")
-    raw_messages = json.loads(resp.text)["messages"]
-    messages = []
-    for k, raw in enumerate(raw_messages):
-        texts = list(dict.fromkeys(t.strip() for t in raw["variations"] if t.strip()))
+    try:
+        raw_messages = json.loads(resp.text)["messages"]
+        if not isinstance(raw_messages, list) or not raw_messages:
+            raise ValueError("'messages' is empty or not a list")
         # the last n_held_out messages are kept away from any tuning (count what the model
         # actually returned, not what we asked for)
-        messages.append(Message(claim=raw["claim"].strip(), variations=texts,
-                                held_out=k >= len(raw_messages) - n_held_out))
+        if len(raw_messages) <= n_held_out:
+            raise ValueError(f"only {len(raw_messages)} messages, cannot hold out {n_held_out}")
+        messages = []
+        for k, raw in enumerate(raw_messages):
+            if not isinstance(raw["variations"], list):
+                raise ValueError(f"message {k}: 'variations' is not a list")
+            texts = list(dict.fromkeys(t.strip() for t in raw["variations"] if t.strip()))
+            if len(texts) < n_variations * 2 // 3:
+                warnings.warn(f"message {k} has only {len(texts)} distinct variations (asked for {n_variations})",
+                              stacklevel=2)
+            messages.append(Message(claim=raw["claim"].strip(), variations=texts,
+                                    held_out=k >= len(raw_messages) - n_held_out))
+    except (ValueError, KeyError, TypeError, AttributeError) as e:  # JSONDecodeError and pydantic's ValidationError are ValueErrors
+        raise RuntimeError(f"{model} returned an unusable reply: {type(e).__name__}: {e}") from e
     return VariationSet(topic=check_slug(topic), description=description, source=model, messages=messages)
 
 
@@ -119,8 +136,11 @@ def main() -> None:
     ap.add_argument("--variations", type=int, default=30)
     ap.add_argument("--held-out", type=int, default=2)
     args = ap.parse_args()
-    vs = generate(args.topic, args.description, n_messages=args.messages, n_variations=args.variations,
-                  n_held_out=args.held_out)
+    try:
+        vs = generate(args.topic, args.description, n_messages=args.messages, n_variations=args.variations,
+                      n_held_out=args.held_out)
+    except (ValueError, RuntimeError) as e:
+        raise SystemExit(f"error: {e}") from e
     path = save_variations(vs)
     sizes = ", ".join(str(len(m.variations)) for m in vs.messages)
     print(f"wrote {path} ({len(vs.messages)} messages; variations: {sizes}). Read it before committing.")
