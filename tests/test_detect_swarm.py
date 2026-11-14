@@ -10,8 +10,8 @@ from pydantic import TypeAdapter
 
 from contracts.models import Item
 from detect import cfar, sprt
-from detect.config import DEFAULT
-from detect.correlation import TopicSignal, pair_correlation
+from detect.config import DEFAULT, SLOW
+from detect.correlation import TopicSignal, build_signal, pair_correlation
 from detect.pipeline import detect
 from synth.campaign import make_campaign
 
@@ -24,13 +24,12 @@ def _items(name: str) -> list[Item]:
 
 
 def _signal(t, acct, code, gain=None) -> TopicSignal:
-    """Hand-made topic signal (posts already in time order)."""
+    """Hand-made topic signal; posts are put in time order (stable), as the pipeline does."""
     t, acct, code = np.asarray(t, float), np.asarray(acct), np.asarray(code, float)
-    gain = np.ones(len(t)) if gain is None else np.asarray(gain, float)
-    close = np.sqrt(np.outer(gain, gain)) * np.clip(code @ code.T, 0, None)
-    close[acct[:, None] == acct[None, :]] = 0
-    return TopicSignal(t=t, acct=acct, accounts=[f"a{k}" for k in range(acct.max() + 1)],
-                       gain=gain, code=code, close=close)
+    order = np.argsort(t, kind="stable")
+    t, acct, code = t[order], acct[order], code[order]
+    gain = np.ones(len(t)) if gain is None else np.asarray(gain, float)[order]
+    return build_signal(t, acct, [f"a{k}" for k in range(acct.max() + 1)], gain, code)
 
 
 def test_correlation_peaks_at_true_lag():
@@ -289,3 +288,88 @@ def test_news_echo_off_in_news_only_stream():
     assert not any(it.source == "context_social" for it in alt)
     hits = [f for f in detect(alt) if "reader_0" in f.accounts]
     assert hits and hits[0].verdict == "coordinated" and hits[0].note is None
+
+
+def test_second_inject_in_the_same_topic_does_not_mask_the_first():
+    """Two injected swarms in one window: each must stay coordinated (the other one is not its H0)."""
+    now = datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc)
+    first = make_campaign("helsinki-tram-fares", now)
+    second = make_campaign("helsinki-tram-fares", now + timedelta(minutes=20))
+    found = [f for f in detect(first + second) if f.verdict == "coordinated"]
+    assert len(found) == 2
+    assert {frozenset(f.accounts) for f in found} == {
+        frozenset(it.author for it in first),
+        frozenset(it.author for it in second),
+    }
+    assert all(f.synthetic for f in found)
+
+
+def _dense_reference(sig: TopicSignal, members=None, cfg=DEFAULT):
+    """The former (n, n) implementation of echo and the near-pair set, for the equivalence test."""
+    n = sig.n_posts
+    close = np.sqrt(np.outer(sig.gain, sig.gain)) * np.clip(sig.code @ sig.code.T, 0.0, None)
+    close[sig.acct[:, None] == sig.acct[None, :]] = 0.0
+    dt = sig.t[:, None] - sig.t[None, :]
+    ok = np.tril(np.ones((n, n), dtype=bool), k=-1) & (dt >= 0) & (dt <= cfg.tau_max_sec)
+    if members is not None:
+        ok &= members[sig.acct][None, :]
+    x = np.where(ok, close * np.exp(-np.clip(dt, 0.0, None) / cfg.lag_kernel_sec), 0.0).max(axis=1)
+    p, q = np.triu_indices(n, k=1)
+    near = (sig.acct[p] != sig.acct[q]) & (sig.t[q] - sig.t[p] <= sig.pair_window)
+    return x, set(zip(p[near].tolist(), q[near].tolist())), close
+
+
+def test_near_pairs_match_the_dense_computation():
+    rng = np.random.default_rng(7)
+    n = 700  # several PAIR_BLOCK blocks
+    t = np.sort(np.round(rng.uniform(0, 4 * 3600, n) / 15) * 15)  # 15 s grid: ties, gaps at tau_max and 615 s
+    acct = rng.integers(0, 120, n)
+    code = rng.normal(size=(n, 8))
+    code /= np.linalg.norm(code, axis=1, keepdims=True)
+    sig = _signal(t, acct, code, gain=rng.uniform(0.2, 1.0, n))
+    members = rng.random(120) < 0.3
+    for m in (None, members):
+        x_ref, pairs_ref, close = _dense_reference(sig, m)
+        np.testing.assert_allclose(sprt.echo(sig, m), x_ref, rtol=0, atol=1e-12)
+    assert sig.pair_window == 615.0  # last lag cell edge: (20 + 0.5) * 30 s
+    assert set(zip(sig.pair_p.tolist(), sig.pair_q.tolist())) == pairs_ref  # the whole window, beyond tau_max too
+    np.testing.assert_allclose(sig.pair_close, close[sig.pair_p, sig.pair_q], rtol=0, atol=1e-12)
+    # pair correlation over all pairs equals the one over near pairs: farther pairs fall outside the lag grid
+    full = _signal(t, acct, code, gain=sig.gain)
+    p, q = np.triu_indices(n, k=1)
+    keep = sig.acct[p] != sig.acct[q]
+    full.pair_p, full.pair_q = p[keep], q[keep]
+    full.pair_dt = sig.t[full.pair_q] - sig.t[full.pair_p]
+    full.pair_close = close[full.pair_p, full.pair_q]
+    full.pair_cos = np.einsum("ij,ij->i", code[full.pair_p], code[full.pair_q])
+    full.pair_window = np.inf
+    for got, want in zip(pair_correlation(sig), pair_correlation(full)):
+        np.testing.assert_array_equal(got, want)
+    with pytest.raises(ValueError):  # a wider cfg must not silently read a narrow signal
+        sprt.echo(sig, cfg=SLOW)
+    with pytest.raises(ValueError):
+        pair_correlation(sig, SLOW)
+
+
+def test_large_window_needs_no_post_by_post_matrices():
+    """A busy topic (4000 posts in 6 h) must not blow up the worker: one dense (n, n) float matrix alone is 128 MB."""
+    import tracemalloc
+
+    from detect.correlation import topic_signal
+    from detect.embed import embed_with_backend
+
+    rng = np.random.default_rng(1)
+    n = 4000
+    t = np.sort(rng.uniform(0, 6 * 3600, n))
+    authors = [f"u{k}" for k in rng.integers(0, 2000, n)]
+    E, _ = embed_with_backend([f"tram fare post {i} {rng.integers(50)}" for i in range(n)])
+    tracemalloc.start()
+    sig = topic_signal(E, t, authors)
+    sprt.echo(sig)
+    pair_correlation(sig)
+    peak = tracemalloc.get_traced_memory()[1]
+    tracemalloc.stop()
+    # legit: embeddings + codes (n x 1024, ~64 MB), account x account R and lag (~50 MB); the dense version
+    # held several (n, n) matrices at once (> 700 MB)
+    assert peak < 250 * 2**20
+    assert len(sig.pair_p) < n * n / 20  # only pairs within the lag window

@@ -28,7 +28,7 @@ import numpy as np
 from contracts.models import AmbiguityMap, Finding, Item, finding_id
 from detect import cfar, sprt
 from detect.config import DEFAULT, AnalyzerConfig
-from detect.correlation import TopicSignal, n_lag_steps, pair_correlation, topic_signal
+from detect.correlation import TopicSignal, n_lag_steps, pair_correlation, require_window, topic_signal
 from detect.embed import embed_with_backend
 from detect.news_echo import news_echo_note
 
@@ -85,13 +85,20 @@ def _detect_topic(topic: str, items: list[Item], E: np.ndarray, now: datetime, c
     texts = [it.text for it in items]
     pair_bins = _pair_bins(sig, cfg)
 
+    # SPRT reference = posts of accounts in NO candidate group: another swarm in the topic (e.g. a
+    # second inject) would otherwise raise mu0 and mask this one (other targets censored from CFAR cells).
+    in_any = np.zeros(len(sig.accounts), dtype=bool)
+    for g in groups:
+        in_any[list(g)] = True
+    censored = in_any[sig.acct]
+
     out: list[Finding] = []
     for group in groups:
         members = np.zeros(len(sig.accounts), dtype=bool)
         members[group] = True
         in_group = members[sig.acct]
         posts = np.flatnonzero(in_group)  # time order
-        mu0, sigma = sprt.background(echo_all[~in_group], cfg)
+        mu0, sigma = sprt.background(echo_all[~censored], cfg)
         x = sprt.echo(sig, members, cfg)[posts]
         res = sprt.run(x, mu0, sigma, alpha=cfg.alpha, beta=cfg.beta, cfg=cfg)
         note = news_echo_note(sig, is_news, texts, posts, cfg, has_social=has_social)
@@ -134,14 +141,10 @@ def _detect_topic(topic: str, items: list[Item], E: np.ndarray, now: datetime, c
 
 def _pair_bins(sig: TopicSignal, cfg: AnalyzerConfig) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Cross-account post pairs with |lag| <= tau_max: (account p, account q, |lag|, mismatch)."""
-    p, q = np.triu_indices(sig.n_posts, k=1)
-    keep = sig.acct[p] != sig.acct[q]
-    p, q = p[keep], q[keep]
-    dt = np.abs(sig.t[q] - sig.t[p])
-    near = dt <= cfg.tau_max_sec
-    p, q, dt = p[near], q[near], dt[near]
-    cos = np.einsum("ij,ij->i", sig.code[p], sig.code[q]) if len(p) else np.zeros(0)
-    mismatch = 1.0 - np.clip(cos, 0.0, 1.0)
+    require_window(sig, cfg)
+    near = sig.pair_dt <= cfg.tau_max_sec  # near pairs are already cross-account
+    p, q, dt = sig.pair_p[near], sig.pair_q[near], sig.pair_dt[near]
+    mismatch = 1.0 - np.clip(sig.pair_cos[near], 0.0, 1.0)
     return sig.acct[p], sig.acct[q], dt, mismatch
 
 
