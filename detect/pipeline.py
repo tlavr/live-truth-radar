@@ -190,11 +190,11 @@ def _detect_topic(
     censored = in_any[sig.acct]
 
     out: list[Finding] = []
+    used: set[str] = set()
     for group in groups:
         members = np.zeros(len(sig.accounts), dtype=bool)
         members[group] = True
-        in_group = members[sig.acct]
-        posts = np.flatnonzero(in_group)  # time order
+        posts = np.flatnonzero(members[sig.acct])  # time order
         mu0, sigma = sprt.background(echo_all[~censored], cfg)
         x = sprt.echo(sig, members, cfg)[posts]
         res = sprt.run(x, mu0, sigma, alpha=cfg.alpha, beta=cfg.beta, cfg=cfg)
@@ -207,50 +207,78 @@ def _detect_topic(
         if note is not None and verdict == "coordinated":
             verdict, decided = "watching", None
 
-        # Accounts in order of their first post (sig.accounts is already in that order).
-        idx = sorted(group)
-        accounts = [sig.accounts[k] for k in idx]
-        integ = cfar.integrate(z, idx)
-        group_items = [items[p] for p in posts]
-        last_seen = max(it.published_at for it in group_items)
-        out.append(
-            Finding(
-                id=finding_id(topic, accounts),
-                topic=topic,
-                created_at=max(now, last_seen),
-                verdict=verdict,
-                accounts=accounts,
-                item_ids=[it.id for it in group_items],
-                llr=round(res.llr, 4),
-                snr_db=round(integ.snr_db, 2),
-                snr_db_single=round(integ.snr_db_single, 2),
-                sprt_trace=res.trace,
-                sprt_upper=res.upper,
-                sprt_lower=res.lower,
-                decided_at_item=decided,
-                first_seen=min(it.published_at for it in group_items),
-                last_seen=last_seen,
-                correlation=[[round(float(R[a, b]), 4) for b in idx] for a in idx],
-                lag_sec=[[float(lag[a, b]) for b in idx] for a in idx],
-                synthetic=any(it.synthetic for it in group_items),
-                ambiguity=_ambiguity(pair_bins, members, cfg),
-                note=note,
+        # The decision above is for the whole group; each wave reports its own posts, accounts and
+        # its slice [a, b) of the group's SPRT trace (empty for a wave after the decision).
+        for a, b in split_waves(sig, posts, cfg):
+            wave = posts[a:b]
+            idx = sorted(set(sig.acct[wave].tolist()))  # accounts in order of their first post in the topic
+            in_wave = np.zeros(sig.n_posts, dtype=bool)
+            in_wave[wave] = True
+            accounts = [sig.accounts[k] for k in idx]
+            integ = cfar.integrate(z, idx)
+            group_items = [items[p] for p in wave]
+            first_seen = min(it.published_at for it in group_items)
+            last_seen = max(it.published_at for it in group_items)
+            fid = finding_id(topic, accounts)
+            if fid in used:  # the same accounts posted an earlier wave: the wave start tells them apart
+                fid = finding_id(topic, accounts + [f"wave@{first_seen.isoformat()}"])
+            used.add(fid)
+            out.append(
+                Finding(
+                    id=fid,
+                    topic=topic,
+                    created_at=max(now, last_seen),
+                    verdict=verdict,
+                    accounts=accounts,
+                    item_ids=[it.id for it in group_items],
+                    llr=round(res.llr, 4),
+                    snr_db=round(integ.snr_db, 2),
+                    snr_db_single=round(integ.snr_db_single, 2),
+                    sprt_trace=res.trace[a:b],
+                    sprt_upper=res.upper,
+                    sprt_lower=res.lower,
+                    decided_at_item=decided - a if decided is not None and a <= decided < b else None,
+                    first_seen=first_seen,
+                    last_seen=last_seen,
+                    correlation=[[round(float(R[i, j]), 4) for j in idx] for i in idx],
+                    lag_sec=[[float(lag[i, j]) for j in idx] for i in idx],
+                    synthetic=any(it.synthetic for it in group_items),
+                    ambiguity=_ambiguity(pair_bins, in_wave, cfg),
+                    note=note,
+                )
             )
-        )
     return out
 
 
+def split_waves(sig: TopicSignal, posts: np.ndarray, cfg: AnalyzerConfig) -> list[tuple[int, int]]:
+    """Cut a group's posts (indices in time order) into waves at pauses longer than cfg.wave_gap_sec.
+
+    Returns [a, b) ranges into `posts`. Only waves with >= min_swarm_accounts accounts are kept
+    (stragglers between waves are dropped); if no wave is that large (a slow drip), or
+    wave_gap_sec <= 0, the group stays whole.
+    """
+    whole = [(0, len(posts))]
+    if cfg.wave_gap_sec <= 0 or len(posts) < 2:
+        return whole
+    cuts = (np.flatnonzero(np.diff(sig.t[posts]) > cfg.wave_gap_sec) + 1).tolist()
+    spans = list(zip([0, *cuts], [*cuts, len(posts)]))
+    waves = [(a, b) for a, b in spans if len(set(sig.acct[posts[a:b]].tolist())) >= cfg.min_swarm_accounts]
+    return waves or whole
+
+
 def _pair_bins(sig: TopicSignal, cfg: AnalyzerConfig) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Cross-account post pairs with |lag| <= tau_max: (account p, account q, |lag|, mismatch)."""
+    """Cross-account post pairs with |lag| <= tau_max: (post p, post q, |lag|, mismatch)."""
     require_window(sig, cfg)
     near = sig.pair_dt <= cfg.tau_max_sec  # near pairs are already cross-account
     p, q, dt = sig.pair_p[near], sig.pair_q[near], sig.pair_dt[near]
     mismatch = 1.0 - np.clip(sig.pair_cos[near], 0.0, 1.0)
-    return sig.acct[p], sig.acct[q], dt, mismatch
+    return p, q, dt, mismatch
 
 
 def _ambiguity(pair_bins, members: np.ndarray, cfg: AnalyzerConfig) -> AmbiguityMap:
-    """Lag x semantic-mismatch histogram: pairs inside the group vs all other pairs (docs 3.9)."""
+    """Lag x semantic-mismatch histogram: pairs inside the group vs all other pairs (docs 3.9).
+
+    members: bool mask over posts (the posts of the wave)."""
     ap, aq, dt, mismatch = pair_bins
     lag_edges = [float(k * cfg.lag_step_sec) for k in range(n_lag_steps(cfg) + 1)]
     if lag_edges[-1] < cfg.tau_max_sec:  # tau_max not a multiple of the step: shorter last bin
