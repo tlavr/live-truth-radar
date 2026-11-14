@@ -29,3 +29,6 @@
 4. `make eval` → проверить `n_labelled`, `live_precision`, `live_precision_ci`, `live_fpr` в `eval/report.json` → `make test` → коммит `eval/labels.csv`, `eval/labels_meta.json`, `eval/report.json` → PR → `make deploy` → `make smoke`.
 
 `review.md` и `label_handles.csv` содержат реальные хэндлы и живут только в `cache/` (git-ignored).
+
+## Итог разметки (14.11)
+Выборка с VPS: окно 6 ч, 5 тем, 51 аккаунт (`coordinated` 0, `watching` 9, без алерта 42; `--n-quiet 42`, чтобы набрать ≥ 40 строк в формулах). Разметка: черновик модели по этой рубрике, проверен человеком (P1). Итог: organic 49, unclear 1, suspicious 1 (без алерта). `n_labelled = 42`, `live_fpr = 0.0`; `live_precision` не определена: живых `coordinated` в окне не было. В сабмите писать именно так.
