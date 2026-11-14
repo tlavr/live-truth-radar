@@ -23,12 +23,12 @@ class RadarFrame(BaseModel):
     n_accounts: int
     n_lit_pairs: int  # account pairs above the CFAR threshold (z > k); 0 below min_swarm_accounts
     max_pair_z: float | None  # largest pair z; None below min_swarm_accounts accounts (no CFAR run)
-    n_watching: int  # candidates held at "watching" (news echo / reprint, undecided)
+    n_watching: int  # candidates held at "watching" (news echo / reprint / viral echo, undecided)
     top_verdict: Literal["coordinated", "watching", "organic"] | None  # best candidate: coordinated > watching > organic, then llr, then size
     top_n_accounts: int | None
     top_llr: float | None
     top_trace: list[tuple[datetime, float]]  # SPRT trace of the best candidate against its posts' times
-    top_capped: bool  # trace reached sprt_upper but the verdict was capped (news echo / reprint)
+    top_capped: bool  # trace reached sprt_upper but the verdict was capped (news echo / reprint / viral echo)
     sprt_upper: float
     sprt_lower: float
     top_campaign_ids: list[str]  # campaign ids of the synthetic posts in the best candidate

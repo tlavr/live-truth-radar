@@ -483,12 +483,36 @@ def test_viral_echo_leaves_a_fresh_campaign_and_a_second_inject_alone():
     injected = make_campaign(TOPIC, datetime(2026, 11, 13, 19, 30, tzinfo=timezone.utc), n_accounts=12, seed=1)
     hits = [f for f in detect(background + injected) if f.synthetic and f.verdict == "coordinated"]
     assert len(hits) == 1 and hits[0].note is None  # a new message: nobody outside said it before
-    # injected posts are not live-stream posts: an earlier inject is no "prior spread" for a later one
+    # injected posts are not live-stream posts: a repeat of an earlier inject (same texts, new accounts)
+    # is no "prior spread" for the later one, and the later one none for the earlier one
     now = datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc)
-    two = make_campaign(TOPIC, now) + make_campaign(TOPIC, now + timedelta(minutes=20))
-    assert len([f for f in detect(background + two) if f.verdict == "coordinated" and f.synthetic]) == 2
+    first = make_campaign(TOPIC, now, seed=3)  # one message only, so the centroid matches each post (cos > 0.8)
+    first = [it.model_copy(update={"text": first[0].text}) for it in first]
+    again = [it.model_copy(update={"id": "again-" + it.id, "author": "again_" + it.author,
+                                   "published_at": it.published_at + timedelta(minutes=20)}) for it in first]
+    two = [f for f in detect(background + first + again) if f.verdict == "coordinated" and f.synthetic]
+    assert len(two) == 2 and all(f.note is None for f in two)
 
 
 def test_viral_echo_is_off_without_social_posts():
-    alt = [it.model_copy(update={"source": "context_news"}) for it in _meme_waves()]
-    assert not [f for f in detect(alt) if f.note and f.note.startswith("viral echo")]
+    # [ALT] news-only stream: background and wave 0 of the meme come from outlets (context_news), later
+    # waves are non-news groups (synthetic) that would match wave 0, but without context_social the rule is off
+    def src(it: Item) -> str:
+        return "synthetic" if it.id.startswith("meme-") and not it.id.startswith("meme-0-") else "context_news"
+
+    alt = [it.model_copy(update={"source": src(it)}) for it in _meme_waves()]
+    later = _later_waves(detect(alt))
+    assert later
+    assert not [f for f in later if f.note and f.note.startswith("viral echo")]
+
+
+def test_viral_echo_also_caps_the_first_wave_seen_at_the_window_edge():
+    # nothing before wave 0 inside the window, but later waves by other people repeat it
+    first = [f for f in detect(_meme_waves()) if any(a.startswith("fan_0_") for a in f.accounts)]
+    assert first and all(f.verdict != "coordinated" for f in first)
+
+
+def test_viral_echo_needs_accounts_outside_the_group():
+    # one copypasta wave of real accounts with nobody else repeating it: the group's own posts are no "spread"
+    [f] = [f for f in detect(_meme_waves(n_waves=1)) if any(a.startswith("fan_") for a in f.accounts)]
+    assert f.verdict == "coordinated" and f.note is None

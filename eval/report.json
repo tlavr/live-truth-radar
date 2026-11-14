@@ -1,113 +1,113 @@
 {
- "generated_at": "2026-11-14T15:38:08Z",
+ "generated_at": "2026-11-14T18:51:29Z",
  "roc": [
   [
-   0.0,
-   0.8025
+   0.009,
+   0.7087
   ],
   [
-   0.0,
-   0.945
+   0.0131,
+   0.8562
   ],
   [
-   0.0,
-   0.965
+   0.0139,
+   0.8562
   ],
   [
-   0.0,
-   0.9738
+   0.018,
+   0.8562
   ],
   [
-   0.0,
-   0.9838
+   0.0188,
+   0.8562
   ],
   [
-   0.0,
-   0.9888
+   0.0212,
+   0.8888
   ],
   [
-   0.0,
-   0.99
+   0.0212,
+   0.8925
   ],
   [
-   0.0,
-   0.99
+   0.0261,
+   0.9
   ],
   [
-   0.0,
-   0.99
+   0.0384,
+   0.9087
   ],
   [
-   0.0,
-   0.99
+   0.04,
+   0.9125
   ],
   [
-   0.0,
-   0.99
+   0.0408,
+   0.9125
   ]
  ],
- "detection_rate": 0.99,
- "operating_pfa": 0.0,
- "mean_posts_to_decision": 4.11,
- "mean_seconds_to_decision": 70.0,
+ "detection_rate": 0.8562,
+ "operating_pfa": 0.0131,
+ "mean_posts_to_decision": 4.24,
+ "mean_seconds_to_decision": 99.7,
  "live_fpr": 0.0,
  "live_precision": null,
  "n_labelled": 42,
  "failure_examples": [
   {
-   "kind": "false_negative",
-   "finding_id": null,
+   "kind": "false_positive",
+   "finding_id": "f-f61746b393f5",
    "account": null,
-   "note": "injected swarm of 4 accounts (microsoft-global-outage) missed: SPRT stopped at organic (LLR -3.00) on a group with 4/4 injected accounts"
+   "note": "background window 808 (microsoft-global-outage, shift): 4 organic accounts flagged coordinated, SNR 24.5 dB, LLR 4.50"
+  },
+  {
+   "kind": "false_positive",
+   "finding_id": "f-c28647c497cc",
+   "account": null,
+   "note": "background window 813 (microsoft-global-outage, subset): 5 organic accounts flagged coordinated, SNR 33.54 dB, LLR 5.00"
+  },
+  {
+   "kind": "false_positive",
+   "finding_id": "f-93b50d19bd22",
+   "account": null,
+   "note": "background window 839 (microsoft-global-outage, subset): 4 organic accounts flagged coordinated, SNR 31.85 dB, LLR 4.50"
   },
   {
    "kind": "false_negative",
    "finding_id": null,
    "account": null,
-   "note": "injected swarm of 4 accounts (jensen-huang-resignation) missed: CFAR assembled no group with the injected accounts"
+   "note": "injected swarm of 4 accounts (europe-bomb-threat-hoaxes) missed: CFAR assembled no group with the injected accounts"
   },
   {
    "kind": "false_negative",
    "finding_id": null,
    "account": null,
-   "note": "injected swarm of 4 accounts (jensen-huang-resignation) missed: SPRT undecided (watching, LLR 1.89) on a group with 4/4 injected accounts"
-  },
-  {
-   "kind": "false_negative",
-   "finding_id": null,
-   "account": null,
-   "note": "injected swarm of 4 accounts (jensen-huang-resignation) missed: SPRT undecided (watching, LLR 3.59) on a group with 4/4 injected accounts"
-  },
-  {
-   "kind": "false_negative",
-   "finding_id": null,
-   "account": null,
-   "note": "injected swarm of 4 accounts (jensen-huang-resignation) missed: SPRT undecided (watching, LLR 3.36) on a group with 4/4 injected accounts"
+   "note": "injected swarm of 4 accounts (europe-bomb-threat-hoaxes) missed: CFAR assembled no group with the injected accounts"
   }
  ],
  "embedder": "gemini",
  "pd_by_size": [
   [
    3,
-   0.92
+   0.715
   ],
   [
    4,
-   0.9925
+   0.83
   ],
   [
    6,
-   1.0
+   0.9175
   ],
   [
    8,
-   0.995
+   0.905
   ],
   [
    12,
-   0.995
+   0.8775
   ]
  ],
- "swarm_purity": 0.9991,
+ "swarm_purity": 1.0,
  "live_precision_ci": null
 }

@@ -619,7 +619,7 @@ function render() {
     ? `Crossed the ${f.verdict === 'coordinated' ? 'upper' : 'lower'} threshold at post ${f.decided_at_item + 1}.`
     : hit ? 'The group these accounts belong to crossed the upper threshold in another wave.'
     : f.note && f.sprt_trace.length && f.sprt_trace.at(-1) >= f.sprt_upper
-      ? `Crossed the upper threshold after ${f.sprt_trace.length} posts, but downgraded to watching (news echo).`
+      ? `Crossed the upper threshold after ${f.sprt_trace.length} posts, but downgraded to watching (${esc(f.note.split(':')[0])}).`
       : `Between thresholds after ${f.sprt_trace.length} posts.`}</p>`;
   const mx = Math.max(f.snr_db, f.snr_db_single ?? 0, 1);
   $('evSignal').innerHTML = `<h3>Signal-to-noise</h3><div class="bars">
@@ -872,7 +872,7 @@ function renderLive(msg, last) {
   const f = L.frame;
   const bits = f
     ? [`frame ${f.at.slice(11, 19)} UTC`, `${f.n_items} posts from ${f.n_accounts} accounts in ${WINDOW_HOURS} h`,
-       ...(f.n_watching ? [`${f.n_watching} news echo${f.n_watching === 1 ? '' : 'es'} on watch`] : []),
+       ...(f.n_watching ? [`${f.n_watching} group${f.n_watching === 1 ? '' : 's'} on watch`] : []),
        ...(f.top_verdict === 'coordinated' ? [`swarm of ${f.top_n_accounts} accounts`] : [])]
     : ['starting the scan…'];
   // the live frame is the design alpha; other slider points are recomputed on the worker's slow pass only

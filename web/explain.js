@@ -114,7 +114,7 @@ function render(f, items, points) {
   const R = offDiag(f.correlation), lags = offDiag(f.lag_sec ?? []).map(Math.abs).sort((a, b) => a - b);
   const g = closeShare(f.ambiguity?.counts), bg = closeShare(f.ambiguity?.background);
   const d = f.decided_at_item, p = points?.points?.find(o => Math.abs(o.alpha - ALPHA) < 1e-9);
-  const reprint = f.note?.startsWith('news reprint: '), echo = f.note?.startsWith('news echo: ');
+  const reprint = f.note?.startsWith('news reprint: '), echo = f.note?.startsWith('news echo: '), viral = f.note?.startsWith('viral echo: ');
   const trigger = f.sprt_trace.length && f.sprt_trace.at(-1) >= f.sprt_upper;
 
   const s = [];
@@ -148,6 +148,7 @@ function render(f, items, points) {
   s.push(step(5, 'Rule out a real news story',
     reprint ? 'All posts in this group are news articles reprinting one story. Outlets syndicating a wire story are not a swarm.'
       : echo ? `A news article appeared just before this burst and says the same thing, so people may simply be reacting to it.`
+      : viral ? `The same message is also posted by other accounts outside this group, so it looks like a meme or headline spreading on its own rather than a planned campaign.`
       : `No news article from the ${NEWS_ECHO_MIN} minutes before the burst was flagged as saying the same thing, so nothing points to people just reacting to a headline.`,
     f.note ? `<p class="note">${esc(f.note)}</p>` : '',
     f.note && trigger ? 'The evidence alone reached "coordinated", so this check lowered the verdict to "watching".' : ''));

@@ -254,7 +254,7 @@ def miss_reason(trial: Trial) -> str:
     if f.verdict == "coordinated":
         return f"group of {len(f.accounts)} is coordinated but covers {common}/{len(inj)} injected accounts"
     if f.note:
-        return f"news echo capped the group at watching ({common}/{len(inj)} injected accounts)"
+        return f"{f.note.split(':')[0]} capped the group at watching ({common}/{len(inj)} injected accounts)"
     state = "SPRT undecided (watching, " if f.verdict == "watching" else f"SPRT stopped at {f.verdict} ("
     return f"{state}LLR {f.llr:.2f}) on a group with {common}/{len(inj)} injected accounts"
 
