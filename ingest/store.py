@@ -81,13 +81,36 @@ def get_items(conn: psycopg.Connection, ids: list[str], until: datetime | None =
     return [_item(r) for r in rows]
 
 
+DEFAULT_WINDOW_MAX_ITEMS = 800
+
+
+def window_max_items() -> int:
+    """WINDOW_MAX_ITEMS (default 800; 0 = no cap): the pair correlator grows with the square of the accounts, and
+    a loud topic (Putin, NATO) fills Bluesky's 300 posts per cycle, so the detector sees only the newest N real
+    social posts (news and synthetic rows are never capped)."""
+    raw = (os.environ.get("WINDOW_MAX_ITEMS") or "").strip()
+    try:
+        n = int(raw) if raw else DEFAULT_WINDOW_MAX_ITEMS
+    except ValueError:
+        return DEFAULT_WINDOW_MAX_ITEMS
+    return max(0, n)
+
+
 def window_items(conn: psycopg.Connection, topic: str, hours: float, now: datetime | None = None) -> list[Item]:
-    """Items of one topic published in [now - hours, now], in time order."""
+    """Items of one topic published in [now - hours, now], in time order. Real social posts are capped to the
+    newest window_max_items(); news and synthetic rows of the window are always kept (news_echo needs the
+    articles behind a burst, and an injected campaign must stay whole)."""
     now = now or datetime.now(timezone.utc)
+    cap = window_max_items()
+    span = (topic, now - timedelta(hours=hours), now)
+    where = "topic = %s AND published_at >= %s AND published_at <= %s"
+    capped = ""
+    if cap:
+        capped = (f" AND (source <> 'context_social' OR synthetic OR id IN (SELECT id FROM items WHERE {where} "
+                  "AND source = 'context_social' AND NOT synthetic ORDER BY published_at DESC, id DESC LIMIT %s))")
     rows = conn.execute(
-        f"SELECT {', '.join(ITEM_COLS)} FROM items WHERE topic = %s AND published_at >= %s AND published_at <= %s "
-        "ORDER BY published_at, id",
-        (topic, now - timedelta(hours=hours), now),
+        f"SELECT {', '.join(ITEM_COLS)} FROM items WHERE {where}{capped} ORDER BY published_at, id",
+        (*span, *((*span, cap) if cap else ())),
     ).fetchall()
     return [_item(r) for r in rows]
 

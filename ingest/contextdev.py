@@ -257,6 +257,127 @@ TOPIC_SPECS: dict[str, tuple[str, list[list[str]]]] = {
     ),
     "ukraine-peace-talks": ("Ukraine peace talks", [["ukrain"], ["peace", "talks", "negotiat", "ceasefire"]]),
     "helsinki-tram-fares": ("Helsinki tram fares", [["helsinki", "hsl"], ["tram", "fare", "ticket", "transport"]]),
+    # 50-topic expansion (probe 14.11, Bluesky 6 h): news of the day, world, long-running narratives, tech
+    "faa-ground-stop": (
+        "FAA nationwide ground stop",
+        [["faa", "ground stop", "air traffic"],
+         ["ground stop", "grounded", "outage", "equipment", "l3harris", "telecom", "halt"]],
+    ),
+    "sean-duffy-faa": (
+        "Sean Duffy FAA contract",
+        [["duffy"], ["faa", "contract", "son-in-law", "transportation", "aviation"]],
+    ),
+    "new-orleans-cruise-tanker": (
+        "New Orleans cruise ship tanker collision",
+        [["cruise"], ["tanker", "collision", "collided", "crash", "new orleans"]],
+    ),
+    "midterm-vote-count": (
+        "midterm close races vote count",
+        [["midterm", "house race", "senate race", "ballots"],
+         [r"count(?:s|ed|ing)?\b", "recount", "results", "called", r"lead(?:s|ing)?\b", "race", "seat"]],
+    ),
+    "schumer-leadership": (
+        "Schumer leadership challenge",
+        [["schumer", "jeffries"], ["leader", "replace", "step down", "leadership", "ousted", "resign"]],
+    ),
+    "ice-overhaul": (
+        "Congress ICE overhaul",
+        [[r"ice\b", "immigration and customs"],
+         ["immigra", "deport", "agents", "detention", "abolish", "overhaul", "raid"]],
+    ),
+    "trump-cuba": (
+        "Trump Cuba military operation",
+        [["cuba", "havana"], ["trump", "military", "invasion", "operation", "regime", "blockade"]],
+    ),
+    "measles-outbreak": (
+        "US measles outbreak elimination status",
+        [["measles"], ["case", "outbreak", "elimination", "vaccin", "spread"]],
+    ),
+    "rfk-vaccines": (
+        "RFK Jr vaccines HHS",
+        [["kennedy", r"rfk\b"], ["vaccin", "autism", r"hhs\b", r"cdc\b", r"fda\b", "acip"]],
+    ),
+    "epstein-files": ("Epstein files", [["epstein"]]),
+    "tariffs": (
+        "Trump tariffs trade war",
+        [["tariff"], ["trump", "china", "trade", "court", "canada", "europe", "price"]],
+    ),
+    "deportations": ("deportations immigration raids", [[r"deport(?:ed|ee|ees|ing|ation|ations|s)?\b", "ice raid", "immigration raid"]]),
+    "trump-xi-putin-summit": (
+        "Trump Xi Putin summit APEC China",
+        [["summit", "apec", "trilateral"], [r"xi\b", "putin"]],
+    ),
+    "us-iran-strikes": (
+        "US Iran strikes",
+        [["iran"], ["strike", "drone", "radar", "bahrain", "missile", "attack", "war", "bomb"]],
+    ),
+    "hormuz-tankers": (
+        "Strait of Hormuz tankers mines",
+        [["hormuz", "persian gulf", "gulf of oman"], ["tanker", "mine", "oil", "ship", "attack", "iran"]],
+    ),
+    "gaza-ceasefire": (
+        "Gaza ceasefire",
+        [["gaza", "hamas"], ["ceasefire", "truce", "hostage", "deal", "phase", "aid", "killed"]],
+    ),
+    "turkey-qatar-defense-pact": (
+        "Turkey Qatar defense pact",
+        [["qatar", "turk", "türkiye"], ["defen", "pact", "agreement"]],
+    ),
+    "ukraine-territory-nato": (
+        "Ukraine cede territory NATO membership",
+        [["ukrain", "zelensk"], ["territor", "nato", "cede", "donbas", "land"]],
+    ),
+    "poland-russia-border": (
+        "Poland Russia border sabotage",
+        [["poland", r"polish\b", "kaliningrad"], ["sabotage", "border", "russia", "drone", "shoot", "gunman"]],
+    ),
+    "sudan-war": (
+        "Sudan war RSF",
+        [["sudan", r"rsf\b", "darfur", "el fasher"],
+         ["army", "attack", "killed", "famine", "war", "genocide"]],
+    ),
+    "south-sudan-elections": (
+        "South Sudan elections postponed",
+        [["south sudan"], ["election", "vote", "postpone", "violence"]],
+    ),
+    "pakistan-militants": (
+        "Pakistan militants border",
+        [["pakistan"], ["militant", "raid", "border", "taliban", "killed", "afghan", "attack"]],
+    ),
+    "taiwan-china": (
+        "Taiwan China military pressure",
+        [["taiwan"], ["china", "chinese", r"pla\b", "drill", "invasion", "strait"]],
+    ),
+    "north-korea": ("North Korea", [["north korea", "pyongyang", "kim jong"]]),
+    "venezuela": ("Venezuela Maduro", [["venezuela", "maduro"]]),
+    "uk-starmer": ("Starmer UK government", [["starmer"]]),
+    "chile-fuel-protests": (
+        "Chile fuel protests Kast",
+        [["chile", "kast"], ["fuel", "protest", "strike", "price", "president"]],
+    ),
+    "israel": ("Israel", [["israel"]]),
+    "putin-russia": ("Putin Russia", [["putin", "kremlin"]]),
+    "nato": ("NATO", [[r"nato\b"]]),
+    "cop31-climate": (
+        "COP31 climate summit",
+        [["cop31", "cop 31", "climate summit", "climate talks", "climate conference"]],
+    ),
+    "climate-change": ("climate change", [["climate change", "global warming", "climate crisis"]]),
+    "vaccines": ("vaccines", [["vaccin"]]),
+    "abortion": ("abortion", [["abortion"]]),
+    "bird-flu": ("H5N1 bird flu", [["bird flu", "h5n1", "avian flu", "avian influenza"]]),
+    "earthquake": ("earthquake", [["earthquake", "quake"]]),
+    "wildfire": ("wildfire", [["wildfire", "bushfire", "forest fire"]]),
+    "openai-chatgpt": ("OpenAI ChatGPT", [["openai", "chatgpt", "altman"]]),
+    "musk": ("Elon Musk", [[r"musk\b"]]),
+    "spacex-starship": ("SpaceX Starship launch", [["starship", "spacex"]]),
+    "ai-data-centers": ("AI data centers", [["data center", "data centre", "datacenter"]]),
+    "cyberattacks": (
+        "cyberattack ransomware data breach",
+        [["cyberattack", "cyber attack", "ransomware", "data breach", "hacked"]],
+    ),
+    "bitcoin-crypto": ("Bitcoin crypto", [["bitcoin", r"btc\b", r"crypto\b", "cryptocurrenc"]]),
+    "russell-brand-trial": ("Russell Brand trial", [["russell brand"]]),
 }
 
 
