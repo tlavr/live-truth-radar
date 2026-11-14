@@ -14,7 +14,7 @@ tests/                   test_contracts.py (shared), test_detect_*.py (P2), smok
 docs/                    plan and workflow (Russian)
 ```
 Detector entry point: `detect.pipeline.detect(items, *, alpha=0.02, beta=0.1) -> list[Finding]`.
-API: `GET /health`, `GET /api/alerts`, `GET /api/metrics` (reads `eval/report.json`), `POST /api/inject` (calls `synth.campaign.make_campaign`; worker runs detect; 1 per 5 min per topic), `GET /api/items?ids=`; T12d live scan: `POST /api/scan`, `POST /api/scan/{id}/stop`, `GET /api/radar?session=&topic=`; red team console `/redteam`: `GET /api/attack/topics`, `POST /api/attack` (1 per 5 min per topic), `GET /api/attack/{campaign_id}`; S1 only: `GET /api/source/{domain}`. Worker: `ingest/worker.py`.
+API: `GET /health`, `GET /api/alerts`, `GET /api/metrics` (reads `eval/report.json`), `POST /api/inject` (calls `synth.campaign.make_campaign`; worker runs detect; 1 per 5 min per topic), `GET /api/items?ids=`, `GET /api/timemap?topic=&alpha=&minutes=&at=` (time × meaning map, `detect/timemap.py`; `at` rewinds it); T12d live scan: `POST /api/scan`, `POST /api/scan/{id}/stop`, `GET /api/radar?session=&topic=`; red team console `/redteam`: `GET /api/attack/topics`, `POST /api/attack` (1 per 5 min per topic), `GET /api/attack/{campaign_id}`; S1 only: `GET /api/source/{domain}`. Worker: `ingest/worker.py`.
 Interfaces outside the contract: docs/HANDOFF.md §5.
 
 ## Commands

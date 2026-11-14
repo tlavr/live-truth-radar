@@ -160,9 +160,9 @@ def timemap(
     end = now
     if at is not None:
         end = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
-        if end > now + timedelta(seconds=5) or end < now - timedelta(hours=hours):
+        if end < now - timedelta(hours=hours):
             raise HTTPException(422, "at must lie inside the detector window")
-        end = min(end, now)
+        end = min(end, now)  # a browser clock ahead of the server asks for a moment slightly in the future
     with store.connect() as conn:
         posts = store.window_items(conn, topic, hours, now)
         if alpha is None or round(alpha, 6) == operating.DEFAULT_ALPHA:

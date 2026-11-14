@@ -41,7 +41,7 @@ const S = {
   topics: [], findings: [], lastPoll: null, metrics: null, points: null, served: null, alpha: DESIGN_ALPHA,
   topic: null, list: [], sel: 0, items: new Map(),
   live: null,  // T12d live scan: {topic, session, since, frame, timer, busy, error}
-  weak: false, pickedWeak: false,  // T12d: groups below the alert threshold are folded into one line
+  pickedWeak: false,               // T12d: a group below the alert threshold is shown only if the user picked it
   tmap: null, mapBusy: false,      // time x meaning map of the topic (/api/timemap), one layer per group
   mapAt: null, view: 0,            // mapAt: null = live, else the ISO moment the map is rewound to;
                                    // view: bins between the end of the fetched map and the origin on screen
@@ -57,7 +57,7 @@ const pfaText = () => {
     ? `False alarm target: ${pct(S.alpha)} (measured ${pct(p.pfa)}, ≤ ${pct(p.pfa_upper95)} at 95%)`
     : `False alarm target: ${pct(S.alpha)}`;
 };
-// alerts first, then in time order: a group is one wave of posts, so the buttons read left to right in time
+// alerts first, then in time order: a group is one wave of posts, so the drop-down reads top to bottom in time
 const topicFindings = t => S.findings.filter(f => f.topic === t)
   .sort((a, b) => RANK[a.verdict] - RANK[b.verdict] || a.first_seen.localeCompare(b.first_seen) || a.id.localeCompare(b.id));
 const span = f => hm(f.first_seen) === hm(f.last_seen) ? hm(f.first_seen) : `${hm(f.first_seen)}–${hm(f.last_seen)}`;
@@ -393,7 +393,6 @@ const heightAt = (x, z) => {
   if (i < 0 || j < 0 || i >= NX || j >= NZ) return -1;
   return field.C[j * NX + i] * U.uCarpet.value + (field.P[j * NX + i] + field.O[j * NX + i]) * U.uPeak.value;
 };
-const fmtLag = s => s < 60 ? `${s}s` : `${s / 60}m`.replace('.5', '½');
 function hover(e) {
   const y = layers(shown());
   if (root.dataset.stage !== 'result' || dragging || !y) return hideTip();
@@ -470,9 +469,10 @@ function openTopic(topic, {instant = false, findingId = null} = {}) {
   liveStart(topic);
   S.topic = topic; S.list = topicFindings(topic);
   S.sel = Math.max(0, S.list.findIndex(f => f.id === findingId));
-  S.weak = false; S.pickedWeak = S.list[S.sel]?.verdict !== 'coordinated' && !!findingId;
+  S.pickedWeak = S.list[S.sel]?.verdict !== 'coordinated' && !!findingId;
   scrollTw?.kill(); scrollTw = null; mapSeq++;
-  S.tmap = null; S.mapAt = null; S.view = 0; loadMap();
+  S.tmap = null; S.mapAt = null; S.view = 0;
+  setMapAt(rewindFor(shown()));  // the opened group on screen from the start (rewound if it is older than the map)
   history.replaceState(null, '', `?q=${encodeURIComponent(topic)}`);
   tl?.kill(); selTl?.kill();
   root.dataset.stage = 'scan'; scrollTo(0, 0); hideTip();
@@ -670,11 +670,11 @@ function trace(f) {
     <circle cx="${x(t.length - 1)}" cy="${y(t.at(-1))}" r="4.5" fill="${hit ? PAL.peak : PAL.cool}"/>` : ''}${dots}</svg>`;
 }
 
-// A group already off the live map (older than its L*BIN_MIN minutes) rewinds the map to the group's time:
-// the wave ends a minute right of the origin. A group still on the live map keeps the map live.
+// A group whose last post is already off the live map (older than L*BIN_MIN minutes) rewinds the map to the
+// group's time: its last post lands a minute right of the origin. A group still posting keeps the map live.
 const REWIND_PAD_MS = 60000;
 function rewindFor(f) {
-  if (!f || Date.parse(f.first_seen) >= Date.now() - L * BIN_MIN * 60000) return null;
+  if (!f || Date.parse(f.last_seen) >= Date.now() - L * BIN_MIN * 60000) return null;
   return new Date(Math.min(Date.parse(f.last_seen) + REWIND_PAD_MS, Date.now())).toISOString();
 }
 // Moves the map so its origin is `at` (null = live now). One map from the server covers both the current
@@ -682,6 +682,7 @@ function rewindFor(f) {
 let scrollTw = null, mapSeq = 0;
 async function setMapAt(at) {
   if (at === S.mapAt && S.tmap) return;
+  const prev = S.mapAt;
   S.mapAt = at; hideTip();
   const topic = S.topic, asked = S.alpha, seq = ++mapSeq;
   const target = at ? Date.parse(at) : Date.now(), from = S.tmap ? originMs() : target;
@@ -691,7 +692,7 @@ async function setMapAt(at) {
   try {
     r = await api(`/api/timemap?topic=${encodeURIComponent(topic)}&minutes=${minutes}` +
       `${asked === DESIGN_ALPHA ? '' : `&alpha=${asked}`}${live ? '' : `&at=${encodeURIComponent(new Date(end).toISOString())}`}`);
-  } catch (e) { console.warn('timemap', e); return; }
+  } catch (e) { console.warn('timemap', e); if (seq === mapSeq) S.mapAt = prev; return; }  // keep state = what is drawn
   if (seq !== mapSeq || S.topic !== topic || S.alpha !== asked) return;
   scrollTw?.kill();
   const hadMap = !!S.tmap, endMs = Date.parse(r.now);
@@ -714,7 +715,8 @@ function goLive() {
 }
 
 function select(i, instant) {
-  if (i === S.sel && shown()) { setMapAt(rewindFor(shown())); return; }  // in the Quiet view index 0 is "selected" but not shown: open it
+  if (i === S.sel && shown()) { setMapAt(rewindFor(shown())); return; }  // already shown: only bring its wave on screen
+  // (in the Quiet view index 0 is "selected" but not shown: fall through and open it)
   S.sel = i; S.pickedWeak = S.list[i]?.verdict !== 'coordinated'; hideTip(); selTl?.kill();
   setMapAt(rewindFor(shown()));
   const d = reduced || instant ? 0 : 1;
@@ -765,11 +767,13 @@ async function refresh() {
     if (sig(next) !== sig(S.list)) {
       const at = next.findIndex(f => f.id === cur);
       S.list = next; S.sel = Math.max(0, at);
-      if (at < 0) { S.pickedWeak = false; S.mapAt = null; }  // the opened group is gone: back to the alert (or Quiet), live
+      if (at < 0) S.pickedWeak = false;  // the opened group is gone: back to the alert (or Quiet)
       if (ok) setField(shown());
       render();
-      loadMap();
-    } else if (S.tmap && (S.list.some(f => !S.tmap.groups[f.id]) || (!S.mapAt && Date.now() - Date.parse(S.tmap.now) > MAP_MAX_AGE_MS))) loadMap();  // keep "now" current; a rewound map stays put
+      const want = rewindFor(shown());
+      if (shown()?.id !== cur && want !== S.mapAt) setMapAt(want);  // a new group on screen: bring its wave into view
+      else loadMap();
+    } else if (!S.tmap || S.list.some(f => !S.tmap.groups[f.id]) || (!S.mapAt && Date.now() - Date.parse(S.tmap.now) > MAP_MAX_AGE_MS)) loadMap();  // also retries a map that never arrived  // keep "now" current; a rewound map stays put
   }
   return true;
 }
