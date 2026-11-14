@@ -1,0 +1,113 @@
+{
+ "generated_at": "2026-11-14T01:51:19Z",
+ "roc": [
+  [
+   0.0,
+   0.78
+  ],
+  [
+   0.0,
+   0.885
+  ],
+  [
+   0.0,
+   0.905
+  ],
+  [
+   0.0,
+   0.925
+  ],
+  [
+   0.0,
+   0.93
+  ],
+  [
+   0.0,
+   0.935
+  ],
+  [
+   0.0,
+   0.94
+  ],
+  [
+   0.0,
+   0.94
+  ],
+  [
+   0.0,
+   0.94
+  ],
+  [
+   0.0,
+   0.94
+  ],
+  [
+   0.0,
+   0.94
+  ]
+ ],
+ "detection_rate": 0.905,
+ "operating_pfa": 0.0,
+ "mean_posts_to_decision": 4.25,
+ "mean_seconds_to_decision": 83.5,
+ "live_fpr": null,
+ "live_precision": null,
+ "n_labelled": 0,
+ "failure_examples": [
+  {
+   "kind": "false_negative",
+   "finding_id": null,
+   "account": null,
+   "note": "injected swarm of 4 accounts (helsinki-tram-fares) missed: SPRT undecided (watching, LLR 2.95) on a group with 4/4 injected accounts"
+  },
+  {
+   "kind": "false_negative",
+   "finding_id": null,
+   "account": null,
+   "note": "injected swarm of 4 accounts (helsinki-tram-fares) missed: SPRT undecided (watching, LLR 2.90) on a group with 4/4 injected accounts"
+  },
+  {
+   "kind": "false_negative",
+   "finding_id": null,
+   "account": null,
+   "note": "injected swarm of 4 accounts (helsinki-tram-fares) missed: SPRT stopped at organic (LLR -2.58) on a group with 4/4 injected accounts"
+  },
+  {
+   "kind": "false_negative",
+   "finding_id": null,
+   "account": null,
+   "note": "injected swarm of 4 accounts (helsinki-tram-fares) missed: SPRT stopped at organic (LLR -3.00) on a group with 4/4 injected accounts"
+  },
+  {
+   "kind": "false_negative",
+   "finding_id": null,
+   "account": null,
+   "note": "injected swarm of 4 accounts (helsinki-tram-fares) missed: SPRT undecided (watching, LLR 3.19) on a group with 4/4 injected accounts"
+  }
+ ],
+ "embedder": "gemini",
+ "pd_by_size": [
+  [
+   3,
+   0.28
+  ],
+  [
+   4,
+   0.91
+  ],
+  [
+   6,
+   1.0
+  ],
+  [
+   8,
+   1.0
+  ],
+  [
+   12,
+   1.0
+  ]
+ ],
+ "swarm_purity": 1.0,
+ "live_precision_ci": null
+}
