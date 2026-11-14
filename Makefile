@@ -2,7 +2,7 @@
 export
 
 URL ?= http://localhost
-VPS ?= root@your-vps
+VPS ?= root@179.67.199.112
 REMOTE_DIR ?= live-truth-radar
 COMPOSE = docker compose -f infra/docker-compose.yml --env-file .env
 
