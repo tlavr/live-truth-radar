@@ -7,7 +7,9 @@ and lower bound, so one failing source (or a missing CONTEXT_DEV_API_KEY) never 
 
 Threads (T12d), so a slow Context.dev or LLM call never freezes the radar:
   * ingest (`ingest_loop`, own DB connection): every POLL_INTERVAL_SEC ingest_cycle(), which warms the
-    embedding cache for each topic's fetched texts before upserting them, then wakes the detect loop;
+    embedding cache for each topic's fetched texts before upserting them, then wakes the detect loop.
+    Bluesky (free) every cycle for every topic; Context.dev news (paid) per NewsSchedule: every cycle for the
+    topics people look at, at once for a topic with a fresh real alert, else every NEWS_POLL_SEC (50 topics);
   * explain (`ExplainQueue.run`, no DB access): LLM explanations of coordinated findings -> cache/explanations/;
   * detect (main thread, `step`), the only writer of findings / findings_alpha: after every ingest (or at the
     latest every 2 x POLL_INTERVAL_SEC) detect() on every topic incl. the ALPHA_POINTS; every SCAN_INTERVAL_SEC
@@ -303,6 +305,8 @@ def detect_topic(conn, topic: str, detector: Detector, window_hours: float, alph
     for f in findings:
         by_topic[f.topic].append(f)
     mine = by_topic.pop(topic, [])
+    if _news is not None and any(f.verdict == "coordinated" and not f.synthetic for f in mine):
+        _news.alarm(topic)  # fresh news at once: a news echo is capped at watching only once its article is in
     store.replace_findings(conn, topic, mine)
     for other, group in by_topic.items():
         store.replace_findings(conn, other, group)
@@ -501,30 +505,132 @@ def fetch_topic(sources: list[Source], topic: str, sinces: dict[str, datetime | 
     return items if ok else None
 
 
-def ingest_cycle(conn) -> list[Item]:
-    """Poll every active source for every topic and upsert its items (one commit per topic: a bad topic is
-    rolled back alone), then store.set_last_poll if at least one topic was fetched. Returns the fetched items.
-    A lost (broken/closed) connection propagates."""
+PAID_SOURCES = frozenset({"news", "reddit"})  # Context.dev: credits per request; Bluesky is free
+URGENT_CHECK_SEC = 10.0  # ingest thread: how often it looks for selected / alarmed topics between full cycles
+
+
+class NewsSchedule:
+    """Which topics get a (paid) Context.dev search now. Bluesky is free and polls every topic each cycle.
+
+    News is polled every hot_sec for the topics people look at (open scan sessions and running attacks, set by
+    the detect loop with `set_hot`; a newly opened topic is fetched within URGENT_CHECK_SEC), once at once for a
+    topic whose detector raised a real `coordinated` alert (`alarm`: the article that would mark the group a
+    news echo may not be stored yet; at most once per alarm_sec), and every background_sec otherwise. At most
+    max_per_cycle background topics per full cycle, the longest-waiting first, so a restart does not fire 50
+    requests at once (Context.dev: 10 req/min) and the background fetches stay spread over the cycles.
+    Times are time.monotonic(); fetches are remembered in this process only. Thread-safe: the detect thread
+    calls set_hot / alarm / take_fresh, the ingest thread urgent / due / mark / add_fresh."""
+
+    def __init__(self, hot_sec: float, background_sec: float, alarm_sec: float, max_per_cycle: int):
+        self.hot_sec, self.background_sec, self.alarm_sec = hot_sec, background_sec, alarm_sec
+        self.max_per_cycle = max_per_cycle
+        self._lock = threading.Lock()
+        self._last: dict[str, float] = {}  # topic -> monotonic time of its last news fetch
+        self._hot: set[str] = set()
+        self._alarms: set[str] = set()
+        self._fresh: set[str] = set()  # fetched by an urgent cycle: the detect loop re-runs them
+
+    def set_hot(self, hot) -> None:
+        with self._lock:
+            self._hot = set(hot)
+
+    def alarm(self, topic: str) -> None:
+        with self._lock:
+            self._alarms.add(topic)
+
+    def _waited(self, topic: str, now: float, sec: float) -> bool:
+        last = self._last.get(topic)
+        return last is None or now - last >= sec
+
+    def urgent(self, now: float) -> list[str]:
+        """Hot topics due (hot_sec) and alarmed topics not fetched in the last alarm_sec; other alarms are
+        dropped (a recent fetch already brought the article)."""
+        with self._lock:
+            for t in [t for t in self._alarms if not self._waited(t, now, self.alarm_sec)]:
+                self._alarms.discard(t)
+            due = {t for t in self._hot if self._waited(t, now, self.hot_sec)} | self._alarms
+            return sorted(due)
+
+    def due(self, topics_: list[str], now: float) -> list[str]:
+        """News topics of a full cycle: the urgent ones among topics_, then up to max_per_cycle background ones."""
+        urgent = set(self.urgent(now))
+        with self._lock:
+            waiting = [t for t in topics_ if t not in urgent and t not in self._hot
+                       and self._waited(t, now, self.background_sec)]
+            waiting.sort(key=lambda t: self._last.get(t, -math.inf))  # never fetched first; stable otherwise
+        return [t for t in topics_ if t in urgent] + waiting[: self.max_per_cycle]
+
+    def mark(self, topic: str, now: float) -> None:
+        """A news fetch was attempted (a failed one too: no retry storm against a failing API)."""
+        with self._lock:
+            self._last[topic] = now
+            self._alarms.discard(topic)
+
+    def add_fresh(self, topics_) -> None:
+        with self._lock:
+            self._fresh |= set(topics_)
+
+    def take_fresh(self) -> set[str]:
+        with self._lock:
+            fresh, self._fresh = self._fresh, set()
+            return fresh
+
+
+def news_schedule() -> NewsSchedule:
+    """From the env: hot = POLL_INTERVAL_SEC, background = NEWS_POLL_SEC (2 h), alarm = NEWS_ALARM_SEC (10 min),
+    NEWS_MAX_PER_CYCLE (8) background topics per cycle."""
+    return NewsSchedule(hot_sec=_positive("POLL_INTERVAL_SEC", 300), background_sec=_positive("NEWS_POLL_SEC", 7200),
+                        alarm_sec=_positive("NEWS_ALARM_SEC", 600),
+                        max_per_cycle=max(1, int(_positive("NEWS_MAX_PER_CYCLE", 8))))
+
+
+_news: NewsSchedule | None = None  # set by main(); None = every cycle polls news for every topic (tests)
+
+
+def ingest_cycle(conn, news: NewsSchedule | None = None, only: list[str] | None = None) -> list[Item]:
+    """Poll the active sources and upsert the items (one commit per topic: a bad topic is rolled back alone).
+    Returns the fetched items. A lost (broken/closed) connection propagates.
+
+    Full cycle (only=None): every topic of TOPICS; with `news`, the paid sources only for news.due() topics;
+    then store.set_last_poll if at least one topic was fetched. Urgent cycle (only=[...]): the paid sources only,
+    for those topics; they are handed to the detect loop (news.add_fresh) for a re-run."""
     window_h = _positive("DETECT_WINDOW_HOURS", 6)
     sources = active_sources(window_h)
+    if only is not None:
+        sources = [s for s in sources if s.name in PAID_SOURCES]
     if not sources:
-        log.warning("no ingest source (CONTEXT_DEV_API_KEY empty and BLUESKY_ENABLED=0)")
+        if only is None:
+            log.warning("no ingest source (CONTEXT_DEV_API_KEY empty and BLUESKY_ENABLED=0)")
         return []
+    todo = topics() if only is None else list(only)
+    paid_due: set[str] | None = None  # None: every topic
+    if news is not None:
+        mono = time.monotonic()
+        paid_due = set(todo if only is not None else news.due(todo, mono))
+        for t in paid_due:  # marked before the fetch: a slow or failing request is not repeated meanwhile
+            news.mark(t, mono)
     any_ok = False
     fetched: list[Item] = []
-    for topic in topics():
+    done: list[str] = []
+    for topic in todo:
+        srcs = [s for s in sources if s.name not in PAID_SOURCES or paid_due is None or topic in paid_due]
+        if not srcs:
+            continue
         try:
             now = datetime.now(timezone.utc)
-            sinces = {src.name: src.since(conn, topic, now) for src in sources}
-            items = fetch_topic(sources, topic, sinces)
+            sinces = {src.name: src.since(conn, topic, now) for src in srcs}
+            items = fetch_topic(srcs, topic, sinces)
             if items is None:
                 conn.rollback()  # ends the read transaction opened by latest_published
                 continue
-            warm_embeddings(items)  # before the items are visible: the 10 s scan must not call the embedder
+            # before the items are visible: the 10 s scan must not call the embedder. Only the detector window:
+            # a new topic's 48 h Bluesky backfill (up to 1000 posts, for eval) is embedded later by eval itself
+            warm_embeddings(items, since=now - timedelta(hours=window_h))
             new = store.upsert_items(conn, items)
             conn.commit()
             any_ok = True
             fetched += items
+            done.append(topic)
             log.info("topic=%s new_items=%d", topic, new)
         except psycopg.OperationalError:
             if conn.broken or conn.closed:
@@ -534,8 +640,13 @@ def ingest_cycle(conn) -> list[Item]:
         except Exception:  # bad row (NUL, encoding), constraint, ...: skip this topic only
             log.exception("ingest of %s failed", topic)
             conn.rollback()
-    if any_ok:
+    if only is not None:
+        if news is not None and done:
+            news.add_fresh(done)
+    elif any_ok:
         store.set_last_poll(conn)
+    if paid_due is not None:
+        log.info("ingest cycle: %d topics, news for %d: %s", len(todo), len(paid_due), sorted(paid_due))
     return fetched
 
 
@@ -550,6 +661,7 @@ class LoopState:
     scanner: Scanner | None = None  # T12d: frames of the fast topics (main() sets load_scanner())
     next_fast: float = 0.0
     polled: threading.Event = field(default_factory=threading.Event)  # set by the ingest thread
+    clock: Callable[[], float] = time.monotonic  # time spent inside step(): fast frames during a long full pass
 
 
 def _synthetic_ttl() -> float:
@@ -585,35 +697,69 @@ def plan(st: LoopState, now: float, fast: list[str]) -> tuple[bool, list[str]]:
 
 
 def step(conn, st: LoopState, now: float) -> float:
-    """One detect-loop iteration; returns the seconds until something is due (each unit fails on its own)."""
+    """One detect-loop iteration; returns the seconds until something is due, counted from the end of the step
+    (each unit fails on its own)."""
     _guarded(conn, "schema", _ensure_schema_once, conn)
     fast: list[str] = []
-    _guarded(conn, "fast topics", lambda: fast.extend(fast_topics(conn)))
+    got_fast = _guarded(conn, "fast topics", lambda: fast.extend(fast_topics(conn)))
+    if _news is not None and got_fast:
+        _news.set_hot(fast)  # the topics people look at get their news every POLL_INTERVAL_SEC
     full, due = plan(st, now, fast)
     # explanations that arrived before this step; one landing during it stays dirty for the next step
     dirty, dirty_alpha = _explain_queue.take_dirty_split() if _explain_queue is not None else (set(), set())
+    fresh = _news.take_fresh() if _news is not None else set()  # topics an urgent news fetch just updated
     done: set[str] = set()  # detected at the design alpha in this step (explanations read from the cache)
     done_full: set[str] = set()  # ... and at the slider points
+    c0 = st.clock()
+
+    def elapsed_now() -> float:
+        return now + (st.clock() - c0)
+
     if full:
         st.polled.clear()
         st.next_poll = now + 2 * st.interval  # the ingest thread normally wakes us first
-        if topics():  # findings of topics dropped from TOPICS are never recomputed: remove them
-            _guarded(conn, "stale findings cleanup", store.delete_findings_except, conn, topics())
+        monitored = topics()
+        if monitored:  # findings of topics dropped from TOPICS are never recomputed: remove them
+            _guarded(conn, "stale findings cleanup", store.delete_findings_except, conn, monitored)
         _guarded(conn, "radar frame pruning", store.prune_frames, conn, radar.FRAME_KEEP_HOURS)
-        for topic in topics():
+        for topic in [t for t in monitored if t in fast]:  # fast topics first: their frames are stored at once
             _guarded(conn, f"detect on {topic}", detect_topic, conn, topic, st.detector, st.window_hours, st.alphas,
-                     st.scanner if topic in fast else None)
+                     st.scanner)
             done.add(topic)
             done_full.add(topic)
         if fast:
             st.next_fast = now + st.scan_interval  # the pass stored their frames
+        next_check = st.next_fast if fast else now + st.scan_interval
+        for topic in [t for t in monitored if t not in fast]:
+            _guarded(conn, f"detect on {topic}", detect_topic, conn, topic, st.detector, st.window_hours, st.alphas)
+            done.add(topic)
+            done_full.add(topic)
+            started = elapsed_now()
+            if started >= next_check:  # a long pass (50 topics) must not freeze an open radar
+                fresh_fast: list[str] = []  # a topic opened mid-pass gets its frames and news now
+                if _guarded(conn, "fast topics", lambda: fresh_fast.extend(fast_topics(conn))):
+                    fast = fresh_fast
+                    if _news is not None:
+                        _news.set_hot(fast)
+                for t in fast:
+                    _guarded(conn, f"scan detect on {t}", detect_topic, conn, t, st.detector, st.window_hours, (),
+                             st.scanner)
+                    done.add(t)
+                next_check = started + st.scan_interval
+                if fast:
+                    st.next_fast = next_check
     if due:
-        st.next_fast = now + st.scan_interval
+        st.next_fast = max(st.next_fast, now + st.scan_interval)
         for topic in due:
             if topic not in done:  # frequent frames: design alpha only (T12c points stay on the full pass)
                 _guarded(conn, f"scan detect on {topic}", detect_topic, conn, topic, st.detector, st.window_hours,
                          (), st.scanner)
                 done.add(topic)
+    for topic in sorted(fresh - done_full):  # news fetched for a selected / alarmed topic: re-run it now
+        _guarded(conn, f"detect on {topic} after news", detect_topic, conn, topic, st.detector, st.window_hours,
+                 st.alphas, st.scanner if topic in fast else None)
+        done.add(topic)
+        done_full.add(topic)
     if _explain_queue is not None:
         for topic in sorted((dirty - done) | (dirty_alpha - done_full)):  # an explanation arrived: store it now
             alphas = st.alphas if topic in dirty_alpha else ()
@@ -622,19 +768,23 @@ def step(conn, st: LoopState, now: float) -> float:
                 _explain_queue.mark_dirty(topic, alphas=topic in dirty_alpha)
     _guarded(conn, "inject processing", process_injects, conn, st.detector, st.window_hours, st.alphas)
     wait = INJECT_CHECK_SEC
+    end = elapsed_now()  # a long pass: due times are counted from its end, not from its start
     if fast:
-        wait = min(wait, max(0.0, st.next_fast - now))
-    return max(0.2, min(wait, st.next_poll - now))
+        wait = min(wait, max(0.0, st.next_fast - end))
+    return max(0.2, min(wait, st.next_poll - end))
 
 
-def warm_embeddings(items: list[Item]) -> None:
-    """Embed fetched texts in the ingest thread, so the detect loop only reads cache/embeddings/. Never raises."""
+def warm_embeddings(items: list[Item], since: datetime | None = None) -> None:
+    """Embed fetched texts in the ingest thread, so the detect loop only reads cache/embeddings/. Never raises.
+    since: only items published from then on (the detector window)."""
     if not items:
         return
     try:
         from detect.embed import embed_with_backend
 
-        embed_with_backend([it.text for it in items])
+        texts = [it.text for it in items if since is None or it.published_at >= since]
+        if texts:
+            embed_with_backend(texts)
     except Exception:  # the detect loop embeds again if this failed
         log.exception("embedding warm-up failed")
 
@@ -659,23 +809,32 @@ def warm_attack_texts() -> int:
 
 
 def ingest_loop(stop: threading.Event, st: LoopState) -> None:
-    """T12d ingest thread: warms the attack texts once, then own DB connection per cycle; wakes the detect loop
-    after every cycle."""
+    """T12d ingest thread: warms the attack texts once, then own DB connection per cycle. Full cycle every
+    POLL_INTERVAL_SEC (wakes the detect loop after it); in between, every URGENT_CHECK_SEC, the news of the
+    selected / alarmed topics (NewsSchedule.urgent) without waiting for the next full cycle."""
     warm_attack_texts()
+    next_full = 0.0
     while not stop.is_set():
         started = time.monotonic()
-        try:
-            with store.connect() as conn:
-                ingest_cycle(conn)
-                conn.commit()  # set_last_poll
-        except Exception:  # DB down, connection lost: retried next interval
-            log.exception("ingest cycle failed")
-        st.polled.set()
-        stop.wait(max(1.0, st.interval - (time.monotonic() - started)))
+        full = started >= next_full
+        # no paid source (no CONTEXT_DEV_API_KEY): an urgent cycle would fetch nothing and mark nothing
+        only = None if full or _news is None or _get_client() is None else _news.urgent(started)
+        if full or only:
+            if full:
+                next_full = started + st.interval
+            try:
+                with store.connect() as conn:
+                    ingest_cycle(conn, _news, only)
+                    conn.commit()  # set_last_poll
+            except Exception:  # DB down, connection lost: retried next interval
+                log.exception("ingest cycle failed")
+            if full:
+                st.polled.set()
+        stop.wait(max(1.0, min(URGENT_CHECK_SEC, next_full - time.monotonic())))
 
 
 def main() -> None:
-    global _explain_queue
+    global _explain_queue, _news
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     st = LoopState(load_detector(), _positive("POLL_INTERVAL_SEC", 300), _positive("DETECT_WINDOW_HOURS", 6),
                    alphas=alpha_points(), scan_interval=_positive("SCAN_INTERVAL_SEC", 10), scanner=load_scanner())
@@ -688,19 +847,22 @@ def main() -> None:
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, on_signal)
     _explain_queue = ExplainQueue()
+    _news = news_schedule()
     threads = [threading.Thread(target=ingest_loop, args=(stop, st), name="ingest", daemon=True),
                threading.Thread(target=_explain_queue.run, args=(stop,), name="explain", daemon=True)]
     for t in threads:
         t.start()
-    log.info("worker started: detector=real interval=%ss scan=%ss window=%sh topics=%s extra alphas=%s",
-             st.interval, st.scan_interval, st.window_hours, topics() or "(none)", st.alphas)
+    log.info("worker started: detector=real interval=%ss scan=%ss window=%sh topics=%d %s extra alphas=%s "
+             "news: background=%ss alarm=%ss max/cycle=%d", st.interval, st.scan_interval, st.window_hours,
+             len(topics()), topics() or "(none)", st.alphas, _news.background_sec, _news.alarm_sec,
+             _news.max_per_cycle)
 
     while not stop.is_set():
         wait = INJECT_CHECK_SEC
         try:
             with store.connect() as conn:
                 t0 = time.monotonic()
-                wait = step(conn, st, t0) - (time.monotonic() - t0)  # step() counts from its start
+                wait = step(conn, st, t0)  # step() counts its wait from the end of the step
         except Exception:  # keep the worker alive: DB down. Sleep on `stop`: `polled` may stay set (no busy loop)
             log.exception("detect cycle failed; retrying in %ss", INJECT_CHECK_SEC)
             stop.wait(INJECT_CHECK_SEC)
