@@ -171,3 +171,14 @@ def test_alerts_per_slider_alpha_and_operating_points(client, monkeypatch, tmp_p
                                                  n_background=1000)])
     write_points(pts, tmp_path / "op.json")
     assert OperatingPoints.model_validate(c.get("/api/operating_points").json()) == pts
+
+
+def test_served_alphas_follow_worker_env(client, monkeypatch):
+    """T12c: the slider shows only the alphas the worker computes (same .env as the api container)."""
+    c, _ = client
+    monkeypatch.setenv("ALPHA_POINTS", "0.01,0.05")  # an old VPS .env
+    assert c.get("/api/alphas").json() == [0.01, 0.02, 0.05]  # design alpha always served
+    monkeypatch.setenv("ALPHA_POINTS", "")
+    assert c.get("/api/alphas").json() == [0.02]
+    monkeypatch.delenv("ALPHA_POINTS")
+    assert c.get("/api/alphas").json() == [0.005, 0.01, 0.02, 0.05, 0.1]

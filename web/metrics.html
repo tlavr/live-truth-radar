@@ -40,6 +40,9 @@ th{color:var(--tertiary)}
 .fails li{padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid var(--hairline);font-size:14px}
 .fails b{font-weight:600;margin-right:8px}
 .empty{color:var(--tertiary)}
+#points tr.def td{color:var(--salat)}
+#points td,#points th{padding:5px 18px 5px 0}
+#points .nw{white-space:nowrap}
 @media (max-width:760px){.charts{grid-template-columns:1fr}}
 </style>
 </head>
@@ -66,6 +69,12 @@ th{color:var(--tertiary)}
     </div>
   </section>
   <section class="card">
+    <h2>False alarm limit (slider stops)</h2>
+    <p>What each stop of the dashboard slider measured: false alarms on windows with no swarm, small swarms caught, and how fast the verdict comes.</p>
+    <table id="points"><tr><td class="empty">No operating points yet: run make eval.</td></tr></table>
+    <p class="empty" id="pointsNote"></p>
+  </section>
+  <section class="card">
     <h2>Known mistakes</h2>
     <p>Real false positives and misses, so the numbers above are not taken on faith.</p>
     <ul class="fails" id="fails"></ul>
@@ -76,6 +85,20 @@ th{color:var(--tertiary)}
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
 const pct = x => x == null ? '—' : `${+(x * 100).toFixed(1)}%`;
+// operating points first: the table must not depend on Chart.js (CDN) loading
+fetch('/api/operating_points').then(r => r.json()).then(o => {
+  if (!o?.points?.length) return;
+  const ps = [...o.points].sort((x, y) => x.alpha - y.alpha);
+  const def = o.default_alpha;
+  $('points').innerHTML = '<tr><th>Limit</th><th>False alarms</th><th>Small swarms caught</th><th>Posts to verdict</th></tr>' +
+    ps.map(p => `<tr${p.alpha === def ? ' class="def"' : ''}><td>${pct(p.alpha)}${p.alpha === def ? ' (default)' : ''}</td>` +
+      `<td class="nw">${pct(p.pfa)} <span class="empty">≤ ${pct(p.pfa_upper95)}</span></td><td>${pct(p.pd_small)}</td>` +
+      `<td>${p.posts_to_decision?.toFixed(1) ?? '—'}</td></tr>`).join('');
+  const p0 = ps[0];
+  $('pointsNote').textContent = `${p0.n_background} test windows per stop; ≤ is the 95% upper bound. Small swarm = 3 accounts.` +
+    (p0.n_independent ? ` Only ${p0.n_independent} of them are independent live windows: on those alone the honest bound is ≤ ${pct(p0.pfa_independent_upper95)}.` : '');
+}).catch(() => {});
+
 const C = {cool: '#63CF97', warm: '#B7F063', peak: '#FFE066', ink: '#F2F6F3', muted: 'rgba(218,232,222,.64)', grid: 'rgba(218,240,224,.08)'};
 Chart.defaults.color = C.muted;
 Chart.defaults.font.family = getComputedStyle(document.documentElement).getPropertyValue('--font');
@@ -127,6 +150,7 @@ fetch('/api/metrics').then(r => r.json()).then(m => {
     ? m.failure_examples.map(e => `<li><b>${e.kind === 'false_positive' ? 'False alarm' : 'Missed'}</b>${esc(e.note)}${e.account ? ` <span class="empty">(${esc(e.account)})</span>` : ''}</li>`).join('')
     : '<li class="empty">None recorded yet.</li>';
 }).catch(e => { $('gen').textContent = `could not load metrics (${e.message})`; });
+
 </script>
 </body>
 </html>

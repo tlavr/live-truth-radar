@@ -87,6 +87,14 @@ def operating_points() -> operating.OperatingPoints | None:
     return operating.load_points(POINTS_PATH)
 
 
+@app.get("/api/alphas", response_model=list[float])
+def served_alphas() -> list[float]:
+    """T12c: slider alphas with stored findings: the design alpha + the worker's ALPHA_POINTS (same .env)."""
+    from ingest.worker import alpha_points  # same parsing as the worker; light import (no DB at import)
+
+    return sorted({operating.DEFAULT_ALPHA, *alpha_points()})
+
+
 @app.get("/api/metrics", response_model=MetricsReport)
 def metrics() -> MetricsReport:
     """eval/report.json (committed by `make eval`); an empty report until it exists or if it is invalid."""
