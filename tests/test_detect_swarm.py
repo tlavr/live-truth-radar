@@ -230,3 +230,24 @@ def test_beam_calibration_suggests_ordered_thresholds():
 
     c_lo, c_hi, lines = suggest(corpus([ROOT / "fixtures" / "items.json"]))
     assert 0 <= c_lo < c_hi <= 1 and len(lines) >= 2
+
+
+def test_beam_thresholds_follow_the_embedder_that_ran(monkeypatch):
+    import detect.pipeline as pipeline
+    from detect.embed import embed_with_backend, hash_embed
+
+    # Gemini requested, no key (conftest): falls back to hashing and says so, no network.
+    monkeypatch.setenv("LTR_EMBEDDER", "gemini")
+    _, backend = embed_with_backend(["a post", "another post"])
+    assert backend == "hash"
+    assert DEFAULT.for_embedder("hash") is DEFAULT
+    gem = DEFAULT.for_embedder("gemini")
+    assert (gem.c_lo, gem.c_hi) == (DEFAULT.gemini_c_lo, DEFAULT.gemini_c_hi)
+
+    # The same vectors labelled "gemini" get the Gemini beam: hash cosines (~0.4) fall
+    # below gemini_c_lo, every post loses its beam gain and the swarm disappears.
+    items = _items("items.json")
+    monkeypatch.setattr(pipeline, "embed_with_backend", lambda texts: (hash_embed(texts), "gemini"))
+    assert not [f for f in detect(items) if f.verdict == "coordinated"]
+    monkeypatch.setattr(pipeline, "embed_with_backend", lambda texts: (hash_embed(texts), "hash"))
+    assert [f for f in detect(items) if f.verdict == "coordinated"]

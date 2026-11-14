@@ -6,7 +6,7 @@ that every stage (T10) reads its numbers from one place.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 
 @dataclass(frozen=True)
@@ -15,9 +15,14 @@ class AnalyzerConfig:
     window_hours: float = 6.0
 
     # Topic beam (3.2a): gain b = clip((<e, a> - c_lo) / (c_hi - c_lo), 0, 1).
-    # Tuned for the hashing embedder; recalibrate for Gemini on the live sample (I1, T15).
+    # c_lo/c_hi are for the hashing embedder (tests, fallback); Gemini cosines live on another
+    # scale, so detect() switches to gemini_c_lo/gemini_c_hi when Gemini produced the vectors
+    # (for_embedder). Gemini values: `python -m detect.calibrate_beam` on fixtures (sat 14.11);
+    # recheck on the live sample (T15).
     c_lo: float = 0.15
     c_hi: float = 0.35
+    gemini_c_lo: float = 0.81
+    gemini_c_hi: float = 0.88
     # Share of accounts (least aligned with the beam) dropped by the robust mean.
     beam_trim: float = 0.2
     # Whitening (3.3): residual norm below this -> zero vector ("pure topic" post).
@@ -50,6 +55,12 @@ class AnalyzerConfig:
     news_echo_cos: float = 0.8
     news_echo_max_age_sec: float = 3600.0
     news_echo_enabled: bool = True
+
+    def for_embedder(self, backend: str) -> AnalyzerConfig:
+        """Same config with the beam thresholds of the embedder that produced the vectors."""
+        if backend == "gemini":
+            return replace(self, c_lo=self.gemini_c_lo, c_hi=self.gemini_c_hi)
+        return self
 
 
 DEFAULT = AnalyzerConfig()

@@ -24,7 +24,7 @@ from pydantic import TypeAdapter
 
 from contracts.models import Item
 from detect.beam import steering_vector
-from detect.embed import embed
+from detect.embed import embed_with_backend
 from synth.variations import available_topics, load_variations
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -48,12 +48,18 @@ def corpus(item_files: list[Path]) -> dict[str, tuple[list[str], list[str]]]:
 
 
 def suggest(topics: dict[str, tuple[list[str], list[str]]]) -> tuple[float, float, list[str]]:
-    """(c_lo, c_hi, report lines), averaged over topics that have another topic to compare with."""
+    """(c_lo, c_hi, report lines), averaged over topics that have another topic to compare with.
+
+    The first report line names the embedder that actually ran (a Gemini failure falls back to hash).
+    """
     if len(topics) < 2:
         raise ValueError("need at least two topics (on-topic vs off-topic)")
     names = sorted(topics)
-    E = {t: embed(topics[t][0]) for t in names}
-    lines, los, his = [], [], []
+    E, backends = {}, set()
+    for t in names:
+        E[t], backend = embed_with_backend(topics[t][0])
+        backends.add(backend)
+    lines, los, his = [f"embedder: {'+'.join(sorted(backends))} (requested: {os.environ.get('LTR_EMBEDDER') or 'gemini'})"], [], []
     for t in names:
         a = steering_vector(E[t], topics[t][1])
         on = E[t] @ a
@@ -74,7 +80,6 @@ def main(argv: list[str] | None = None) -> None:
     args = ap.parse_args(argv)
     files = args.items or [ROOT / "fixtures" / "items.json"]
     c_lo, c_hi, lines = suggest(corpus(files))
-    print(f"embedder: {os.environ.get('LTR_EMBEDDER') or 'gemini'}")
     print("\n".join(lines))
     print(f"suggested: c_lo = {c_lo:.2f}, c_hi = {c_hi:.2f}")
     if c_lo >= c_hi:
