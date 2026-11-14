@@ -17,6 +17,7 @@ def test_dashboard_pages_are_served():
         r = c.get(path)
         assert r.status_code == 200, path
         assert marker in r.text, path
+        assert r.headers["cache-control"] == "no-cache", path  # a deploy shows without a hard reload
 
 
 def test_topics_from_env(monkeypatch):
