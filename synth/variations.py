@@ -90,16 +90,24 @@ def generate(topic: str, description: str, *, n_messages: int = 5, n_variations:
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is not set (see .env.example)")
     model = os.environ.get("GEMINI_LLM_MODEL") or DEFAULT_LLM_MODEL
-    resp = genai.Client(api_key=api_key).models.generate_content(
-        model=model,
-        contents=PROMPT.format(description=description, n_messages=n_messages, n_variations=n_variations),
-        config=types.GenerateContentConfig(response_mime_type="application/json", temperature=1.0),
-    )
+    # Keep the client in a `with`: a temporary Client is garbage-collected (and its HTTP
+    # session closed) while the request is still running.
+    with genai.Client(api_key=api_key) as client:
+        resp = client.models.generate_content(
+            model=model,
+            contents=PROMPT.format(description=description, n_messages=n_messages, n_variations=n_variations),
+            config=types.GenerateContentConfig(response_mime_type="application/json", temperature=1.0),
+        )
+    if not resp.text:
+        raise RuntimeError(f"{model} returned no text (blocked or empty response)")
+    raw_messages = json.loads(resp.text)["messages"]
     messages = []
-    for k, raw in enumerate(json.loads(resp.text)["messages"]):
+    for k, raw in enumerate(raw_messages):
         texts = list(dict.fromkeys(t.strip() for t in raw["variations"] if t.strip()))
-        # the last n_held_out messages are kept away from any tuning
-        messages.append(Message(claim=raw["claim"].strip(), variations=texts, held_out=k >= n_messages - n_held_out))
+        # the last n_held_out messages are kept away from any tuning (count what the model
+        # actually returned, not what we asked for)
+        messages.append(Message(claim=raw["claim"].strip(), variations=texts,
+                                held_out=k >= len(raw_messages) - n_held_out))
     return VariationSet(topic=check_slug(topic), description=description, source=model, messages=messages)
 
 
