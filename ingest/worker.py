@@ -6,7 +6,7 @@ T4: heartbeat stub. T8: detect loop on the DB and inject handling. T6: Context.d
 Loop:
   * every INJECT_CHECK_SEC (~10 s): pending inject_requests -> detect() on that topic -> findings;
   * every POLL_INTERVAL_SEC: ingest_cycle(), then detect() on every topic.
-Detector: LTR_DETECTOR = "mock" (default until I1: fixtures/findings.json) | "real" (detect.pipeline).
+Detector: detect.pipeline.detect (I1; the mock detector is no longer on the worker path).
 
 Run: python -m ingest.worker
 """
@@ -21,13 +21,11 @@ import threading
 import time
 from collections import defaultdict
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import httpx
 import psycopg
-from pydantic import TypeAdapter
 
 from contracts.models import Finding, Item
 from ingest import store
@@ -44,7 +42,6 @@ log = logging.getLogger("ltr.worker")
 
 INJECT_CHECK_SEC = 10
 NEWS_OVERLAP = timedelta(minutes=15)
-FIXTURE_ITEMS = Path(__file__).resolve().parent.parent / "fixtures" / "items.json"
 
 Detector = Callable[[list[Item]], list[Finding]]
 
@@ -64,26 +61,14 @@ def topics() -> list[str]:
     return [t.strip() for t in (os.environ.get("TOPICS") or "").split(",") if t.strip()]
 
 
-def load_detector() -> tuple[str, Detector]:
-    name = (os.environ.get("LTR_DETECTOR") or "mock").strip().lower()
-    if name == "real":
-        from detect.pipeline import detect
-        return name, detect
-    if name != "mock":
-        log.warning("unknown LTR_DETECTOR=%r; using mock", name)
-    from api.mock_detect import detect as mock_detect
-    return "mock", mock_detect
+def load_detector() -> Detector:
+    """The real detector (I1). LTR_DETECTOR is obsolete: any value other than "real" is only warned about."""
+    name = (os.environ.get("LTR_DETECTOR") or "real").strip().lower()
+    if name != "real":
+        log.warning("LTR_DETECTOR=%r is no longer supported; using detect.pipeline", name)
+    from detect.pipeline import detect
 
-
-def seed_fixtures(conn) -> list[str]:
-    """Mock mode: load fixtures/items.json, so /api/items resolves the ids of fixtures/findings.json.
-
-    Returns the fixture topics: the mock runs on them too, since their posts are older than the window.
-    """
-    items = TypeAdapter(list[Item]).validate_json(FIXTURE_ITEMS.read_text(encoding="utf-8"))
-    store.upsert_items(conn, items)
-    log.info("mock mode: %d fixture items loaded (existing ids kept)", len(items))
-    return list(dict.fromkeys(it.topic for it in items))
+    return detect
 
 
 def _needs_explanation(f: Finding) -> bool:
@@ -101,13 +86,12 @@ def _with_explanation(f: Finding, posts: list[Item]) -> Finding:
 def detect_topic(conn, topic: str, detector: Detector, window_hours: float) -> int:
     """Run the detector on the topic window and replace its findings; returns the number of findings."""
     items = store.window_items(conn, topic, window_hours)
-    findings = detector(items)  # detect.pipeline.detect([]) == []; the mock ignores its input
-    # posts by id, not from the window: mock findings point at fixture posts older than the window
+    findings = detector(items)  # detect.pipeline.detect([]) == []
     posts = {f.id: store.get_items(conn, f.item_ids) for f in findings if _needs_explanation(f)}
     if posts:
         conn.commit()  # end the read-only transaction: no idle-in-transaction during slow LLM calls
         findings = [_with_explanation(f, posts[f.id]) if f.id in posts else f for f in findings]
-    # the mock ignores its input and may return other topics: store each under its own topic
+    # a detector may return findings of other topics: store each under its own topic
     by_topic: dict[str, list[Finding]] = defaultdict(list)
     for f in findings:
         by_topic[f.topic].append(f)
@@ -228,44 +212,36 @@ def ingest_cycle(conn) -> None:
 
 @dataclass
 class LoopState:
-    detector_name: str
     detector: Detector
     interval: float
     window_hours: float
-    seeded: bool = False
-    extra_topics: list[str] = field(default_factory=list)
     next_poll: float = 0.0
 
 
 def tick(conn, st: LoopState, now: float) -> None:
     """One worker iteration (~every INJECT_CHECK_SEC); each topic and the injects fail independently."""
-    if st.detector_name == "mock" and not st.seeded:
-        st.extra_topics = seed_fixtures(conn)
-        conn.commit()
-        st.seeded = True
     if now >= st.next_poll:
         st.next_poll = now + st.interval  # set first: a failing cycle must not rerun (and burn quota) every tick
         _guarded(conn, "ingest cycle", ingest_cycle, conn)
-        for topic in dict.fromkeys(topics() + st.extra_topics):
+        for topic in topics():
             _guarded(conn, f"detect on {topic}", detect_topic, conn, topic, st.detector, st.window_hours)
     _guarded(conn, "inject processing", process_injects, conn, st.detector, st.window_hours)
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
-    detector_name, detector = load_detector()
-    st = LoopState(detector_name, detector, _positive("POLL_INTERVAL_SEC", 300), _positive("DETECT_WINDOW_HOURS", 6))
+    st = LoopState(load_detector(), _positive("POLL_INTERVAL_SEC", 300), _positive("DETECT_WINDOW_HOURS", 6))
     stop = threading.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: stop.set())
-    log.info("worker started: detector=%s interval=%ss window=%sh topics=%s",
-             detector_name, st.interval, st.window_hours, topics() or "(none)")
+    log.info("worker started: detector=real interval=%ss window=%sh topics=%s",
+             st.interval, st.window_hours, topics() or "(none)")
 
     while not stop.is_set():
         try:
             with store.connect() as conn:
                 tick(conn, st, time.monotonic())
-        except Exception:  # keep the worker alive: DB down, seeding failed
+        except Exception:  # keep the worker alive: DB down
             log.exception("worker cycle failed; retrying in %ss", INJECT_CHECK_SEC)
         stop.wait(INJECT_CHECK_SEC)
     log.info("worker stopped")
