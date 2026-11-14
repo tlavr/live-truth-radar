@@ -148,5 +148,11 @@ def metrics_page() -> FileResponse:
     return FileResponse(WEB_DIR / "metrics.html")
 
 
+@app.get("/explain", include_in_schema=False)
+def explain_page() -> FileResponse:
+    """T12b: step-by-step "How we got here" page for one alert (?id=&topic=&alpha=)."""
+    return FileResponse(WEB_DIR / "explain.html")
+
+
 # last: serves web/index.html at / and its assets; the routes above take precedence
 app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
