@@ -1,7 +1,7 @@
 """Ingest/detect worker (P1).
 
-T4: heartbeat stub. T8: detect loop on the DB and inject handling. T6 plugs Context.dev polling
-into `ingest_cycle()` (and calls store.set_last_poll after a successful cycle).
+T4: heartbeat stub. T8: detect loop on the DB and inject handling. T6: Context.dev polling in
+`ingest_cycle()` (news search + Reddit search -> on-topic Items -> items/actors, then last_poll_at).
 
 Loop:
   * every INJECT_CHECK_SEC (~10 s): pending inject_requests -> detect() on that topic -> findings;
@@ -22,16 +22,28 @@ import time
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import httpx
+import psycopg
 from pydantic import TypeAdapter
 
 from contracts.models import Finding, Item
 from ingest import store
+from ingest.contextdev import (
+    ContextDevClient,
+    ContextDevError,
+    news_to_items,
+    on_topic,
+    reddit_to_items,
+    topic_query,
+)
 
 log = logging.getLogger("ltr.worker")
 
 INJECT_CHECK_SEC = 10
+NEWS_OVERLAP = timedelta(minutes=15)
 FIXTURE_ITEMS = Path(__file__).resolve().parent.parent / "fixtures" / "items.json"
 
 Detector = Callable[[list[Item]], list[Finding]]
@@ -133,8 +145,85 @@ def process_injects(conn, detector: Detector, window_hours: float) -> int:
     return len(pending)
 
 
+_client: ContextDevClient | None = None
+
+
+def _get_client() -> ContextDevClient | None:
+    global _client
+    if _client is None and os.environ.get("CONTEXT_DEV_API_KEY"):
+        # cache shorter than the poll interval: every cycle asks for fresh data, retries within a cycle are free
+        ttl = max(30.0, _positive("POLL_INTERVAL_SEC", 300) - 30)
+        _client = ContextDevClient(os.environ["CONTEXT_DEV_API_KEY"], cache_ttl_sec=ttl)
+    return _client
+
+
+def news_since(now: datetime, window_h: float, latest: datetime | None) -> datetime:
+    """Lower bound for the news query: the detector window, or just before the newest stored article.
+    News search is relevance-ranked with a result cap, so asking for the whole window every cycle would return
+    the same top-N forever. `latest` is capped at now: one future-dated row cannot stall polling.
+    Trade-off: an article indexed later than NEWS_OVERLAP after its published_at can be missed."""
+    since = now - timedelta(hours=window_h)
+    if latest is not None:
+        since = max(since, min(latest, now) - NEWS_OVERLAP)
+    return since
+
+
+def fetch_topic(client: ContextDevClient, topic: str, since: datetime) -> list[Item] | None:
+    """All sources for one topic, on-topic items only; None if every source failed."""
+    query = topic_query(topic)
+    items: list[Item] = []
+    ok = False
+    for name, call, norm in (
+        ("news", lambda: client.news_search(query, since=since), news_to_items),
+        ("reddit", lambda: client.reddit_search(query), reddit_to_items),
+    ):
+        try:
+            got = norm(call(), topic)
+        except (ContextDevError, httpx.HTTPError, ValueError, OSError) as e:  # API, network, bad JSON, cache I/O
+            log.warning("topic=%s source=%s failed: %s", topic, name, e)
+            continue
+        except Exception:  # one bad response must not stop the other source or topics
+            log.exception("topic=%s source=%s unexpected error", topic, name)
+            continue
+        ok = True
+        kept = [it for it in got if on_topic(it.text, topic)]
+        log.info("topic=%s source=%s items=%d on_topic=%d", topic, name, len(got), len(kept))
+        items += kept
+    return items if ok else None
+
+
 def ingest_cycle(conn) -> None:
-    """T6: poll Context.dev for every topic, upsert items, then store.set_last_poll(conn)."""
+    """Poll Context.dev for every topic and upsert its items (one commit per topic: a bad topic is rolled
+    back alone), then store.set_last_poll if at least one topic was fetched.
+    A lost (broken/closed) connection propagates."""
+    client = _get_client()
+    if client is None:
+        log.warning("CONTEXT_DEV_API_KEY is empty: no ingest")
+        return
+    window_h = _positive("DETECT_WINDOW_HOURS", 6)
+    any_ok = False
+    for topic in topics():
+        try:
+            now = datetime.now(timezone.utc)
+            since = news_since(now, window_h, store.latest_published(conn, topic, "context_news"))
+            items = fetch_topic(client, topic, since)
+            if items is None:
+                conn.rollback()  # ends the read transaction opened by latest_published
+                continue
+            new = store.upsert_items(conn, items)
+            conn.commit()
+            any_ok = True
+            log.info("topic=%s new_items=%d", topic, new)
+        except psycopg.OperationalError:
+            if conn.broken or conn.closed:
+                raise  # connection lost: main() reconnects
+            log.exception("ingest of %s failed", topic)  # timeout, deadlock, ...: connection still usable
+            conn.rollback()
+        except Exception:  # bad row (NUL, encoding), constraint, ...: skip this topic only
+            log.exception("ingest of %s failed", topic)
+            conn.rollback()
+    if any_ok:
+        store.set_last_poll(conn)
 
 
 @dataclass
@@ -165,7 +254,7 @@ def tick(conn, st: LoopState, now: float) -> None:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     detector_name, detector = load_detector()
-    st = LoopState(detector_name, detector, _positive("POLL_INTERVAL_SEC", 180), _positive("DETECT_WINDOW_HOURS", 6))
+    st = LoopState(detector_name, detector, _positive("POLL_INTERVAL_SEC", 300), _positive("DETECT_WINDOW_HOURS", 6))
     stop = threading.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: stop.set())
