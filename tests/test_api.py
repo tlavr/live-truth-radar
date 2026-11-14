@@ -130,6 +130,16 @@ def test_inject_adds_synthetic_items_and_rejects_bad_or_repeated_requests(client
     assert c.post("/api/inject", json={"topic": ""}).status_code == 422
 
 
+
+def test_inject_rejects_topics_outside_topics(client, monkeypatch):
+    c, fake = client
+    monkeypatch.setenv("TOPICS", "jensen-huang-resignation")
+    r = c.post("/api/inject", json={"topic": "helsinki-tram-fares"})  # has variations, not monitored
+    assert r.status_code == 400 and "not monitored" in r.json()["detail"]
+    assert fake.injects == []
+    assert c.post("/api/inject", json={"topic": "jensen-huang-resignation"}).status_code == 200
+
+
 def test_export_sample_pseudonymizes_and_drops_synthetic():
     items = TypeAdapter(list[Item]).validate_json((FIX / "items.json").read_text())
     out = pseudonymize(items, "salt")

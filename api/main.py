@@ -121,6 +121,9 @@ def inject(req: InjectRequest) -> InjectResponse:
     """Add a synthetic swarm (synth.campaign.make_campaign) to the topic; the worker runs detect() within ~10 s."""
     from synth.campaign import make_campaign  # heavy import (numpy) only when used
 
+    monitored = topics()
+    if monitored and req.topic not in monitored:  # the worker would delete its finding at the next poll
+        raise HTTPException(status_code=400, detail=f"topic {req.topic!r} is not monitored (TOPICS)")
     with store.connect() as conn:
         if store.has_pending_inject(conn, req.topic):
             raise HTTPException(status_code=429, detail="an inject for this topic is still being processed")

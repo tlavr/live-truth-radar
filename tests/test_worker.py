@@ -39,7 +39,8 @@ def test_failing_topic_does_not_stall_other_topics_injects_or_poll_interval(monk
     fake = FakeWorkerStore([{"id": 1, "topic": "good"}, {"id": 2, "topic": "bad"}])
     for name in ("window_items", "replace_findings", "pending_injects", "mark_injects_processed"):
         monkeypatch.setattr(worker.store, name, getattr(fake, name))
-    calls = {"ingest": 0, "detect": []}
+    calls = {"ingest": 0, "detect": [], "cleanup": []}
+    monkeypatch.setattr(worker.store, "delete_findings_except", lambda conn, keep: calls["cleanup"].append(keep))
 
     def ingest_cycle(conn):
         calls["ingest"] += 1
@@ -59,6 +60,7 @@ def test_failing_topic_does_not_stall_other_topics_injects_or_poll_interval(monk
         worker.tick(conn, st, now=10.0 * k)
 
     assert calls["ingest"] == 1  # a failed cycle is not retried every tick
+    assert calls["cleanup"] == [["bad", "good"]]  # stale topics' findings removed once per poll
     assert calls["detect"].count("good") == 2  # poll + inject
     assert calls["detect"].count("bad") == 2
     assert "good" in fake.replaced and "bad" not in fake.replaced
@@ -204,3 +206,84 @@ def test_failing_extra_alpha_never_loses_the_main_findings(monkeypatch):
     worker.detect_topic(conn, "t", lambda items, alpha=0.02: [], 6, alphas=(0.01, 0.05))
     assert "t" in stored and attempts == [0.01, 0.05]  # each point tried, the error swallowed
     assert conn.commits >= 1  # the main findings are committed before the extra points run
+
+
+def test_reddit_source_is_off_by_default(monkeypatch):
+    calls = []
+
+    class Client:
+        def news_search(self, query, since):
+            calls.append("news")
+            return {}
+
+        def reddit_search(self, query):
+            calls.append("reddit")
+            return {}
+
+    monkeypatch.setattr(worker, "news_to_items", lambda resp, topic: [])
+    monkeypatch.setattr(worker, "reddit_to_items", lambda resp, topic: [])
+    monkeypatch.delenv("REDDIT_ENABLED", raising=False)
+    assert worker.fetch_topic(Client(), "jensen-huang-resignation", since=None) == []
+    assert calls == ["news"]  # no Context.dev request units spent on the failing reddit scrape
+
+    calls.clear()
+    monkeypatch.setenv("REDDIT_ENABLED", "1")
+    worker.fetch_topic(Client(), "jensen-huang-resignation", since=None)
+    assert calls == ["news", "reddit"]
+
+
+def test_no_stale_cleanup_without_topics(monkeypatch):
+    cleaned = []
+    monkeypatch.setattr(worker.store, "delete_findings_except", lambda conn, keep: cleaned.append(keep))
+    monkeypatch.setattr(worker, "ingest_cycle", lambda conn: None)
+    monkeypatch.setattr(worker, "process_injects", lambda conn, d, h: 0)
+    monkeypatch.setenv("TOPICS", "")
+    worker.tick(FakeConn(), worker.LoopState(detector=lambda items: [], interval=300, window_hours=6), now=0.0)
+    assert cleaned == []  # an empty TOPICS must never wipe every finding
+
+
+def test_stale_cleanup_also_covers_findings_alpha_and_survives_its_absence():
+    from contextlib import contextmanager
+
+    import psycopg
+
+    from ingest import store
+
+    class Cur:
+        rowcount = 2
+
+        def __init__(self, conn):
+            self.conn = conn
+
+        def execute(self, sql, params):
+            if "findings_alpha" in sql and self.conn.no_alpha_table:
+                raise psycopg.errors.UndefinedTable("findings_alpha")
+            self.conn.sql.append((sql.split()[2], params, self.conn.depth))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    class Conn:
+        def __init__(self, no_alpha_table):
+            self.sql, self.no_alpha_table, self.depth = [], no_alpha_table, 0
+
+        @contextmanager
+        def transaction(self):
+            self.depth += 1
+            try:
+                yield
+            finally:
+                self.depth -= 1
+
+        def cursor(self):
+            return Cur(self)
+
+    conn = Conn(no_alpha_table=False)
+    assert store.delete_findings_except(conn, ("a", "b")) == 4
+    # findings_alpha inside a nested savepoint: a missing table must not abort the findings DELETE
+    assert conn.sql == [("findings", (["a", "b"],), 1), ("findings_alpha", (["a", "b"],), 2)]
+    old = Conn(no_alpha_table=True)  # a DB volume from before T12c
+    assert store.delete_findings_except(old, ["a"]) == 2 and old.sql == [("findings", (["a"],), 1)]

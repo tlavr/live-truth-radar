@@ -187,6 +187,22 @@ def load_findings_alpha(conn: psycopg.Connection, alpha: float, topic: str | Non
             for r in rows]
 
 
+def delete_findings_except(conn: psycopg.Connection, topics: list[str]) -> int:
+    """Delete findings (also T12c findings_alpha) of every topic not in `topics`; returns the count."""
+    if not topics:
+        raise ValueError("delete_findings_except needs at least one topic to keep")
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute("DELETE FROM findings WHERE NOT (topic = ANY(%s))", (list(topics),))
+        n = cur.rowcount
+        try:
+            with conn.transaction():  # savepoint: findings_alpha (T12c) may not exist yet on an old volume
+                cur.execute("DELETE FROM findings_alpha WHERE NOT (topic = ANY(%s))", (list(topics),))
+                n += cur.rowcount
+        except psycopg.errors.UndefinedTable:
+            pass
+        return n
+
+
 def load_findings(conn: psycopg.Connection, topic: str | None = None) -> list[Finding]:
     """Stored findings, newest first; optionally one topic."""
     cols = FINDING_SCALARS + FINDING_JSON
