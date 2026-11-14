@@ -419,7 +419,8 @@ function render() {
     : f.verdict === 'watching'
       ? '🟡 Keep watching — not sure yet.'
       : '🟢 Looks organic.') +
-    ` <small>${pfaText()} · ${snr}</small>`;
+    ` <small>${pfaText()} · ${snr}</small>` +
+    ` <a class="how" href="/explain?id=${encodeURIComponent(f.id)}&topic=${encodeURIComponent(f.topic)}&alpha=${S.alpha}">How we got here →</a>`;
   const pairs = sum(f.ambiguity?.counts);
   $('lgSpike').textContent = hit ? `${pairs} pairs of this group, close in time and wording` : `${pairs} pairs of this group`;
   $('lgCarpet').textContent = `${sum(f.ambiguity?.background)} other pairs in the topic across 10m`;
@@ -440,7 +441,7 @@ function render() {
       : `Between thresholds after ${f.sprt_trace.length} posts.`}</p>`;
   const mx = Math.max(f.snr_db, f.snr_db_single ?? 0, 1);
   $('evSignal').innerHTML = `<h3>Signal-to-noise</h3><div class="bars">
-      ${f.snr_db_single != null ? `<div><span>One pair</span><i style="width:${Math.max(0, f.snr_db_single) / mx * 100}%"></i><span>${f.snr_db_single.toFixed(1)} dB</span></div>` : ''}
+      ${f.snr_db_single != null ? `<div><span>Average pair</span><i style="width:${Math.max(0, f.snr_db_single) / mx * 100}%"></i><span>${f.snr_db_single.toFixed(1)} dB</span></div>` : ''}
       <div><span>Group (${n})</span><i style="width:${Math.max(0, f.snr_db) / mx * 100}%"></i><span>${f.snr_db.toFixed(1)} dB</span></div></div>
       <p>Combining all account pairs coherently lifts the swarm above the noise.</p>`;
 }
