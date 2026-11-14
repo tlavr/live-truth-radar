@@ -228,8 +228,30 @@ def test_lag_grid_never_exceeds_tau_max():
 def test_beam_calibration_suggests_ordered_thresholds():
     from detect.calibrate_beam import ROOT, corpus, suggest
 
-    c_lo, c_hi, lines = suggest(corpus([ROOT / "fixtures" / "items.json"]))
+    topics = corpus([ROOT / "fixtures" / "items.json"])
+    c_lo, c_hi, lines = suggest(topics)
     assert 0 <= c_lo < c_hi <= 1 and len(lines) >= 2
+    # The beam is built from organic posts only: the fixture swarm (swarm-001) is never in it.
+    tram = topics["helsinki-tram-fares"]
+    assert len(tram.organic) == 56 and len(tram.organic_authors) == 56
+    assert all(t not in tram.organic for t in tram.other)
+
+
+def test_beam_thresholds_are_off_topic_quantiles_on_the_organic_beam():
+    from detect.calibrate_beam import thresholds
+
+    rng = np.random.default_rng(0)
+    d = 16
+    axis = np.eye(d)[0]
+    # Organic posts close to the axis; off-topic posts with known projections 0.0 .. 0.9 on it.
+    E_on = axis + 0.05 * rng.standard_normal((20, d))
+    E_on /= np.linalg.norm(E_on, axis=1, keepdims=True)
+    proj = np.linspace(0.0, 0.9, 10)
+    E_off = np.outer(proj, axis) + np.outer(np.sqrt(1 - proj**2), np.eye(d)[1])
+    c_lo, c_hi, organic_q = thresholds(E_on, [f"a{k}" for k in range(20)], E_off)
+    a = E_on.mean(axis=0) / np.linalg.norm(E_on.mean(axis=0))
+    assert abs(c_lo - np.quantile(E_off @ a, 0.5)) < 0.02 and abs(c_hi - np.quantile(E_off @ a, 0.9)) < 0.02
+    assert c_lo < c_hi < organic_q  # organic posts keep full gain
 
 
 def test_beam_thresholds_follow_the_embedder_that_ran(monkeypatch):
