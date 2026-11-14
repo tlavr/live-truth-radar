@@ -6,6 +6,7 @@ that every stage (T10) reads its numbers from one place.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, replace
 
 
@@ -48,6 +49,11 @@ class AnalyzerConfig:
     # Topics above ~1000 pairs (~45 accounts) keep the background median (busy topic, test_detect_swarm).
     cfar_min_ref_cells: int = 2000
     min_swarm_accounts: int = 3
+    # Waves (experiment, off by default; LTR_WAVE_GAP_SEC=120 turns it on): the posts of a detected
+    # group are cut where the pause between neighbours is longer than this, and every wave with
+    # >= min_swarm_accounts accounts is reported as its own finding. The decision (CFAR, SPRT, news
+    # checks) is still made on the whole group, so Pd / Pfa do not change. 0 = no cut.
+    wave_gap_sec: float = float(os.environ.get("LTR_WAVE_GAP_SEC") or 0)
 
     # SPRT (3.7).
     alpha: float = 0.02

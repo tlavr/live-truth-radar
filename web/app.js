@@ -42,6 +42,9 @@ const S = {
   topic: null, list: [], sel: 0, items: new Map(),
   live: null,  // T12d live scan: {topic, session, since, frame, timer, busy, error}
   weak: false, pickedWeak: false,  // T12d: groups below the alert threshold are folded into one line
+  tmap: null, mapBusy: false,      // time x meaning map of the topic (/api/timemap), one layer per group
+  mapAt: null, view: 0,            // mapAt: null = live, else the ISO moment the map is rewound to;
+                                   // view: bins between the end of the fetched map and the origin on screen
 };
 // T12c: the false-alarm slider picks an SPRT alpha; /api/alerts?alpha= serves the findings at that point
 const SLIDER_ALPHAS = [0.005, 0.01, 0.02, 0.05, 0.1];  // fallback until eval/operating_points.json exists
@@ -54,37 +57,42 @@ const pfaText = () => {
     ? `False alarm target: ${pct(S.alpha)} (measured ${pct(p.pfa)}, ≤ ${pct(p.pfa_upper95)} at 95%)`
     : `False alarm target: ${pct(S.alpha)}`;
 };
-// alerts first, the largest first (a big swarm can split into several groups), then the newest
+// alerts first, then in time order: a group is one wave of posts, so the buttons read left to right in time
 const topicFindings = t => S.findings.filter(f => f.topic === t)
-  .sort((a, b) => RANK[a.verdict] - RANK[b.verdict] || b.accounts.length - a.accounts.length || b.created_at.localeCompare(a.created_at));
+  .sort((a, b) => RANK[a.verdict] - RANK[b.verdict] || a.first_seen.localeCompare(b.first_seen) || a.id.localeCompare(b.id));
+const span = f => hm(f.first_seen) === hm(f.last_seen) ? hm(f.first_seen) : `${hm(f.first_seen)}–${hm(f.last_seen)}`;
 
 // the group the result view shows: an alert (coordinated), or a weaker group only if the user opened it
 const shown = () => { const f = S.list[S.sel]; return f && (f.verdict === 'coordinated' || S.pickedWeak) ? f : null; };
 const SIM = 'simulated attack';
 
-const PAL = {bg: '#0C100E', cool: '#63CF97', muted: '#A3B8AA', warm: '#B7F063', peak: '#FFE066'};
+const PAL = {bg: '#0C100E', cool: '#63CF97', muted: '#A3B8AA', warm: '#B7F063', peak: '#FFE066', sel: '#FF5C9E'};
 
 /* ------------------------------------------------------------------ scene */
-// grid of detector bins (detect/config.py: 20 lag bins of 30 s, 10 mismatch bins of 0.1)
-const L = 20, M = 10;
+// grid of the time x meaning map (detect/timemap.py): the last L time bins of 30 s (10 min), 20 meaning-gap
+// bins of 0.05. Ordinary axes: the origin is "now" and meaning gap 0; time runs to the right into the past.
+// Labels every LABEL_EVERY bins (2 min, 0.2); a small tick at every bin.
+const M = 20, L = 20, BIN_MIN = .5, LABEL_EVERY = 4, MAP_MAX_AGE_MS = 20000;
+const U0 = 0, U1 = L;  // the surface starts and ends exactly at the axes
 const W = 10, D = 6, PEAK = 3.1, NX = 190, NZ = 56;
-const U0 = -1.3, U1 = L + .5, V0 = -1.3, V1 = M + .4;
+const V0 = 0, V1 = M;
 const X = u => -W / 2 + (u - U0) / (U1 - U0) * W, Z = v => D / 2 - (v - V0) / (V1 - V0) * D;
 const binU = x => (x + W / 2) / W * (U1 - U0) + U0, binV = z => (D / 2 - z) / D * (V1 - V0) + V0;
 const canvas = $('scene'), stage = $('stage');
-let renderer, composer, bloom, camera, scene, U, axisMat, geoms = [], ok = true;
-const field = {P: new Float32Array(NX * NZ), C: new Float32Array(NX * NZ)};
+let renderer, composer, bloom, camera, scene, U, axisMat, axGeo, geoms = [], ok = true;
+const field = {P: new Float32Array(NX * NZ), O: new Float32Array(NX * NZ), C: new Float32Array(NX * NZ)};
 
-function smooth(grid) {
-  const out = new Float32Array(NX * NZ), su = .62, sv = .55;
+function smooth(grid, off = 0) {
+  // su in time bins; off = column of the grid at the origin (fractional while the map scrolls)
+  const out = new Float32Array(NX * NZ), su = .5, sv = .55, ru = Math.ceil(3 * su);
   if (!grid) return out;
   for (let j = 0; j < NZ; j++) {
     const v = V0 + j / (NZ - 1) * (V1 - V0);
     for (let i = 0; i < NX; i++) {
-      const u = U0 + i / (NX - 1) * (U1 - U0);
+      const u = U0 + i / (NX - 1) * (U1 - U0) + off;
       let s = 0, w = 0;
       for (let m = Math.floor(v - 3); m <= Math.ceil(v + 3); m++)
-        for (let l = Math.floor(u - 3); l <= Math.ceil(u + 3); l++) {
+        for (let l = Math.floor(u - ru); l <= Math.ceil(u + ru); l++) {
           const du = u - (l + .5), dv = v - (m + .5);
           const k = Math.exp(-du * du / (2 * su * su) - dv * dv / (2 * sv * sv));
           s += k * (grid[m]?.[l] ?? 0); w += k;
@@ -95,15 +103,111 @@ function smooth(grid) {
   return out;
 }
 
-// Heights of the selected finding: its own pairs are the spike, the rest of the topic the carpet.
-// One scale for both, so a weak group stays low next to the carpet instead of being stretched to PEAK.
-function setField(f) {
-  const P = smooth(f?.ambiguity?.counts), C = smooth(f?.ambiguity?.background);
-  let mp = 0, mc = 0;
-  for (let i = 0; i < P.length; i++) { mp = Math.max(mp, P[i]); mc = Math.max(mc, C[i]); }
-  const k = PEAK / Math.max(mp, mc * 2.5, 1e-6);
-  for (let i = 0; i < P.length; i++) { field.P[i] = P[i] * k; field.C[i] = C[i] * k; }
-  for (const g of geoms) { g.attributes.aP.needsUpdate = true; g.attributes.aC.needsUpdate = true; }
+// The fetched map may be wider than the screen (it covers both ends of a scroll). Columns are kept newest
+// first; S.view = the column at the origin, so screen column l is "l to l+1 bins before the origin".
+const BIN_MS = BIN_MIN * 60000;
+const rev = g => g.map(row => row.slice().reverse());
+const originMs = () => Date.parse(S.tmap.now) - S.view * BIN_MS;
+const nowText = () => S.tmap ? new Date(originMs()).toISOString().slice(11, 16) : 'now';
+let full = {};
+// all cells of the fetched map: the selected group, the other groups of the topic, everything else
+function layersFull(f) {
+  if (!S.tmap) return null;
+  if (full.map === S.tmap && full.f === f && full.list === S.list) return full.val;
+  const total = rev(S.tmap.total), zero = () => total.map(r => r.map(() => 0));
+  const grid = id => S.tmap.groups?.[id] ? rev(S.tmap.groups[id]) : null;
+  const sel = (f && grid(f.id)) || zero(), others = zero();
+  for (const g of S.list) if (g !== f) grid(g.id)?.forEach((r, m) => r.forEach((v, l) => { others[m][l] += v; }));
+  const rest = total.map((r, m) => r.map((v, l) => Math.max(0, v - sel[m][l] - others[m][l])));
+  full = {map: S.tmap, f, list: S.list, val: {sel, others, rest}};
+  return full.val;
+}
+// the L columns on screen, for the tooltip and the legend
+function layers(f) {
+  const y = layersFull(f); if (!y) return null;
+  const a = Math.round(S.view), cut = g => g.map(r => Array.from({length: L}, (_, l) => r[a + l] ?? 0));
+  return {sel: cut(y.sel), others: cut(y.others), rest: cut(y.rest)};
+}
+
+// Heights in dB above the mean level of all pairs on screen (the radar's noise floor): a point whose pairs
+// (all layers, smoothed) total T stands 10*log10(T / mean) dB high, 0 at or below the mean. The layers split
+// that height in proportion: the selected group (accent colour) on top of the other groups (they keep their
+// colour), on top of the carpet of all other pairs. A click only moves the accent.
+const sample = f => { const y = layersFull(f); return [smooth(y?.sel, S.view), smooth(y?.others, S.view), smooth(y?.rest, S.view)]; };
+// Threshold: the CFAR rule of the detector (detect/config.py cfar_k = 3) applied to this surface, mean + 3
+// sigma of all points on screen, in dB above the mean. It is a guide on the map's own scale: the detector
+// itself thresholds pair correlations, not this density.
+const CFAR_K = 3;
+function dbField([P, O, C]) {
+  const n = P.length, H = new Float32Array(n);
+  let mean = 0, sq = 0, top = 0;
+  for (let i = 0; i < n; i++) { const t = P[i] + O[i] + C[i]; mean += t; sq += t * t; }
+  mean /= n;
+  const sd = Math.sqrt(Math.max(0, sq / n - mean * mean)), thr = mean > 1e-9 ? 10 * Math.log10(1 + CFAR_K * sd / mean) : 0;
+  if (mean > 1e-9) for (let i = 0; i < n; i++) {
+    const t = P[i] + O[i] + C[i];
+    H[i] = t > mean ? 10 * Math.log10(t / mean) : 0; top = Math.max(top, H[i]);
+  }
+  return {H, top: Math.max(top, thr), thr};
+}
+// the height axis has 5 steps; a step is a round number of dB that fits the highest point
+const DB_STEPS = [1, 2, 3, 4, 5, 6, 8, 10, 15, 20];
+const dbStep = top => DB_STEPS.find(st => 5 * st >= top) ?? Math.ceil(top / 50) * 10;
+const scaleOf = s => PEAK / (5 * dbStep(dbField(s).top));  // scene units per dB
+// k: scene units per dB; by default the one that fits the view, a scroll passes its own so heights glide
+function setField(f, k) {
+  const s = sample(f), [P, O, C] = s, {H, top, thr} = dbField(s);
+  k ??= PEAK / (5 * dbStep(top));
+  let best = 0, at = -1;
+  for (let i = 0; i < P.length; i++) {
+    if (P[i] > best) { best = P[i]; at = i % NX; }
+    const t = P[i] + O[i] + C[i], q = t > 0 ? H[i] * k / t : 0;
+    field.P[i] = P[i] * q; field.O[i] = O[i] * q; field.C[i] = C[i] * q;
+  }
+  for (const g of geoms) for (const a of ['aP', 'aO', 'aC']) g.attributes[a].needsUpdate = true;
+  CAMS.peak.tx = at < 0 ? -3 : Math.max(-3.4, Math.min(3.4, -W / 2 + at / (NX - 1) * W)) * .8;  // look at the selected wave
+  setHeightLabels(k);
+  S.thrDb = thr; S.thrY = thr > 0 ? thr * k : null;
+  if (U) U.uThrY.value = S.thrY ?? 1e3;  // the surface turns red above it, with a dashed contour where it crosses
+  if (axGeo && S.thrY !== axThrY) drawAxes();
+  if (thrLabel) thrLabel.el.textContent = thr > 0 ? `detection threshold (mean + ${CFAR_K}σ) · ${thr.toFixed(1)} dB` : '';
+}
+let thrLabel = null, axThrY = null;
+
+// Axes just outside the surface, on the edges that face the viewer: the time axis on the front or back
+// edge, the meaning-gap axis on the left or right one, whichever edge's outward normal n has dot(n, view) > 0
+// (view = from the scene to the camera). The height axis stands on the far corner of the meaning-gap edge.
+// Ticks point outwards: a small one at every bin (30 s, 0.05), a raised post at every label (2 min, 0.2).
+const TICK_H = .26, AX_OFF = .35, HEIGHT_TICKS = [0, .2, .4, .6, .8, 1];
+const axSide = {x: -1, z: 1};  // x: -1 = meaning-gap axis on the left edge (gap 0 side), z: 1 = time axis on the front edge
+const timeZ = sz => sz > 0 ? Z(0) + AX_OFF : Z(M) - AX_OFF;
+const gapX = sx => sx < 0 ? X(0) - AX_OFF : X(L) + AX_OFF;
+function drawAxes() {
+  const sx = axSide.x, sz = axSide.z, ax = [], zt = timeZ(sz), xg = gapX(sx), zf = timeZ(-sz);
+  ax.push(X(0), 0, zt, X(L), 0, zt, xg, 0, Z(0), xg, 0, Z(M));
+  for (let l = 0; l <= L; l++) {
+    const x = X(l), big = l % LABEL_EVERY === 0;
+    ax.push(x, 0, zt, x, 0, zt + sz * (big ? .14 : .07));
+    if (big) ax.push(x, 0, zt, x, TICK_H, zt);
+  }
+  for (let m = 0; m <= M; m++) {
+    const z = Z(m), big = m % LABEL_EVERY === 0;
+    ax.push(xg, 0, z, xg + sx * (big ? .14 : .07), 0, z);
+    if (big) ax.push(xg, 0, z, xg, TICK_H, z);
+  }
+  ax.push(xg, 0, zf, xg, PEAK, zf);  // height axis
+  for (const g of HEIGHT_TICKS) ax.push(xg, g * PEAK, zf, xg + sx * .14, g * PEAK, zf);
+  axThrY = S.thrY ?? null;
+  if (axThrY != null) ax.push(xg - sx * .22, axThrY, zf, xg + sx * .22, axThrY, zf);  // detection threshold
+  axGeo.setAttribute('position', new THREE.Float32BufferAttribute(ax, 3));
+  axGeo.boundingSphere = null;  // recomputed for frustum culling: the axes moved
+}
+// flip an axis only past a small margin, so it does not flicker when the view is edge-on
+function faceAxes() {
+  const vx = camera.position.x - cam.tx, vz = camera.position.z - cam.tz, n = Math.hypot(vx, vz) || 1;
+  const sx = vx / n > .05 ? 1 : vx / n < -.05 ? -1 : axSide.x, sz = vz / n > .05 ? 1 : vz / n < -.05 ? -1 : axSide.z;
+  if (sx === axSide.x && sz === axSide.z) return;
+  axSide.x = sx; axSide.z = sz; drawAxes();
 }
 
 function buildScene() {
@@ -111,7 +215,7 @@ function buildScene() {
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   scene = new THREE.Scene();
   scene.background = new THREE.Color(PAL.bg);
-  camera = new THREE.PerspectiveCamera(34, 1, .1, 100);
+  camera = new THREE.OrthographicCamera(-1, 1, 1, -1, .1, 100);  // parallel projection: proportions hold everywhere
 
   const pos = new Float32Array(NX * NZ * 3);
   for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) {
@@ -122,6 +226,7 @@ function buildScene() {
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     g.setAttribute('aC', new THREE.BufferAttribute(field.C, 1));
     g.setAttribute('aP', new THREE.BufferAttribute(field.P, 1));
+    g.setAttribute('aO', new THREE.BufferAttribute(field.O, 1));
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 1, 0), 9);
     geoms.push(g);
     return g;
@@ -139,51 +244,63 @@ function buildScene() {
     uNoise: {value: 1}, uGlow: {value: .3}, uSweep: {value: -9}, uSweepOn: {value: 0},
     uHover: {value: new THREE.Vector4(9, 9, 9, 9)},
     uCool: {value: new THREE.Color(PAL.cool)}, uWarm: {value: new THREE.Color(PAL.warm)},
-    uPeakC: {value: new THREE.Color(PAL.peak)}, uBg: {value: new THREE.Color(PAL.bg)},
+    uPeakC: {value: new THREE.Color(PAL.peak)}, uBg: {value: new THREE.Color(PAL.bg)}, uSelC: {value: new THREE.Color(PAL.sel)},
+    uThrY: {value: 1e3},  // height of the detection threshold (setField); 1e3 = none
   };
   const vert = `
-    attribute float aC; attribute float aP;
+    attribute float aC; attribute float aP; attribute float aO;
     uniform float uTime, uCarpet, uPeak, uNoise;
-    varying float vHeat; varying vec3 vP;
+    varying float vHeat; varying float vSel; varying vec3 vP;
     void main(){
       vec3 p = position;
       float n = sin(p.x*1.3+uTime*.55)*sin(p.z*1.9-uTime*.4) + .5*sin(p.x*3.1-uTime*.75+p.z*2.2);
-      float hP = aP*uPeak;
+      float hP = (aP + aO)*uPeak;  // all groups: one height and one colour ramp
       p.y = aC*uCarpet + hP + n*uNoise*.075;
       vHeat = smoothstep(0.02, 1., hP/${PEAK.toFixed(2)});
+      vSel = aP/max(aP + aO, 1e-4) * smoothstep(0., .05, aP*uPeak/${PEAK.toFixed(2)});  // share of the selected group
       vP = p;
       gl_Position = projectionMatrix*modelViewMatrix*vec4(p,1.);
     }`;
   const ramp = `
-    vec3 ramp(float h){ vec3 c = mix(uCool, uWarm, smoothstep(0.,.5,h)); return mix(c, uPeakC, smoothstep(.5,1.,h)); }`;
+    vec3 ramp(float h){ vec3 c = mix(uCool, uWarm, smoothstep(0.,.5,h)); return mix(c, uPeakC, smoothstep(.5,1.,h)); }
+    vec3 tint(float h, float sel){ return mix(ramp(h), uSelC, sel); }
+    // the selected group is red only above the threshold, with a soft edge of a few pixels
+    float above(float y){ float w = max(fwidth(y), 1e-3); return smoothstep(uThrY - w, uThrY + w, y); }`;
   const lineMat = new THREE.ShaderMaterial({
     uniforms: U, vertexShader: vert, transparent: true, depthWrite: false,
     fragmentShader: `
-      uniform vec3 uCool, uWarm, uPeakC; uniform float uGlow, uSweep, uSweepOn; uniform vec4 uHover;
-      varying float vHeat; varying vec3 vP; ${ramp}
+      uniform vec3 uCool, uWarm, uPeakC, uSelC; uniform float uGlow, uSweep, uSweepOn, uThrY; uniform vec4 uHover;
+      varying float vHeat; varying float vSel; varying vec3 vP; ${ramp}
       void main(){
+        float sel = vSel * above(vP.y);
         float sweep = exp(-pow((vP.x-uSweep)/.32,2.))*uSweepOn;
         float hov = step(uHover.x,vP.x)*step(vP.x,uHover.y)*step(uHover.z,vP.z)*step(vP.z,uHover.w);
-        float far = mix(.45,1., smoothstep(-${(D / 2).toFixed(1)}, ${(D / 2).toFixed(1)}, vP.z));
-        float a = uGlow*(.5+.9*vHeat)*far + sweep*.32 + hov*.6;
-        gl_FragColor = vec4(ramp(vHeat)*(1.+vHeat*1.35+sweep*.25+hov), clamp(a,0.,1.));
+        float far = 1.;  // no depth fade: in an orthographic view it reads as perspective and makes the far side look wider
+        float a = uGlow*(.5+.9*max(vHeat, sel*.8))*far + sweep*.32 + hov*.6;
+        gl_FragColor = vec4(tint(vHeat, sel)*(1.+max(vHeat, sel*.7)*1.35+sweep*.25+hov), clamp(a,0.,1.));
       }`,
   });
   const sheetMat = new THREE.ShaderMaterial({
     uniforms: U, vertexShader: vert, side: THREE.DoubleSide,
     polygonOffset: true, polygonOffsetFactor: 1.5, polygonOffsetUnits: 2,
     fragmentShader: `
-      uniform vec3 uBg, uCool, uWarm, uPeakC; varying float vHeat; varying vec3 vP; ${ramp}
-      void main(){ gl_FragColor = vec4(uBg*1.2 + ramp(vHeat)*vHeat*.14 + uCool*vP.y*.006, 1.); }`,
+      uniform vec3 uBg, uCool, uWarm, uPeakC, uSelC; uniform float uThrY;
+      varying float vHeat; varying float vSel; varying vec3 vP; ${ramp}
+      void main(){
+        float sel = vSel * above(vP.y);
+        vec3 c = uBg*1.2 + tint(vHeat, sel)*max(vHeat, sel*.7)*.14 + uSelC*sel*.22 + uCool*vP.y*.006;
+        // dashed contour where the surface crosses the threshold: ~1.5 px wide, dashes of ~9 px on screen
+        float d = abs(vP.y - uThrY) / max(fwidth(vP.y), 1e-4);
+        float line = 1. - smoothstep(.75, 1.75, d);
+        float dash = step(.45, fract((gl_FragCoord.x + gl_FragCoord.y) / 18.));
+        vec3 lc = mix(vec3(1.), uSelC, .35 + .65*vSel);  // pink on the selected group, near white elsewhere
+        c = mix(c, lc * (1. + vSel), line * dash * (.55 + .45*vSel));
+        gl_FragColor = vec4(c, 1.);
+      }`,
   });
   scene.add(new THREE.Mesh(sheet, sheetMat), new THREE.LineSegments(lines, lineMat));
 
-  // floor axes: front edge = time between posts, right edge = wording difference
-  const ax = [], x0 = X(0), x1 = X(L), z0 = Z(0) + .2, zb = Z(M), xl = x0 - .2;
-  ax.push(x0, 0, z0, x1, 0, z0, xl, 0, Z(0), xl, 0, zb);
-  for (let i = 0; i <= 10; i++) { const x = X(i / 10 * L); ax.push(x, 0, z0, x, 0, z0 + (i % 5 ? .1 : .22)); }
-  for (let i = 0; i <= 5; i++) { const z = Z(i / 5 * M); ax.push(xl, 0, z, xl - (i % 5 ? .1 : .22), 0, z); }
-  const axGeo = new THREE.BufferGeometry(); axGeo.setAttribute('position', new THREE.Float32BufferAttribute(ax, 3));
+  axGeo = new THREE.BufferGeometry(); drawAxes();
   axisMat = new THREE.LineBasicMaterial({color: PAL.cool, transparent: true, opacity: 0});
   scene.add(new THREE.LineSegments(axGeo, axisMat));
 
@@ -198,12 +315,17 @@ function buildScene() {
 const CAMS = {
   home:   {az: -.34, pol: 1.38, r: 10.5, tx: 0,    ty: 1.5, tz: 0,   off: 0},
   scan:   {az: -.46, pol: 1.22, r: 15.2, tx: 0,    ty: 1.7, tz: 0,   off: 1},
-  over:   {az: -.48, pol: 1.04, r: 18.2, tx: -.3,  ty: .55, tz: 0,   off: 1},
+  over:   {az: -Math.PI / 4, pol: Math.acos(1 / Math.sqrt(3)), r: 20.5, tx: -.3, ty: -.5, tz: 0, off: 1},  // isometric
   peak:   {az: -.92, pol: 1.18, r: 10.6, tx: -3.0, ty: 1.2, tz: 1.5, off: 1},
   carpet: {az: -.14, pol: .98,  r: 16.5, tx: .4,   ty: .2,  tz: -.5, off: 1},
   top:    {az: -.18, pol: .42,  r: 17.5, tx: -.25, ty: 0,   tz: 0,   off: 1},
 };
 const cam = {...CAMS.home};
+// isometric view as in CAD: 35.26° above the floor, 45° between the axes; a drag ends on the nearest such corner
+const ISO_POL = Math.acos(1 / Math.sqrt(3)), ISO_AZ = -Math.PI / 4;
+const isoSnap = az => ISO_AZ + Math.round((az - ISO_AZ) / (Math.PI / 2)) * Math.PI / 2;
+const ORTHO_K = Math.tan(17 * Math.PI / 180);
+let camAspect = 1;
 const camTo = (name, duration = 1.25, ease = 'power3.inOut') =>
   gsap.to(cam, {...CAMS[name], duration: reduced ? 0 : duration, ease, overwrite: true});
 let dragging = false;
@@ -212,38 +334,55 @@ function resize() {
   if (!ok) return;
   const w = stage.clientWidth, h = stage.clientHeight;
   renderer.setSize(w, h, false); composer.setSize(w, h);
-  camera.aspect = w / h;
+  camAspect = w / h;
 }
 function frame(t) {
   requestAnimationFrame(frame);
   const w = stage.clientWidth, h = stage.clientHeight, wide = w > 860;
   U.uTime.value = reduced ? 0 : t / 1000;
-  const sway = reduced || dragging ? 0 : Math.sin(t / 5200) * .045;
-  const az = cam.az + sway, sp = Math.sin(cam.pol);
-  const r = cam.r * (wide ? 1 : Math.min(2.15, Math.max(1, 1.38 / Math.max(.5, camera.aspect))));
+  const az = cam.az, sp = Math.sin(cam.pol);  // no idle sway: the view stays exactly isometric
+  const r = cam.r * (wide ? 1 : Math.min(2.15, Math.max(1, 1.38 / Math.max(.5, camAspect))));
+  // the view height at the target equals that of the old 34 degree lens at distance r, so framings carry over
+  const hh = r * ORTHO_K;
+  camera.left = -hh * camAspect; camera.right = hh * camAspect; camera.top = hh; camera.bottom = -hh;
   camera.position.set(cam.tx + r * sp * Math.sin(az), cam.ty + r * Math.cos(cam.pol), cam.tz + r * sp * Math.cos(az));
   camera.lookAt(cam.tx, cam.ty, cam.tz);
   if (wide) camera.setViewOffset(w, h, 0, -h * .055 * cam.off, w, h);
   else camera.setViewOffset(w, h, 0, -h * .02 * cam.off, w, h);
   camera.updateProjectionMatrix(); camera.updateMatrixWorld();
+  faceAxes();
   composer.render();
   placeAxes(w, h);
 }
 
-/* axis labels live in the DOM, projected from the floor */
+/* axis labels live in the DOM, projected from the floor; positions follow the edges the axes sit on */
+const side = sx => sx < 0 ? 'r' : 'l';
 const AXES = [
-  {t: '0s', p: [X(0), 0, Z(0) + .7], a: 'c'},
-  {t: 'Time between posts', p: [X(L / 2), 0, Z(0) + 1.05], a: 'c', title: 1},
-  {t: '10m', p: [X(L), 0, Z(0) + .7], a: 'c'},
-  {t: 'same meaning', p: [X(0) - .75, 0, Z(0)], a: 'r'},
-  {t: 'Wording gap', p: [X(0) - 1, 0, Z(M / 2)], a: 'r', title: 1},
-  {t: 'unrelated', p: [X(0) - .75, 0, Z(M)], a: 'r'},
-].map(d => { const el = document.createElement('span'); el.textContent = d.t; if (d.title) el.className = 't'; $('axes').append(el); return {...d, el, v: new THREE.Vector3()}; });
+  {t: 'Time before now, minutes', p: (sx, sz) => [X(L / 2), 0, timeZ(sz) + sz * 1.15], a: () => 'c', title: 1},
+  {t: 'Meaning gap', p: (sx, sz) => [gapX(sx) + sx * 1.35, 0, Z(M / 2)], a: side, title: 1},
+  // tick labels: the origin shows the UTC time on screen (filled by loadMap), then −2 min, −4 min, ... −10 min
+  ...Array.from({length: L / LABEL_EVERY + 1}, (_, k) => ({t: k ? `−${k * LABEL_EVERY * BIN_MIN} min` : 'now UTC',
+    p: (sx, sz) => [X(k * LABEL_EVERY), 0, timeZ(sz) + sz * .4], a: () => 'c', k: 1})),
+  // meaning gap 0..1: 0 = same meaning, 1 = unrelated
+  ...[0, .2, .4, .6, .8, 1].map(g => ({t: g === 0 ? 'same meaning' : g === 1 ? 'unrelated' : String(g),
+    p: (sx, sz) => [gapX(sx) + sx * .35, 0, Z(g * M)], a: side, k: 1})),
+  // height: dB above the mean level of all pairs on screen (texts set by setField)
+  ...HEIGHT_TICKS.map(g => ({t: '', hk: g, p: (sx, sz) => [gapX(sx) + sx * .3, g * PEAK, timeZ(-sz)], a: side, k: 1})),
+  {t: 'dB above the mean level', p: (sx, sz) => [gapX(sx), PEAK + .45, timeZ(-sz)], a: () => 'c', title: 1},
+  {t: '', thr: 1, p: (sx, sz) => [gapX(sx) - sx * .3, S.thrY ?? 0, timeZ(-sz)], a: sx => side(-sx)},
+].map(d => { const el = document.createElement('span'); el.textContent = d.t; if (d.title) el.className = 't'; if (d.k) el.className = 'k'; if (d.thr) el.className = 'thr'; $('axes').append(el); return {...d, el, v: new THREE.Vector3()}; });
+function setHeightLabels(k) {
+  thrLabel ??= AXES.find(d => d.thr);
+  for (const d of AXES) if (d.hk != null) {
+    const db = d.hk * PEAK / k;
+    d.el.textContent = `${Math.abs(db - Math.round(db)) < .05 ? Math.round(db) : db.toFixed(1)} dB`;
+  }
+}
 function placeAxes(w, h) {
   for (const d of AXES) {
-    d.v.set(...d.p).project(camera);
-    const x = (d.v.x * .5 + .5) * w, y = (-d.v.y * .5 + .5) * h;
-    d.el.style.transform = `translate(${x.toFixed(1)}px,${y.toFixed(1)}px) translate(${d.a === 'c' ? '-50%' : d.a === 'r' ? '-100%' : '0'},-50%)`;
+    d.v.set(...d.p(axSide.x, axSide.z)).project(camera);
+    const x = (d.v.x * .5 + .5) * w, y = (-d.v.y * .5 + .5) * h, a = d.a(axSide.x);
+    d.el.style.transform = `translate(${x.toFixed(1)}px,${y.toFixed(1)}px) translate(${a === 'c' ? '-50%' : a === 'r' ? '-100%' : '0'},-50%)`;
   }
 }
 
@@ -252,31 +391,35 @@ const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), tip = $('tip');
 const heightAt = (x, z) => {
   const i = Math.round((x + W / 2) / W * (NX - 1)), j = Math.round((D / 2 - z) / D * (NZ - 1));
   if (i < 0 || j < 0 || i >= NX || j >= NZ) return -1;
-  return field.C[j * NX + i] * U.uCarpet.value + field.P[j * NX + i] * U.uPeak.value;
+  return field.C[j * NX + i] * U.uCarpet.value + (field.P[j * NX + i] + field.O[j * NX + i]) * U.uPeak.value;
 };
 const fmtLag = s => s < 60 ? `${s}s` : `${s / 60}m`.replace('.5', '½');
 function hover(e) {
-  const amb = shown()?.ambiguity;
-  if (root.dataset.stage !== 'result' || dragging || !amb) return hideTip();
+  const y = layers(shown());
+  if (root.dataset.stage !== 'result' || dragging || !y) return hideTip();
   const b = canvas.getBoundingClientRect();
   ndc.set((e.clientX - b.left) / b.width * 2 - 1, -((e.clientY - b.top) / b.height) * 2 + 1);
   ray.setFromCamera(ndc, camera);
   const o = ray.ray.origin, d = ray.ray.direction; let hit = null;
-  for (let s = 2; s < 40; s += .06) {
+  for (let s = 0; s < 70; s += .06) {  // orthographic: the ray starts at the near plane, up to ~45 from the scene
     const x = o.x + d.x * s, y = o.y + d.y * s, z = o.z + d.z * s, h = heightAt(x, z);
     if (h >= 0 && y <= h + .02) { hit = [x, z]; break; }
     if (y < -.2) break;
   }
   if (!hit) return hideTip();
   const l = Math.floor(binU(hit[0])), m = Math.floor(binV(hit[1]));
-  if (l < 0 || m < 0 || l >= amb.lag_edges_sec.length - 1 || m >= amb.mismatch_edges.length - 1) return hideTip();
-  const mine = amb.counts[m]?.[l] ?? 0, others = amb.background?.[m]?.[l] ?? 0;
+  if (l < 0 || m < 0 || l >= L || m >= M) return hideTip();
   U.uHover.value.set(X(l), X(l + 1), Z(m + 1), Z(m));
-  tip.innerHTML = `<b>${fmtLag(amb.lag_edges_sec[l])}–${fmtLag(amb.lag_edges_sec[l + 1])} lag, ${Math.round(amb.mismatch_edges[m] * 100)}–${Math.round(amb.mismatch_edges[m + 1] * 100)}% wording gap</b>
-    <span>${mine} group, ${others} background</span>`;
-  const x = e.clientX - b.left, y = e.clientY - b.top;
-  tip.style.transform = `translate(${Math.min(Math.max(8, x + 14), b.width - 256)}px,${Math.max(8, y - 66)}px)`;
+  tip.innerHTML = `<b>${l * BIN_MIN}–${(l + 1) * BIN_MIN} min before ${nowText()} UTC, meaning gap ${(m / M).toFixed(2)}–${((m + 1) / M).toFixed(2)}</b>
+    <span>${y.sel[m][l]} this group, ${y.others[m][l]} other groups, ${y.rest[m][l]} background · ${cellDb(y, m, l)}</span>`;
+  const px = e.clientX - b.left, py = e.clientY - b.top;
+  tip.style.transform = `translate(${Math.min(Math.max(8, px + 14), b.width - 256)}px,${Math.max(8, py - 66)}px)`;
   tip.style.opacity = 1;
+}
+// one cell against the mean cell on screen, in dB
+function cellDb(y, m, l) {
+  const all = (sum(y.sel) + sum(y.others) + sum(y.rest)) / (L * M), t = y.sel[m][l] + y.others[m][l] + y.rest[m][l];
+  return !all || !t ? 'no pairs' : `${(10 * Math.log10(t / all)).toFixed(1)} dB vs the mean cell`;
 }
 function hideTip() { tip.style.opacity = 0; if (U) U.uHover.value.set(9, 9, 9, 9); }
 
@@ -292,7 +435,11 @@ canvas.addEventListener('pointerdown', e => {
   gsap.killTweensOf(cam); dragging = true; canvas.classList.add('dragging'); canvas.setPointerCapture(e.pointerId);
   setLegend(null);
 });
-const endDrag = () => { dragging = false; canvas.classList.remove('dragging'); };
+const endDrag = () => {
+  if (!dragging) return;
+  dragging = false; canvas.classList.remove('dragging');
+  gsap.to(cam, {az: isoSnap(cam.az), pol: ISO_POL, duration: reduced ? 0 : .5, ease: 'power2.out', overwrite: true});
+};
 canvas.addEventListener('pointerup', endDrag); canvas.addEventListener('pointercancel', endDrag);
 canvas.addEventListener('pointerleave', hideTip);
 
@@ -324,6 +471,8 @@ function openTopic(topic, {instant = false, findingId = null} = {}) {
   S.topic = topic; S.list = topicFindings(topic);
   S.sel = Math.max(0, S.list.findIndex(f => f.id === findingId));
   S.weak = false; S.pickedWeak = S.list[S.sel]?.verdict !== 'coordinated' && !!findingId;
+  scrollTw?.kill(); scrollTw = null; mapSeq++;
+  S.tmap = null; S.mapAt = null; S.view = 0; loadMap();
   history.replaceState(null, '', `?q=${encodeURIComponent(topic)}`);
   tl?.kill(); selTl?.kill();
   root.dataset.stage = 'scan'; scrollTo(0, 0); hideTip();
@@ -376,7 +525,7 @@ function showResult(instant) {
   gsap.fromTo('#legend', {autoAlpha: 0, y: 8}, {autoAlpha: 1, y: 0, duration: .45 * d, delay: .18 * d, ease: 'power3.out'});
   if (!ok) return;
   gsap.to('#axes', {opacity: 1, duration: .55 * d, delay: .2 * d});
-  gsap.to(axisMat, {opacity: .42, duration: .55 * d, delay: .2 * d});
+  gsap.to(axisMat, {opacity: .9, duration: .55 * d, delay: .2 * d});
 }
 function goHome() {
   liveStop();
@@ -404,9 +553,19 @@ const VERDICT = {
   organic: {title: 'Organic', light: '🟢'},
 };
 
-function groupBtn(g, k) {
-  const on = k === S.sel && !!shown();
-  return `<button type="button" class="${g.verdict === 'coordinated' ? '' : 'weak'}" aria-pressed="${on}" data-g="${k}">${VERDICT[g.verdict].light} ${g.accounts.length} accounts · ${g.verdict}${g.synthetic ? ` · ${SIM}` : ''}</button>`;
+const groupLabel = g => `${VERDICT[g.verdict].light} ${span(g)} UTC · ${g.accounts.length} accounts · ${g.verdict}${g.synthetic ? ` · ${SIM}` : ''}`;
+
+// One drop-down for all groups of the topic: alerts first, weaker groups in their own section.
+function groupPicker(f, alerts, weak) {
+  if (!S.list.length) return '';
+  const opt = k => `<option value="${k}"${f && k === S.sel ? ' selected' : ''}>${esc(groupLabel(S.list[k]))}</option>`;
+  const sect = (label, ks) => ks.length ? `<optgroup label="${label} (${ks.length})">${ks.map(opt).join('')}</optgroup>` : '';
+  return `<label class="group-pick"><span>Group${f ? ` ${S.sel + 1} of ${S.list.length}` : ''}</span>
+    <select id="groupSel" aria-label="Group shown on the map">
+      <option value="now">${S.mapAt ? '⏵ Now · back to the live map' : '⏵ Now · live map'}</option>
+      ${f ? '' : `<option value="" selected disabled>${weak.length} weaker group${weak.length === 1 ? '' : 's'} · not alerts</option>`}
+      ${sect('Alerts', alerts)}${sect('Weaker groups · not alerts', weak)}
+    </select></label>`;
 }
 
 function render() {
@@ -414,9 +573,7 @@ function render() {
   const vt = $('vTitle');
   const idx = S.list.map((g, k) => k);
   const alerts = idx.filter(k => S.list[k].verdict === 'coordinated'), weak = idx.filter(k => S.list[k].verdict !== 'coordinated');
-  $('groups').innerHTML = alerts.map(k => groupBtn(S.list[k], k)).join('') +
-    (weak.length ? `<button type="button" class="weak-toggle" data-weak="1" aria-expanded="${S.weak}">${S.weak ? '−' : '+'} ${weak.length} weaker group${weak.length === 1 ? '' : 's'} · not alerts</button>` : '') +
-    (S.weak ? weak.map(k => groupBtn(S.list[k], k)).join('') : '');
+  $('groups').innerHTML = groupPicker(f, alerts, weak);
   $('legend').style.display = f ? '' : 'none';
   if (!f) {
     vt.dataset.v = 'organic'; vt.textContent = 'Quiet';
@@ -442,9 +599,12 @@ function render() {
       : '🟢 Looks organic.') +
     ` <small>${pfaText()} · ${snr}</small>` +
     ` <a class="how" href="/explain?id=${encodeURIComponent(f.id)}&topic=${encodeURIComponent(f.topic)}&alpha=${S.alpha}">How we got here →</a>`;
-  const pairs = sum(f.ambiguity?.counts);
-  $('lgSpike').textContent = hit ? `${pairs} pairs of this group, close in time and meaning` : `${pairs} pairs of this group`;
-  $('lgCarpet').textContent = `${sum(f.ambiguity?.background)} other pairs in the topic across 10m`;
+  const y = layers(f);
+  $('lgSpike').textContent = !y ? 'Loading the map…' : sum(y.sel) ? `${sum(y.sel)} pairs of posts at ${span(f)} UTC, at most 2 min apart`
+    : `Posted at ${span(f)} UTC: older than the ${L * BIN_MIN} min on the map`;
+  $('lgOthers').textContent = y ? `${sum(y.others)} pairs of the other ${S.list.length - 1} group${S.list.length === 2 ? '' : 's'}` : '';
+  $('lgCarpet').textContent = !y ? '' : S.mapAt ? `${sum(y.rest)} other pairs in the ${L * BIN_MIN} min before ${nowText()} UTC · not live`
+    : `${sum(y.rest)} other pairs in the last ${L * BIN_MIN} min`;
 
   const x = f.explanation;
   $('evSay').innerHTML = (x
@@ -457,6 +617,7 @@ function render() {
   $('evCorr').innerHTML = corrGrid(f);
   $('evDecision').innerHTML = `<h3>Sequential test (SPRT)</h3>${trace(f)}<p>${f.decided_at_item != null
     ? `Crossed the ${f.verdict === 'coordinated' ? 'upper' : 'lower'} threshold at post ${f.decided_at_item + 1}.`
+    : hit ? 'The group these accounts belong to crossed the upper threshold in another wave.'
     : f.note && f.sprt_trace.length && f.sprt_trace.at(-1) >= f.sprt_upper
       ? `Crossed the upper threshold after ${f.sprt_trace.length} posts, but downgraded to watching (news echo).`
       : `Between thresholds after ${f.sprt_trace.length} posts.`}</p>`;
@@ -509,16 +670,57 @@ function trace(f) {
     <circle cx="${x(t.length - 1)}" cy="${y(t.at(-1))}" r="4.5" fill="${hit ? PAL.peak : PAL.cool}"/>` : ''}${dots}</svg>`;
 }
 
+// A group already off the live map (older than its L*BIN_MIN minutes) rewinds the map to the group's time:
+// the wave ends a minute right of the origin. A group still on the live map keeps the map live.
+const REWIND_PAD_MS = 60000;
+function rewindFor(f) {
+  if (!f || Date.parse(f.first_seen) >= Date.now() - L * BIN_MIN * 60000) return null;
+  return new Date(Math.min(Date.parse(f.last_seen) + REWIND_PAD_MS, Date.now())).toISOString();
+}
+// Moves the map so its origin is `at` (null = live now). One map from the server covers both the current
+// origin and the target, and the view scrolls over it, so the time axis slides instead of jumping.
+let scrollTw = null, mapSeq = 0;
+async function setMapAt(at) {
+  if (at === S.mapAt && S.tmap) return;
+  S.mapAt = at; hideTip();
+  const topic = S.topic, asked = S.alpha, seq = ++mapSeq;
+  const target = at ? Date.parse(at) : Date.now(), from = S.tmap ? originMs() : target;
+  const end = Math.max(from, target), live = !at;
+  const minutes = Math.min(1440, Math.ceil(L * BIN_MIN + Math.abs(target - from) / 60000) + 1);
+  let r;
+  try {
+    r = await api(`/api/timemap?topic=${encodeURIComponent(topic)}&minutes=${minutes}` +
+      `${asked === DESIGN_ALPHA ? '' : `&alpha=${asked}`}${live ? '' : `&at=${encodeURIComponent(new Date(end).toISOString())}`}`);
+  } catch (e) { console.warn('timemap', e); return; }
+  if (seq !== mapSeq || S.topic !== topic || S.alpha !== asked) return;
+  scrollTw?.kill();
+  const hadMap = !!S.tmap, endMs = Date.parse(r.now);
+  const vTo = live ? 0 : Math.max(0, Math.round((endMs - target) / BIN_MS)), vFrom = Math.max(0, (endMs - from) / BIN_MS);
+  S.tmap = r;
+  if (!ok || reduced || !hadMap || Math.abs(vTo - vFrom) < .5) { S.view = vTo; showMap(); return; }
+  S.view = vFrom; const kA = scaleOf(sample(shown()));
+  S.view = vTo; const kB = scaleOf(sample(shown()));
+  S.view = vFrom;
+  const t = {p: 0}, dist = Math.abs(vTo - vFrom) / L;  // in screen widths
+  scrollTw = gsap.to(t, {
+    p: 1, duration: Math.min(2.6, .9 + .55 * Math.log2(1 + dist)), ease: 'power2.inOut',
+    onUpdate: () => { S.view = vFrom + (vTo - vFrom) * t.p; setField(shown(), kA + (kB - kA) * t.p); setOrigin(); },
+    onComplete: () => { scrollTw = null; S.view = vTo; showMap(); },
+  });
+}
+function goLive() {
+  setMapAt(null);
+  if (root.dataset.stage === 'result') render();
+}
+
 function select(i, instant) {
-  if (i === S.sel && shown()) return;  // in the Quiet view index 0 is "selected" but not shown: open it
+  if (i === S.sel && shown()) { setMapAt(rewindFor(shown())); return; }  // in the Quiet view index 0 is "selected" but not shown: open it
   S.sel = i; S.pickedWeak = S.list[i]?.verdict !== 'coordinated'; hideTip(); selTl?.kill();
+  setMapAt(rewindFor(shown()));
   const d = reduced || instant ? 0 : 1;
   selTl = gsap.timeline().to('#vTitle,#vText,#vRisk', {autoAlpha: 0, duration: .14 * d}).call(render).to('#vTitle,#vText,#vRisk', {autoAlpha: 1, duration: .26 * d});
   if (!ok) return;
-  gsap.timeline()
-    .to([U.uPeak, U.uCarpet], {value: 0, duration: .25 * d, overwrite: true})
-    .call(() => setField(shown()))
-    .to([U.uPeak, U.uCarpet], {value: 1, duration: .7 * d, ease: 'power2.out'});
+  setField(shown());  // the surface stays as it is: only the accent colour moves to the picked group
   setLegend(null); camTo('over', 1.3 * d);
 }
 function setLegend(btn) {
@@ -563,12 +765,36 @@ async function refresh() {
     if (sig(next) !== sig(S.list)) {
       const at = next.findIndex(f => f.id === cur);
       S.list = next; S.sel = Math.max(0, at);
-      if (at < 0) S.pickedWeak = false;                    // the opened group is gone: back to the alert (or Quiet)
+      if (at < 0) { S.pickedWeak = false; S.mapAt = null; }  // the opened group is gone: back to the alert (or Quiet), live
       if (ok) setField(shown());
       render();
-    }
+      loadMap();
+    } else if (S.tmap && (S.list.some(f => !S.tmap.groups[f.id]) || (!S.mapAt && Date.now() - Date.parse(S.tmap.now) > MAP_MAX_AGE_MS))) loadMap();  // keep "now" current; a rewound map stays put
   }
   return true;
+}
+
+// time x meaning map of the open topic, live or rewound; the scene shows a flat floor until it arrives
+const setOrigin = () => { AXES[2].el.textContent = `${nowText()} UTC`; };  // the origin label = the moment on screen
+function showMap() {
+  setOrigin();
+  if (ok) setField(shown());
+  if (root.dataset.stage === 'result') render();
+}
+// periodic reload of the current map: live = the last L bins, rewound = the same map again (new groups)
+async function loadMap() {
+  const topic = S.topic, asked = S.alpha, seq = mapSeq, rewound = S.mapAt && S.tmap;
+  if (!topic || S.mapBusy || scrollTw) return;
+  S.mapBusy = true;
+  try {
+    const r = await api(`/api/timemap?topic=${encodeURIComponent(topic)}` +
+      `&minutes=${rewound ? S.tmap.n_bins * BIN_MIN : L * BIN_MIN}${asked === DESIGN_ALPHA ? '' : `&alpha=${asked}`}` +
+      `${rewound ? `&at=${encodeURIComponent(S.tmap.now)}` : ''}`);
+    if (seq !== mapSeq || scrollTw || S.topic !== topic || S.alpha !== asked || !!S.mapAt !== !!rewound) return;
+    if (!rewound) S.view = 0;
+    S.tmap = r; showMap();
+  } catch (e) { console.warn('timemap', e); }
+  finally { S.mapBusy = false; }
 }
 
 /* ------------------------------------------------------------------ live scan (T12d) */
@@ -661,9 +887,9 @@ $('clear').addEventListener('click', () => {
 $('brandBtn').addEventListener('click', () => { if (root.dataset.stage !== 'home') goHome(); });
 $('resetCam').addEventListener('click', () => { setLegend(null); camTo('over', 1.0); });
 addEventListener('keydown', e => { if (e.key === 'Escape' && root.dataset.stage !== 'home') goHome(); });
-$('groups').addEventListener('click', e => {
-  const b = e.target.closest('button'); if (!b) return;
-  if (b.dataset.weak) { S.weak = !S.weak; render(); } else select(+b.dataset.g);
+$('groups').addEventListener('change', e => {
+  if (e.target.id !== 'groupSel' || e.target.value === '') return;
+  if (e.target.value === 'now') goLive(); else select(+e.target.value);
 });
 $('legend').addEventListener('click', e => {
   const b = e.target.closest('.lg-btn'); if (!b || !ok) return;

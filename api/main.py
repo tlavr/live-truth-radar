@@ -23,6 +23,9 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from contracts.models import AlertsResponse, Finding, Item, MetricsReport
 from detect import operating
+from detect.config import DEFAULT as DEFAULT_CFG
+from detect.pipeline import drop_expired_synthetic
+from detect.timemap import TimeMap, time_map
 from ingest import radar, store
 
 log = logging.getLogger("ltr.api")
@@ -138,6 +141,37 @@ class InjectRequest(BaseModel):
 class InjectResponse(BaseModel):
     campaign_id: str
     n_items: int
+
+
+@app.get("/api/timemap", response_model=TimeMap)
+def timemap(
+    topic: str = Query(..., min_length=1, max_length=64),
+    alpha: float | None = Query(None, gt=0, lt=1),
+    minutes: float | None = Query(None, gt=0, le=1440),
+    at: datetime | None = Query(None, description="draw the map as of this moment (UTC) instead of now"),
+) -> TimeMap:
+    """Experiment: time x meaning map of the topic window with one layer per stored finding (detect/timemap.py).
+
+    `at` rewinds the map to an older moment of the window (a group that is already off the live map):
+    the map ends at `at` and holds only the posts published by then.
+    """
+    now = datetime.now(timezone.utc)
+    hours = float(os.environ.get("DETECT_WINDOW_HOURS") or DEFAULT_CFG.window_hours)
+    end = now
+    if at is not None:
+        end = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+        if end > now + timedelta(seconds=5) or end < now - timedelta(hours=hours):
+            raise HTTPException(422, "at must lie inside the detector window")
+        end = min(end, now)
+    with store.connect() as conn:
+        posts = store.window_items(conn, topic, hours, now)
+        if alpha is None or round(alpha, 6) == operating.DEFAULT_ALPHA:
+            findings = store.load_findings(conn, topic)
+        else:
+            findings = store.load_findings_alpha(conn, round(alpha, 6), topic)
+    posts = drop_expired_synthetic(posts, now, DEFAULT_CFG.synthetic_ttl_sec)  # what the detector saw
+    return time_map(topic, posts, {f.id: f.item_ids for f in findings}, now=end, window_hours=hours,
+                    span_sec=minutes * 60 if minutes else None)
 
 
 @app.post("/api/inject", response_model=InjectResponse)
