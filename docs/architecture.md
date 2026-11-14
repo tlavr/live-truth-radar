@@ -22,8 +22,8 @@
 ```
           ┌──────────────── Hostinger VPS (Docker Compose, публичный HTTPS-домен) ───────────┐
  ВЕБ      │                                                                                   │
- новости ─┼─► worker: поллинг Context.dev каждые N мин ──► db: Postgres            │
- соцсети  │   (news search + social scrape)                  (items, actors, inject_req.,    │
+ новости ─┼─► worker: поллинг Context.dev и Bluesky каждые N мин ──► db: Postgres   │
+ соцсети  │   (news search) + Bluesky searchPosts            (items, actors, inject_req.,    │
           │                                                   findings, labels)              │
           │   worker: эмбеддинги Gemini → отбеливание → корреляция аккаунтов                │
           │           → CFAR → SPRT → вердикт → объяснение Gemini (приём + цитата)           │
@@ -37,7 +37,7 @@
 ## Модули
 | # | Модуль | Уровень | Кто | Папка | Что делает | Тулы |
 |---|---|---|---|---|---|---|
-| 0 | **Live Ingest** | MUST | P1 | `ingest/` | Каждые 2–5 мин тянет свежие статьи и посты по 3–5 темам, сохраняет текст, автора, время, URL как `Item` | Context.dev news search + social scrape |
+| 0 | **Live Ingest** | MUST | P1 | `ingest/` | Каждые 2–5 мин тянет свежие статьи и посты по 3–5 темам, сохраняет текст, автора, время, URL как `Item` (T6b: у каждого источника свой клиент и свой `since`; `BLUESKY_ENABLED=0` выключает Bluesky) | Context.dev news search + Bluesky `searchPosts` (без логина; Reddit через Context.dev — за флагом, по умолчанию выкл) |
 | 1 | **Swarm Detector** | MUST | P2 | `detect/` | Эмбеддинги + луч на тему (бимформинг) + отбеливание (режекция клаттера темы) → коррелятор пар аккаунтов «время × смысл» с лагом → CFAR по парам → рой ≥ 3, когерентное накопление, SNR в дБ → SPRT (решение) + проверка «эхо новости» → `Finding` | Gemini embeddings + numpy/scipy (возможно, Codex) |
 | 2 | **Explain / Technique** | MUST | P1 | `ingest/explain.py` (в worker) | Для `Finding`: приём манипуляции + цитата-доказательство + уверенность + объяснение простыми словами → `Explanation` | Gemini structured output; AI Router запасной |
 | S | **Synthetic Swarm** | MUST | P2 | `synth/` | ~30 вариаций для нескольких месседжей (часть отложена для eval), фейковые аккаунты с лагами, `synthetic = true`, `campaign_id` | Gemini |
@@ -105,7 +105,7 @@ P2 работает офлайн на `fixtures/` (без сети и БД), P1 
 ## Главные риски
 | Риск | Что делаем |
 |---|---|
-| Social scrape Context.dev не отдаёт автора или время | **Проверить первым делом (T2, P1, Пт 23:15).** Запасной вариант: news search + синтетический рой; авторы = домены/авторы статей |
+| Social scrape Context.dev не отдаёт автора или время | Подтвердилось в T2 (reddit-search падает с WEBSITE_ACCESS_ERROR). Решение T6b: соцсеть = Bluesky `searchPosts` (автор = хэндл, время = `createdAt`/`indexedAt`). Без логина `cursor` даёт 403, листаем по `until`. Запасной вариант: `BLUESKY_ENABLED=0` → только новости + синтетический рой, авторы = домены |
 | Мало реальных роёв за выходные | Инжекция тестовой цели: это и метрика, и демо |
 | Лимиты Gemini | Hostinger AI Router как запасной LLM; эмбеддинги кэшируем |
 | Деплой ломается в последний момент | Деплой скелета к Сб 03:00 (T5), smoke после каждого деплоя, фича-фриз кода (F) в Вс 02:00 |

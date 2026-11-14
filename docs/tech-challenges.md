@@ -36,7 +36,7 @@
 | Эндпоинт | Что делает у нас | Уровень |
 |---|---|---|
 | **News search** | Поток свежих статей по 3–5 темам (поллинг каждые 2–5 мин) | MUST |
-| **Social scrape** (TikTok, Instagram) | Посты + автор + время → сигнал аккаунта «время × смысл» для поиска роя | MUST (**сначала проверить, что автор и время есть**) |
+| **Social scrape** (TikTok, Instagram, Reddit) | Посты + автор + время → сигнал аккаунта «время × смысл» для поиска роя | Не работает (T2: Reddit — `WEBSITE_ACCESS_ERROR`, TikTok/Instagram не ищут по теме). Соцсеть с T6b — Bluesky `searchPosts` (не Context.dev), Reddit-код за флагом `REDDIT_ENABLED` |
 | **Brand + company enrichment** | Кто стоит за доменом, чужое ли лого (Source Trust) → «комбинация эндпоинтов» для судей | SHOULD (S1, P1) |
 | Scrape полного текста, Monitors + webhooks, Research, Structured extraction | Хватает текста из поиска / заменены поллингом / Fact-check вырезан | CUT |
 

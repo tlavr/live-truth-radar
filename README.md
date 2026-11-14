@@ -6,7 +6,7 @@
 
 ## Challenges
 - **Main:** Decode the Noise (Hostinger)
-- **Tech:** Context.dev (core: live news search + social scrape), Gemini (embeddings, explanations, synthetic test campaigns); OpenAI Codex not used for now (code is written with Claude); maybe later, only if we genuinely build with it
+- **Tech:** Context.dev (core: live news search), Bluesky public search (live social posts), Gemini (embeddings, explanations, synthetic test campaigns); OpenAI Codex not used for now (code is written with Claude); maybe later, only if we genuinely build with it
 
 ## The idea
 Coordinated propaganda behaves like a spread-spectrum (CDMA) signal: each bot account is too weak to flag alone, but together they carry one "code". Live Swarm Radar applies radar and signal-processing math to the live web:
@@ -18,7 +18,7 @@ Coordinated propaganda behaves like a spread-spectrum (CDMA) signal: each bot ac
 - **SPRT** (sequential likelihood-ratio test) decides *coordinated / organic / keep watching*.
 - Every verdict is explained in plain language with evidence and sources.
 
-Receiver chain: `live web (Context.dev) + topic beam → embeddings, clutter whitening → pair correlator (time × meaning) → CFAR + SPRT → explained verdict`
+Receiver chain: `live web (Context.dev news + Bluesky posts) + topic beam → embeddings, clutter whitening → pair correlator (time × meaning) → CFAR + SPRT → explained verdict`
 
 ## Repository layout
 ```

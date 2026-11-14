@@ -159,13 +159,19 @@ def _future(ts: datetime, now: datetime | None) -> bool:
     return ts > (now or datetime.now(timezone.utc)) + FUTURE_SKEW
 
 
-# Reddit names may contain "-"; "-", "." and "+" before "@" mean an e-mail address (left untouched)
-_HANDLE_RE = re.compile(r"(?<![\w.+-])@[\w.-]*\w|\bu/[\w-]+|\breddit\.com/user/[\w-]+")
+# Reddit names may contain "-"; "-", "." and "+" before "@" mean an e-mail address (left untouched).
+# Bluesky profile links carry the handle or the DID; a bare DID ("did:plc:...", also inside at:// URIs) names
+# an account too; @alice.bsky.social is a plain @handle. Only the Bluesky branches are case-insensitive
+# ("Bsky.app/Profile/..." is the same link); "u/" stays lower-case so news text like "U/S dollar" is left alone.
+_HANDLE_RE = re.compile(
+    r"(?<![\w.+-])@[\w.-]*\w|\bu/[\w-]+|\breddit\.com/user/[\w-]+"
+    r"|(?i:\bbsky\.app/profile/[\w.:-]*\w|\bdid:(?:plc|web):[\w.:-]*\w)"
+)
 
 
 def mask_handles(text: str) -> str:
-    """Replace @handles, u/names and reddit.com/user/ links in free text with "@***"
-    (real handles never go into git)."""
+    """Replace @handles, u/names, reddit.com/user/ and bsky.app/profile/ links in free text with "@***"
+    (real handles never go into git or out of the public API)."""
     return _HANDLE_RE.sub("@***", text)
 
 
@@ -271,11 +277,12 @@ def _has_word(low: str, stem: str) -> bool:
     return re.search(r"\b" + re.escape(stem), low) is not None
 
 
-def on_topic(text: str, slug: str) -> bool:
+def on_topic(text: str, slug: str, *, whole: bool = False) -> bool:
     """Natural-language news search fills its result cap with unrelated recent news when few articles match,
-    so the worker keeps only items that pass the topic's keyword gate (see TOPIC_SPECS). Only the headline
-    (first paragraph of Item.text) is checked: descriptions often carry "related stories" sidebars."""
-    low = text.split("\n\n", 1)[0].lower()
+    so the worker keeps only items that pass the topic's keyword gate (see TOPIC_SPECS). By default only the
+    headline (first paragraph of Item.text) is checked: descriptions often carry "related stories" sidebars.
+    whole=True checks the full text (social posts have no headline)."""
+    low = (text if whole else text.split("\n\n", 1)[0]).lower()
     groups = _TOPIC_RES.get(slug)
     if groups:
         return all(g.search(low) for g in groups)
