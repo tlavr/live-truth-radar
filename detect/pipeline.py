@@ -81,6 +81,7 @@ def _detect_topic(topic: str, items: list[Item], E: np.ndarray, now: datetime, c
 
     echo_all = sprt.echo(sig, None, cfg)
     is_news = np.array([it.source == "context_news" for it in items])
+    has_social = any(it.source == "context_social" for it in items)  # False: [ALT] news-only stream
     texts = [it.text for it in items]
     pair_bins = _pair_bins(sig, cfg)
 
@@ -100,7 +101,7 @@ def _detect_topic(topic: str, items: list[Item], E: np.ndarray, now: datetime, c
         mu0, sigma = sprt.background(echo_all[~censored], cfg)
         x = sprt.echo(sig, members, cfg)[posts]
         res = sprt.run(x, mu0, sigma, alpha=cfg.alpha, beta=cfg.beta, cfg=cfg)
-        note = news_echo_note(sig, is_news, texts, posts, cfg)
+        note = news_echo_note(sig, is_news, texts, posts, cfg, has_social=has_social)
         verdict, decided = res.verdict, res.decided_at
         if note is not None and verdict == "coordinated":
             verdict, decided = "watching", None
