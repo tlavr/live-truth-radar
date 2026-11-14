@@ -71,6 +71,12 @@ class AnalyzerConfig:
     news_echo_enabled: bool = True
     # News reprint (3.8): a group made only of context_news articles is capped at "watching".
     news_reprint_enabled: bool = True
+    # Viral echo (3.8, T6b): >= viral_echo_min_accounts outside accounts of the live stream posted the group's
+    # message (cos > viral_echo_cos) within viral_echo_max_age_sec before its first post -> "watching".
+    viral_echo_cos: float = 0.8
+    viral_echo_min_accounts: int = 3
+    viral_echo_max_age_sec: float = 6 * 3600.0
+    viral_echo_enabled: bool = True
 
     def for_embedder(self, backend: str) -> AnalyzerConfig:
         """Same config with the beam thresholds of the embedder that produced the vectors."""
