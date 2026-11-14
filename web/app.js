@@ -121,6 +121,10 @@ const X = u => -W / 2 + (u - U0) / (U1 - U0) * W, Z = v => D / 2 - (v - V0) / (V
 const binU = x => (x + W / 2) / W * (U1 - U0) + U0, binV = z => (D / 2 - z) / D * (V1 - V0) + V0;
 const canvas = $('scene'), stage = $('stage');
 let renderer, composer, bloom, camera, scene, U, axisMat, axGeo, geoms = [], ok = true;
+// Safari (WebKit) on a retina Mac kills the page when the GPU process runs out of memory: a 4x multisampled
+// half-float target plus the bloom chain at DPR 2 (3024x1800) is several hundred MB. There: DPR <= 1.25, 2x MSAA.
+const SAFARI = /^((?!chrome|chromium|crios|fxios|edg|android).)*safari/i.test(navigator.userAgent);
+const MAX_DPR = SAFARI ? 1.25 : 2, MSAA = SAFARI ? 2 : 4;
 const field = {P: new Float32Array(NX * NZ), O: new Float32Array(NX * NZ), C: new Float32Array(NX * NZ)};
 
 function smooth(grid, off = 0) {
@@ -257,8 +261,8 @@ function faceAxes() {
 }
 
 function buildScene() {
-  renderer = new THREE.WebGLRenderer({canvas, antialias: true, powerPreference: 'high-performance'});
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer = new THREE.WebGLRenderer({canvas, antialias: !SAFARI, powerPreference: 'high-performance'});  // the composer target is multisampled anyway
+  renderer.setPixelRatio(Math.min(devicePixelRatio, MAX_DPR));
   scene = new THREE.Scene();
   scene.background = new THREE.Color(PAL.bg);
   camera = new THREE.OrthographicCamera(-1, 1, 1, -1, .1, 100);  // parallel projection: proportions hold everywhere
@@ -389,7 +393,7 @@ function buildScene() {
 
   // the post-processing chain renders off screen, where the canvas's own antialiasing does not apply: without
   // multisampling there the 1 px lines break into stair steps ("torn fabric") wherever they run at a shallow angle
-  composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, {samples: 4, type: THREE.HalfFloatType}));
+  composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, {samples: MSAA, type: THREE.HalfFloatType}));
   composer.addPass(new RenderPass(scene, camera));
   bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), .38, .6, .18);
   composer.addPass(bloom);
