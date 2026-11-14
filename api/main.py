@@ -429,6 +429,12 @@ def metrics_page() -> FileResponse:
     return FileResponse(WEB_DIR / "metrics.html")
 
 
+@app.get("/how", include_in_schema=False)
+def how_page() -> FileResponse:
+    """How the radar works: the detector's steps in plain words (linked from /metrics)."""
+    return FileResponse(WEB_DIR / "how.html")
+
+
 @app.get("/explain", include_in_schema=False)
 def explain_page() -> FileResponse:
     """T12b: step-by-step "How we got here" page for one alert (?id=&topic=&alpha=)."""

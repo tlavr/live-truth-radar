@@ -1,0 +1,24 @@
+/* The detector's steps (steps.js): shared by the dashboard's "How we got here" window and the /explain page.
+   Uses the page's colour tokens (--surface, --hairline, --cool, --peak, --warm, --muted, --tertiary, --ink, --bg). */
+.step{padding:18px;border-radius:14px;background:var(--surface);border:1px solid var(--hairline)}
+.sn{display:block;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--cool)}
+.step.final .sn{color:var(--peak)}
+.step h2{margin:2px 0 4px;font-size:16.5px;font-weight:600;letter-spacing:-.01em}
+.step .say{margin:0 0 14px;font-size:15px;line-height:1.45;color:var(--ink)}
+.step .hint{margin:10px 0 0;color:var(--muted);font-size:13px;line-height:1.45;max-width:64ch}
+.step svg{display:block;width:100%;height:auto;max-width:640px}
+.corr{display:grid;gap:3px;max-width:240px;margin:0 auto}
+.pairpick{text-align:center}
+.corr div{aspect-ratio:1;border-radius:3px;background:rgba(183,240,99,var(--v));cursor:pointer}
+.corr div.self{background:rgba(255,255,255,.06);cursor:default}
+.pairpick{min-height:1.4em;margin:8px 0 0;font-size:13px;color:var(--ink);font-variant-numeric:tabular-nums}
+.bars{display:grid;gap:8px;max-width:560px}
+.bars div{display:grid;grid-template-columns:110px minmax(0,1fr) 70px;gap:10px;align-items:center;font-size:13px;color:var(--muted)}
+.bars i{display:block;height:12px;border-radius:6px;background:var(--warm);min-width:2px}
+.bars span:last-child{text-align:right;color:var(--ink);font-variant-numeric:tabular-nums}
+.step .note{padding:8px 12px;border-left:2px solid var(--peak);background:rgba(255,224,102,.06);font-size:14px}
+.step blockquote{margin:10px 0;padding-left:12px;border-left:2px solid var(--hairline);color:var(--ink)}
+.step .empty{color:var(--tertiary)}
+.step code{font-size:.92em}
+@media (max-width:560px){.step{padding:14px}.bars div{grid-template-columns:80px minmax(0,1fr) 62px}}
+.vmark{font-weight:600}

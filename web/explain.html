@@ -8,7 +8,7 @@
 <style>
 :root{
   --bg:#0C100E;--surface:#161D19;--ink:#F2F6F3;--muted:rgba(218,232,222,.64);--tertiary:rgba(218,232,222,.38);
-  --hairline:rgba(218,240,224,.12);--cool:#63CF97;--salat:#8EE87B;--warm:#B7F063;--peak:#FFE066;--alarm:#FF7A6B;
+  --hairline:rgba(218,240,224,.12);--cool:#63CF97;--salat:#8EE87B;--warm:#B7F063;--peak:#FFE066;
   --font:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",system-ui,sans-serif;--gutter:clamp(16px,3vw,36px);
 }
 *{box-sizing:border-box}
@@ -20,41 +20,29 @@ header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
 header b{font-weight:600;letter-spacing:-.015em}
 header a.back{font-size:13px}
 main{max-width:880px;margin:0 auto;display:grid;gap:18px}
+#steps{display:grid;gap:14px}
 h1{margin:0;font-size:clamp(28px,4vw,42px);letter-spacing:-.035em;line-height:1.08}
 .sub{margin:8px 0 0;color:var(--muted);max-width:68ch}
-.step{display:grid;grid-template-columns:36px minmax(0,1fr);gap:14px;padding:18px;border-radius:14px;background:var(--surface);border:1px solid var(--hairline)}
-.num{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;font-weight:600;font-size:14px;
-  color:var(--bg);background:var(--cool);font-variant-numeric:tabular-nums}
-.step.final .num{background:var(--peak)}
-.step h2{margin:4px 0 4px;font-size:16px;font-weight:600;letter-spacing:-.01em}
-.step .say{margin:0 0 12px;font-size:15px}
-.step .hint{margin:10px 0 0;color:var(--muted);font-size:13px;max-width:70ch}
-.step svg{display:block;width:100%;height:auto;max-width:640px}
-.corr{display:grid;gap:2px;max-width:420px}
-.corr div{aspect-ratio:1;border-radius:3px;background:rgba(183,240,99,var(--v));cursor:pointer}
-.corr div.self{background:rgba(255,255,255,.06);cursor:default}
-.pick{min-height:1.4em;margin:8px 0 0;font-size:13px;color:var(--ink);font-variant-numeric:tabular-nums}
-.bars{display:grid;gap:8px;max-width:560px}
-.bars div{display:grid;grid-template-columns:110px minmax(0,1fr) 70px;gap:10px;align-items:center;font-size:13px;color:var(--muted)}
-.bars i{display:block;height:12px;border-radius:6px;background:var(--warm);min-width:2px}
-.bars span:last-child{text-align:right;color:var(--ink);font-variant-numeric:tabular-nums}
-.note{padding:8px 12px;border-left:2px solid var(--peak);background:rgba(255,224,102,.06);font-size:14px}
-.verdict{display:inline-block;padding:3px 10px;border-radius:999px;font-weight:600;font-size:14px}
-.verdict[data-v=coordinated]{background:rgba(255,122,107,.16);color:var(--alarm)}
-.verdict[data-v=watching]{background:rgba(255,224,102,.14);color:var(--peak)}
-.verdict[data-v=organic]{background:rgba(99,207,151,.14);color:var(--cool)}
-blockquote{margin:10px 0;padding-left:12px;border-left:2px solid var(--hairline);color:var(--ink)}
-.empty{color:var(--tertiary)}
-code{font-size:.92em}
-@media (max-width:560px){.step{grid-template-columns:28px minmax(0,1fr);gap:10px;padding:14px}.num{width:28px;height:28px;font-size:13px}.bars div{grid-template-columns:80px minmax(0,1fr) 62px}}
+/* the dashboard's verdict marks: one accent, filled = coordinated, outlined = possible, none = nothing unusual */
+.dot{display:inline-block;width:9px;height:9px;margin-right:7px;border-radius:50%;border:1.5px solid var(--tertiary)}
+.dot[data-v=watching]{border-color:var(--peak)}
+.dot[data-v=coordinated]{border-color:var(--peak);background:var(--peak)}
+h1[data-v=coordinated]{color:var(--peak)}
+h1[data-v=organic]{color:var(--muted)}
+.where{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;margin:0 0 8px;font-size:13px;color:var(--muted)}
+.where select{max-width:100%;padding:3px 26px 3px 10px;border-radius:999px;border:1px solid var(--hairline);background:var(--surface);color:var(--ink);font:inherit;appearance:none;-webkit-appearance:none;
+  background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 14px) 50%,calc(100% - 9px) 50%;background-size:5px 5px;background-repeat:no-repeat}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 </style>
+<link rel="stylesheet" href="/steps.css">
 </head>
 <body>
-<header><a href="/"><b>Live Swarm Radar</b></a><a class="back" id="back" href="/">← Back to the radar</a></header>
+<header><a href="/"><b>Live Swarm Radar</b></a><a class="back" id="back" href="/">← Back to the topic</a></header>
 <main id="main" aria-live="polite">
   <section>
-    <h1>How we got here</h1>
-    <p class="sub" id="intro">Loading the alert…</p>
+    <p class="where" id="where">How we got here</p>
+    <h1 id="title">How we got here</h1>
+    <p class="sub" id="intro">Loading…</p>
   </section>
   <div id="steps"></div>
 </main>

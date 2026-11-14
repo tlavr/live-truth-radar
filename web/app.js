@@ -1,14 +1,22 @@
 // Live Swarm Radar dashboard (T12). Scene and motion from the frontend reference
 // (docs/frontend-reference on p2/frontend-reference); data from /api/* (T8).
+// From the T12e experiment (branch ui): the group header (tabs, Why, What they say, How we got here), the
+// "When" timeline, the cell card and the sensitivity menu.
 import * as THREE from 'three';
 import {EffectComposer} from 'three/addons/postprocessing/EffectComposer.js';
 import {RenderPass} from 'three/addons/postprocessing/RenderPass.js';
 import {UnrealBloomPass} from 'three/addons/postprocessing/UnrealBloomPass.js';
 import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
 import {topicLabel, platformLabel} from './labels.js';
+import {heldByNews, reasons} from './chain.js';
+import {points} from './says.js';
+import {merged} from './when.js';
+import {HELD, LABEL, LETTER, ordered, verdictLabel} from './groups.js';
+import {createStrip} from './strip.js';
+import {stepsHTML, wireSteps} from './steps.js';
 
 const POLL_MS = 15000;
-const LIVE_MS = 2500;              // T12d: Check starts a live scan of the topic; frames + findings every 2.5 s
+const LIVE_MS = 10000;             // T12d: Check starts a live scan of the topic; frames + findings every 10 s (the worker scans every 10 s)
 const WINDOW_HOURS = 6;            // DETECT_WINDOW_HOURS on the worker
 const DESIGN_ALPHA = 0.02;         // SPRT alpha of the findings table (T12c default point)
 const RANK = {coordinated: 0, watching: 1, organic: 2};
@@ -40,6 +48,8 @@ async function api(path, opts) {
 const S = {
   topics: [], findings: [], lastPoll: null, metrics: null, points: null, served: null, alpha: DESIGN_ALPHA,
   topic: null, list: [], sel: 0, items: new Map(),
+  pop: null,                       // the open header panel ('why')
+  pick: null,                      // the picked cell of the map {l, m} (its card is #pick), or null
   live: null,  // T12d live scan: {topic, session, since, frame, timer, busy, error}
   pickedWeak: false,               // T12d: a group below the alert threshold is shown only if the user picked it
   tmap: null, mapBusy: false,      // time x meaning map of the topic (/api/timemap), one layer per group
@@ -57,9 +67,8 @@ const pfaText = () => {
     ? `False alarm target: ${pct(S.alpha)} (measured ${pct(p.pfa)}, ≤ ${pct(p.pfa_upper95)} at 95%)`
     : `False alarm target: ${pct(S.alpha)}`;
 };
-// alerts first, then in time order: a group is one wave of posts, so the drop-down reads top to bottom in time
-const topicFindings = t => S.findings.filter(f => f.topic === t)
-  .sort((a, b) => RANK[a.verdict] - RANK[b.verdict] || a.first_seen.localeCompare(b.first_seen) || a.id.localeCompare(b.id));
+// alerts first, then in time order (groups.js, the same order and letters as on /explain)
+const topicFindings = t => ordered(S.findings.filter(f => f.topic === t));
 const span = f => hm(f.first_seen) === hm(f.last_seen) ? hm(f.first_seen) : `${hm(f.first_seen)}–${hm(f.last_seen)}`;
 
 // the group the result view shows: an alert (coordinated), or a weaker group only if the user opened it
@@ -75,6 +84,38 @@ const PAL = {bg: '#0C100E', cool: '#63CF97', muted: '#A3B8AA', warm: '#B7F063', 
 const M = 20, L = 20, BIN_MIN = .5, LABEL_EVERY = 4, MAP_MAX_AGE_MS = 20000;
 const U0 = 0, U1 = L;  // the surface starts and ends exactly at the axes
 const W = 10, D = 6, PEAK = 3.1, NX = 190, NZ = 56;
+const PING_SEC = 2.4, PING_SPEED = 5;     // sonar: a ring leaves the antenna's corner at each data update and crosses the whole map; life (s), speed
+const PING_IDLE = '#63CF97', PING_SWARM = '#FF3B3B';   // its colour: calm, and red while a swarm is on the map
+// landing: the red dot of the "i" in the wordmark beats every BEAT_SEC s, and on each beat a cream sonar ring runs
+// from the centre of the wave outwards. Both read the same frame clock (uTime), so they stay in step
+const BEAT_SEC = 12, BEAT_SPEED = 3, RING_SEC = 3.2;   // a ring every 12 s; it crosses the wave in ~3 s, then the field is calm
+// now and then the ring finds a peak, a disturbance of the field (a swarm) that was there unseen: the peak shows,
+// red, only behind the ring's thin front as it passes over it; the ring runs on red, and the peak settles back
+const SPOT_FALL = 3.5, SPOT_HOLD = 2.5, SPOT_H = .55, SPOT_W = .3;   // s ×2, units ×2
+// the landing follows the sensitivity menu: each ring finds a swarm with this chance, from the strictest stop
+// (sens 0) to the most sensitive one (sens 1). A demo of the trade-off, not a measurement
+const spotP = sens => .1 + .75 * sens;
+let sens = .5, spotRolled = -1;                      // the slider's position 0..1; the last beat rolled for
+const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+let spot = null;                                     // the peak on screen ({x, z, d, hit, beat, end})
+function spotTick(t) {
+  const next = Math.floor(t / BEAT_SEC) + 1;          // the next ring: roll once whether it finds a swarm
+  if (!spot && next !== spotRolled) { spotRolled = next; if (Math.random() < spotP(sens)) {
+    const ang = Math.random() * Math.PI * 2, dist = 1.5 + Math.random() * 2.4;
+    const x = Math.max(-4.2, Math.min(4.2, Math.cos(ang) * dist)), z = Math.max(-2.4, Math.min(2.4, Math.sin(ang) * dist * .65));
+    const d = Math.hypot(x, z), beat = Math.floor(t / BEAT_SEC) + 1;   // the next ring finds it
+    const hit = beat * BEAT_SEC + d / BEAT_SPEED;
+    spot = {x, z, d, hit, beat, end: hit + SPOT_HOLD + SPOT_FALL};
+  } }
+  if (spot && t > spot.end) { spot = null; spotRolled = Math.floor(t / BEAT_SEC) + 1; }   // the ring after it rolls afresh
+  if (!spot) { U.uSpot.value.z = 0; U.uSpot.value.w = 0; U.uRingRed.value = 0; return; }
+  // there from the start of the ring that finds it, but shown only behind that ring's front (shader); it settles later
+  const top = spot.hit + SPOT_HOLD;
+  const amp = t >= spot.beat * BEAT_SEC ? 1 - ss(top, spot.end, t) : 0;
+  U.uSpot.value.set(spot.x, spot.z, amp, amp > 0 ? 1 : 0);
+  U.uSpotD.value = spot.d;
+  U.uRingRed.value = Math.floor(t / BEAT_SEC) === spot.beat ? 1 : 0;   // the ring that found it runs on red
+}
 const V0 = 0, V1 = M;
 const X = u => -W / 2 + (u - U0) / (U1 - U0) * W, Z = v => D / 2 - (v - V0) / (V1 - V0) * D;
 const binU = x => (x + W / 2) / W * (U1 - U0) + U0, binV = z => (D / 2 - z) / D * (V1 - V0) + V0;
@@ -108,7 +149,9 @@ function smooth(grid, off = 0) {
 const BIN_MS = BIN_MIN * 60000;
 const rev = g => g.map(row => row.slice().reverse());
 const originMs = () => Date.parse(S.tmap.now) - S.view * BIN_MS;
-const nowText = () => S.tmap ? new Date(originMs()).toISOString().slice(11, 16) : 'now';
+// the map's times in the viewer's own time zone
+const localHM = ms => new Date(ms).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});
+const nowText = () => S.tmap ? localHM(originMs()) : 'now';
 let full = {};
 // all cells of the fetched map: the selected group, the other groups of the topic, everything else
 function layersFull(f) {
@@ -170,7 +213,10 @@ function setField(f, k) {
   S.thrDb = thr; S.thrY = thr > 0 ? thr * k : null;
   if (U) U.uThrY.value = S.thrY ?? 1e3;  // the surface turns red above it, with a dashed contour where it crosses
   if (axGeo && S.thrY !== axThrY) drawAxes();
-  if (thrLabel) thrLabel.el.textContent = thr > 0 ? `detection threshold (mean + ${CFAR_K}σ) · ${thr.toFixed(1)} dB` : '';
+  if (thrLabel) {                    // only the number on the axis, in the threshold's colour; the meaning on hover
+    thrLabel.el.textContent = thr > 0 ? `${thr.toFixed(1)} dB` : '';
+    thrLabel.el.title = thr > 0 ? `Detection threshold: mean + ${CFAR_K}σ of the map, ${thr.toFixed(1)} dB. What rises above it stands out from the noise.` : '';
+  }
 }
 let thrLabel = null, axThrY = null;
 
@@ -243,19 +289,36 @@ function buildScene() {
     uTime: {value: 0}, uCarpet: {value: 0}, uPeak: {value: 0},
     uNoise: {value: 1}, uGlow: {value: .3}, uSweep: {value: -9}, uSweepOn: {value: 0},
     uHover: {value: new THREE.Vector4(9, 9, 9, 9)},
+    uPick: {value: new THREE.Vector4(9, 9, 9, 9)},        // the picked cell, outlined like the hovered one
+    uBeatOn: {value: reduced ? 0 : 1},                                  // the landing's sonar (home only)
+    uSpot: {value: new THREE.Vector4(0, 0, 0, 0)},       // the landing's peak: floor x, z, height (0..1), red (0..1)
+    uSpotD: {value: 0}, uRingRed: {value: 0},             // its distance from the centre; 1 while the ring that found it runs
+    uPingO: {value: new THREE.Vector2(0, 0)},           // where the sonar starts: the antenna's corner (placeTick)
+    uPingOn: {value: 0}, uPingT: {value: -99}, uPingC: {value: new THREE.Color(PING_IDLE)},   // sonar from the origin (result view): start (uTime)
     uCool: {value: new THREE.Color(PAL.cool)}, uWarm: {value: new THREE.Color(PAL.warm)},
     uPeakC: {value: new THREE.Color(PAL.peak)}, uBg: {value: new THREE.Color(PAL.bg)}, uSelC: {value: new THREE.Color(PAL.sel)},
     uThrY: {value: 1e3},  // height of the detection threshold (setField); 1e3 = none
   };
-  const vert = `
+  // sheet = the dark surface under the lines: the landing's peak lifts only the lines, so the sheet never hides
+  // the lines around it (a dark ring)
+  const vertOf = sheet => `
     attribute float aC; attribute float aP; attribute float aO;
-    uniform float uTime, uCarpet, uPeak, uNoise;
-    varying float vHeat; varying float vSel; varying vec3 vP;
+    uniform float uTime, uCarpet, uPeak, uNoise, uBeatOn, uRingRed; uniform vec4 uSpot;
+    varying float vHeat; varying float vSel; varying vec3 vP; varying float vBump;
     void main(){
       vec3 p = position;
       float n = sin(p.x*1.3+uTime*.55)*sin(p.z*1.9-uTime*.4) + .5*sin(p.x*3.1-uTime*.75+p.z*2.2);
       float hP = (aP + aO)*uPeak;  // all groups: one height and one colour ramp
       p.y = aC*uCarpet + hP + n*uNoise*.075;
+      vec2 dq = p.xz - uSpot.xy;
+      // the landing's peak (its shape, 0..1). It was there all along, unseen: it shows only where the ring that
+      // finds it has passed, so it rises behind the ring's front
+      float br = mod(uTime, ${BEAT_SEC.toFixed(2)}) * ${BEAT_SPEED.toFixed(2)};
+      float seen = mix(1., 1. - smoothstep(br - .2, br + .2, length(p.xz)), uRingRed);
+      vBump = uBeatOn * exp(-dot(dq, dq) / ${(2 * SPOT_W * SPOT_W).toFixed(3)}) * seen;
+      // the sheet sits a hair below its lines: a depth offset alone fails on flat stretches (crests, troughs)
+      // on some GPUs (Metal), where the sheet then hides the lines in dashed arcs
+      ${sheet ? 'p.y -= .02;' : `p.y += vBump * uSpot.z * ${SPOT_H.toFixed(2)};`}
       vHeat = smoothstep(0.02, 1., hP/${PEAK.toFixed(2)});
       vSel = aP/max(aP + aO, 1e-4) * smoothstep(0., .05, aP*uPeak/${PEAK.toFixed(2)});  // share of the selected group
       vP = p;
@@ -265,24 +328,44 @@ function buildScene() {
     vec3 ramp(float h){ vec3 c = mix(uCool, uWarm, smoothstep(0.,.5,h)); return mix(c, uPeakC, smoothstep(.5,1.,h)); }
     vec3 tint(float h, float sel){ return mix(ramp(h), uSelC, sel); }
     // the selected group is red only above the threshold, with a soft edge of a few pixels
-    float above(float y){ float w = max(fwidth(y), 1e-3); return smoothstep(uThrY - w, uThrY + w, y); }`;
+    // fwidth of a line primitive is unreliable on some GPUs (Metal: huge or infinite at places): clamped, or the
+    // edge maths turns into NaN and the line goes black in dashed arcs
+    float above(float y){ float w = clamp(fwidth(y), 1e-3, .05); return smoothstep(uThrY - w, uThrY + w, y); }`;
   const lineMat = new THREE.ShaderMaterial({
-    uniforms: U, vertexShader: vert, transparent: true, depthWrite: false,
+    uniforms: U, vertexShader: vertOf(false), transparent: true, depthWrite: false,
     fragmentShader: `
-      uniform vec3 uCool, uWarm, uPeakC, uSelC; uniform float uGlow, uSweep, uSweepOn, uThrY; uniform vec4 uHover;
-      varying float vHeat; varying float vSel; varying vec3 vP; ${ramp}
+      uniform vec3 uCool, uWarm, uPeakC, uSelC; uniform float uGlow, uSweep, uSweepOn, uThrY, uTime; uniform vec4 uHover, uPick;
+      uniform float uPingOn, uPingT, uBeatOn, uSpotD, uRingRed; uniform vec3 uPingC; uniform vec4 uSpot; uniform vec2 uPingO;
+      varying float vHeat; varying float vSel; varying vec3 vP; varying float vBump; ${ramp}
+      float sq(float x){ return x*x; }   // not pow(x, 2.): pow of a negative base is undefined in GLSL (NaN on some GPUs)
       void main(){
         float sel = vSel * above(vP.y);
-        float sweep = exp(-pow((vP.x-uSweep)/.32,2.))*uSweepOn;
+        float sweep = exp(-sq((vP.x-uSweep)/.32))*uSweepOn;
         float hov = step(uHover.x,vP.x)*step(vP.x,uHover.y)*step(uHover.z,vP.z)*step(vP.z,uHover.w);
+        hov = max(hov, step(uPick.x,vP.x)*step(vP.x,uPick.y)*step(uPick.z,vP.z)*step(vP.z,uPick.w));
+        // sonar: at each data update a ring runs out over the grid from the origin cell (now, same meaning) and fades
+        float age = uTime - uPingT, r = age * ${PING_SPEED.toFixed(2)};
+        float ping = uPingOn * step(0., age) * step(age, ${PING_SEC.toFixed(2)}) * exp(-sq((length(vP.xz - uPingO) - r)/.22)) * (1. - age/${PING_SEC.toFixed(2)});
+        float bage = mod(uTime, ${BEAT_SEC.toFixed(2)}), br = bage * ${BEAT_SPEED.toFixed(2)};
+        float fade = max(0., 1. - bage/${RING_SEC.toFixed(2)});
+        float beat = uBeatOn * exp(-sq((length(vP.xz) - br)/.32)) * fade;
+        // the ring is cream; the ring that reaches the peak turns red there and runs on red to the edge
+        float redK = uRingRed * smoothstep(uSpotD - .15, uSpotD + .35, br);
+        vec3 ringC = mix(vec3(1., .93, .78), vec3(1., .16, .16), redK);
+        // the peak: red where the ring that finds it has already passed (a thin front sweeping over it), then all red
+        // sqrt: the whole zone of the peak, not only its tip. max(): far from the peak vBump underflows to 0 and the
+        // GPU's interpolation along a line can take it a hair below, where sqrt is NaN: a black dashed circle around it
+        float spot = sqrt(max(vBump, 0.)) * uSpot.z * uSpot.w;
         float far = 1.;  // no depth fade: in an orthographic view it reads as perspective and makes the far side look wider
-        float a = uGlow*(.5+.9*max(vHeat, sel*.8))*far + sweep*.32 + hov*.6;
-        gl_FragColor = vec4(tint(vHeat, sel)*(1.+max(vHeat, sel*.7)*1.35+sweep*.25+hov), clamp(a,0.,1.));
+        float a = uGlow*(.5+.9*max(vHeat, sel*.8))*far + sweep*.32 + hov*.6 + ping*.7 + beat*.75 + spot*.8;
+        vec3 col = tint(vHeat, sel)*(1.+max(vHeat, sel*.7)*1.35+sweep*.25+hov) + uPingC*ping*.9;
+        col = mix(col, ringC*1.25, clamp(beat*1.3, 0., 1.));   // the ring's own colour, not added light
+        gl_FragColor = vec4(mix(col, vec3(1., .16, .16)*1.4, clamp(spot*2.2, 0., 1.)), clamp(a,0.,1.));
       }`,
   });
   const sheetMat = new THREE.ShaderMaterial({
-    uniforms: U, vertexShader: vert, side: THREE.DoubleSide,
-    polygonOffset: true, polygonOffsetFactor: 1.5, polygonOffsetUnits: 2,
+    uniforms: U, vertexShader: vertOf(true), side: THREE.DoubleSide,
+    polygonOffset: true, polygonOffsetFactor: 3, polygonOffsetUnits: 4,   // keeps the dark sheet behind its own lines on steep slopes
     fragmentShader: `
       uniform vec3 uBg, uCool, uWarm, uPeakC, uSelC; uniform float uThrY;
       varying float vHeat; varying float vSel; varying vec3 vP; ${ramp}
@@ -290,7 +373,7 @@ function buildScene() {
         float sel = vSel * above(vP.y);
         vec3 c = uBg*1.2 + tint(vHeat, sel)*max(vHeat, sel*.7)*.14 + uSelC*sel*.22 + uCool*vP.y*.006;
         // dashed contour where the surface crosses the threshold: ~1.5 px wide, dashes of ~9 px on screen
-        float d = abs(vP.y - uThrY) / max(fwidth(vP.y), 1e-4);
+        float d = abs(vP.y - uThrY) / clamp(fwidth(vP.y), 1e-4, .05);
         float line = 1. - smoothstep(.75, 1.75, d);
         float dash = step(.45, fract((gl_FragCoord.x + gl_FragCoord.y) / 18.));
         vec3 lc = mix(vec3(1.), uSelC, .35 + .65*vSel);  // pink on the selected group, near white elsewhere
@@ -304,7 +387,9 @@ function buildScene() {
   axisMat = new THREE.LineBasicMaterial({color: PAL.cool, transparent: true, opacity: 0});
   scene.add(new THREE.LineSegments(axGeo, axisMat));
 
-  composer = new EffectComposer(renderer);
+  // the post-processing chain renders off screen, where the canvas's own antialiasing does not apply: without
+  // multisampling there the 1 px lines break into stair steps ("torn fabric") wherever they run at a shallow angle
+  composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, {samples: 4, type: THREE.HalfFloatType}));
   composer.addPass(new RenderPass(scene, camera));
   bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), .38, .6, .18);
   composer.addPass(bloom);
@@ -325,43 +410,54 @@ const cam = {...CAMS.home};
 const ISO_POL = Math.acos(1 / Math.sqrt(3)), ISO_AZ = -Math.PI / 4;
 const isoSnap = az => ISO_AZ + Math.round((az - ISO_AZ) / (Math.PI / 2)) * Math.PI / 2;
 const ORTHO_K = Math.tan(17 * Math.PI / 180);
+const DOCK_ZOOM = .62, DOCK_DROP = .05;   // DOCK_DROP: the view sits this share of the panel lower (the axes' labels hang below)               // the docked result panel is lower than the page: the view comes closer
 let camAspect = 1;
 const camTo = (name, duration = 1.25, ease = 'power3.inOut') =>
   gsap.to(cam, {...CAMS[name], duration: reduced ? 0 : duration, ease, overwrite: true});
 let dragging = false;
 
+const iDot = $('iDot');
 function resize() {
   if (!ok) return;
-  const w = stage.clientWidth, h = stage.clientHeight;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
   renderer.setSize(w, h, false); composer.setSize(w, h);
   camAspect = w / h;
 }
 function frame(t) {
   requestAnimationFrame(frame);
-  const w = stage.clientWidth, h = stage.clientHeight, wide = w > 860;
+  const w = canvas.clientWidth, h = canvas.clientHeight, wide = w > 860;
+  const docked = root.dataset.stage === 'result', off = docked ? 0 : cam.off;   // docked: the view is centred in its own panel
   U.uTime.value = reduced ? 0 : t / 1000;
+  if (!reduced && root.dataset.stage === 'home') {    // the wordmark's dot flares on the beat, as the ring leaves the centre
+    spotTick(U.uTime.value);
+    const k = Math.exp(-(U.uTime.value % BEAT_SEC) * 1.6);
+    iDot.style.opacity = (.5 + .5 * k).toFixed(3); iDot.style.transform = `scale(${(1 + .3 * k).toFixed(3)})`;
+  }
   const az = cam.az, sp = Math.sin(cam.pol);  // no idle sway: the view stays exactly isometric
-  const r = cam.r * (wide ? 1 : Math.min(2.15, Math.max(1, 1.38 / Math.max(.5, camAspect))));
+  const r = cam.r * (wide ? 1 : Math.min(2.15, Math.max(1, 1.38 / Math.max(.5, camAspect)))) * (docked ? DOCK_ZOOM : 1);
   // the view height at the target equals that of the old 34 degree lens at distance r, so framings carry over
   const hh = r * ORTHO_K;
   camera.left = -hh * camAspect; camera.right = hh * camAspect; camera.top = hh; camera.bottom = -hh;
   camera.position.set(cam.tx + r * sp * Math.sin(az), cam.ty + r * Math.cos(cam.pol), cam.tz + r * sp * Math.cos(az));
   camera.lookAt(cam.tx, cam.ty, cam.tz);
-  if (wide) camera.setViewOffset(w, h, 0, -h * .055 * cam.off, w, h);
-  else camera.setViewOffset(w, h, 0, -h * .02 * cam.off, w, h);
+  if (docked) camera.setViewOffset(w, h, 0, -h * DOCK_DROP, w, h);
+  else if (wide) camera.setViewOffset(w, h, 0, -h * .055 * off, w, h);
+  else camera.setViewOffset(w, h, 0, -h * .02 * off, w, h);
   camera.updateProjectionMatrix(); camera.updateMatrixWorld();
   faceAxes();
   composer.render();
   placeAxes(w, h);
+  placePick(w, h);
+  placeTick(w, h, t);
 }
 
 /* axis labels live in the DOM, projected from the floor; positions follow the edges the axes sit on */
 const side = sx => sx < 0 ? 'r' : 'l';
 const AXES = [
-  {t: 'Time before now, minutes', p: (sx, sz) => [X(L / 2), 0, timeZ(sz) + sz * 1.15], a: () => 'c', title: 1},
+  {t: 'Time', p: (sx, sz) => [X(L / 2), 0, timeZ(sz) + sz * 1.15], a: () => 'c', title: 1},
   {t: 'Meaning gap', p: (sx, sz) => [gapX(sx) + sx * 1.35, 0, Z(M / 2)], a: side, title: 1},
-  // tick labels: the origin shows the UTC time on screen (filled by loadMap), then −2 min, −4 min, ... −10 min
-  ...Array.from({length: L / LABEL_EVERY + 1}, (_, k) => ({t: k ? `−${k * LABEL_EVERY * BIN_MIN} min` : 'now UTC',
+  // tick labels: the local clock time of each label, counted back from the origin (filled by setOrigin)
+  ...Array.from({length: L / LABEL_EVERY + 1}, (_, k) => ({t: '', tk: k,
     p: (sx, sz) => [X(k * LABEL_EVERY), 0, timeZ(sz) + sz * .4], a: () => 'c', k: 1})),
   // meaning gap 0..1: 0 = same meaning, 1 = unrelated
   ...[0, .2, .4, .6, .8, 1].map(g => ({t: g === 0 ? 'same meaning' : g === 1 ? 'unrelated' : String(g),
@@ -393,9 +489,8 @@ const heightAt = (x, z) => {
   if (i < 0 || j < 0 || i >= NX || j >= NZ) return -1;
   return field.C[j * NX + i] * U.uCarpet.value + (field.P[j * NX + i] + field.O[j * NX + i]) * U.uPeak.value;
 };
-function hover(e) {
-  const y = layers(shown());
-  if (root.dataset.stage !== 'result' || dragging || !y) return hideTip();
+// the cell of the map under the pointer: {l (time bin), m (meaning-gap bin), x, z (floor point)}, or null
+function cellAt(e) {
   const b = canvas.getBoundingClientRect();
   ndc.set((e.clientX - b.left) / b.width * 2 - 1, -((e.clientY - b.top) / b.height) * 2 + 1);
   ray.setFromCamera(ndc, camera);
@@ -405,15 +500,29 @@ function hover(e) {
     if (h >= 0 && y <= h + .02) { hit = [x, z]; break; }
     if (y < -.2) break;
   }
-  if (!hit) return hideTip();
+  if (!hit) return null;
   const l = Math.floor(binU(hit[0])), m = Math.floor(binV(hit[1]));
-  if (l < 0 || m < 0 || l >= L || m >= M) return hideTip();
+  return l < 0 || m < 0 || l >= L || m >= M ? null : {l, m, x: hit[0], z: hit[1], h: heightAt(hit[0], hit[1])};
+}
+function hover(e) {
+  const y = layers(shown());
+  if (root.dataset.stage !== 'result' || dragging || !y) return hideTip();
+  const c = cellAt(e);
+  if (!c) return hideTip();
+  const {l, m} = c, b = canvas.getBoundingClientRect();
   U.uHover.value.set(X(l), X(l + 1), Z(m + 1), Z(m));
-  tip.innerHTML = `<b>${l * BIN_MIN}–${(l + 1) * BIN_MIN} min before ${nowText()} UTC, meaning gap ${(m / M).toFixed(2)}–${((m + 1) / M).toFixed(2)}</b>
-    <span>${y.sel[m][l]} this group, ${y.others[m][l]} other groups, ${y.rest[m][l]} background · ${cellDb(y, m, l)}</span>`;
+  tip.innerHTML = `<b>${l * BIN_MIN}–${(l + 1) * BIN_MIN} min before ${nowText()}, meaning gap ${(m / M).toFixed(2)}–${((m + 1) / M).toFixed(2)}</b>
+    <span>${y.sel[m][l]} this group, ${y.others[m][l]} other groups, ${y.rest[m][l]} background · ${cellDb(y, m, l)}</span>${thrNote(c)}`;
   const px = e.clientX - b.left, py = e.clientY - b.top;
-  tip.style.transform = `translate(${Math.min(Math.max(8, px + 14), b.width - 256)}px,${Math.max(8, py - 66)}px)`;
+  tip.style.transform = `translate(${Math.min(Math.max(8, px + 14), b.width - 256)}px,${Math.max(8, py - 66) + canvas.offsetTop}px)`;
   tip.style.opacity = 1;
+}
+// the coloured caps of the surface are the part above the detection threshold: the tooltip says so there
+function thrNote(c) {
+  if (S.thrY == null || c.h < S.thrY) return '';
+  const i = Math.round((D / 2 - c.z) / D * (NZ - 1)) * NX + Math.round((c.x + W / 2) / W * (NX - 1));
+  const mine = field.P[i] > field.O[i] + field.C[i];            // mostly the selected group's pairs: the accent cap
+  return `<em class="thr">Above the detection threshold (mean + ${CFAR_K}σ = ${S.thrDb.toFixed(1)} dB): ${mine ? "this group's posts stand" : 'posts stand'} out from the noise here.</em>`;
 }
 // one cell against the mean cell on screen, in dB
 function cellDb(y, m, l) {
@@ -428,18 +537,96 @@ canvas.addEventListener('pointermove', e => {
     cam.pol = Math.min(1.45, Math.max(.3, cam.pol - e.movementY * .004));
   } else if (e.pointerType === 'mouse') hover(e);
 });
+let downAt = null;                   // where a press began: a press that barely moves is a click on a cell
 canvas.addEventListener('pointerdown', e => {
   if (root.dataset.stage !== 'result' || !ok) return;
   if (e.pointerType !== 'mouse') hover(e);
+  downAt = [e.clientX, e.clientY];
   gsap.killTweensOf(cam); dragging = true; canvas.classList.add('dragging'); canvas.setPointerCapture(e.pointerId);
-  setLegend(null);
 });
-const endDrag = () => {
+const endDrag = e => {
   if (!dragging) return;
   dragging = false; canvas.classList.remove('dragging');
+  const click = e?.type === 'pointerup' && downAt && Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) < 6;
+  downAt = null;
+  if (click) { pickCell(cellAt(e)); return; }   // a click leaves the view where it is
   gsap.to(cam, {az: isoSnap(cam.az), pol: ISO_POL, duration: reduced ? 0 : .5, ease: 'power2.out', overwrite: true});
 };
 canvas.addEventListener('pointerup', endDrag); canvas.addEventListener('pointercancel', endDrag);
+
+/* a clicked cell: a sonar ping runs out over the grid from it, and a card over the cell says in words what is
+   there and what the selected group says at that time (the lines themselves are one step away, "What they say") */
+const PAIR_MAX_SEC = 120;            // detect/timemap.py: pairs of posts at most 2 min apart; a pair sits at its later post
+function pickCell(c) {
+  if (!c || !layers(shown())) return unpick();
+  S.pick = {l: c.l, m: c.m}; S.pop && closePop();
+  U.uPick.value.set(X(c.l), X(c.l + 1), Z(c.m + 1), Z(c.m));
+  hideTip(); showCell();
+}
+function unpick() {
+  S.pick = null; picked++;
+  if (U) U.uPick.value.set(9, 9, 9, 9);
+  $('pick').innerHTML = '';
+}
+/* an antenna stands where the time and meaning axes meet (just outside the map's origin, where the sonar starts). It fills from the ground up
+   while the radar waits for the next update (the update clock above); full = the update is called and the sonar fires */
+const tickEl = $('tick'), tickFill = $('tickFill'), tickV = new THREE.Vector3();
+function placeTick(w, h, t) {
+  const on = root.dataset.stage === 'result';
+  tickEl.style.display = on ? '' : 'none';
+  if (!on) return;
+  U.uPingO.value.set(gapX(axSide.x), timeZ(axSide.z));   // the sonar leaves from the antenna, whichever corner the axes face
+  tickV.set(U.uPingO.value.x, 0, U.uPingO.value.y).project(camera);   // where the two floor axes would meet if extended: off the surface
+  const x = (tickV.x * .5 + .5) * w, y = (-tickV.y * .5 + .5) * h + canvas.offsetTop;
+  tickEl.style.transform = `translate(${x.toFixed(1)}px,${y.toFixed(1)}px) translate(-50%,-100%)`;   // its foot on the origin
+  const p = Math.min(1, Math.max(0, (t - clock.at) / clock.ms));
+  tickFill.setAttribute('y', (32 * (1 - p)).toFixed(2)); tickFill.setAttribute('height', (32 * p).toFixed(2));
+  tickEl.dataset.title = `Next update in ${Math.max(0, Math.ceil((clock.ms - (t - clock.at)) / 1000))} s`;
+}
+// the card sits over the top of the picked cell's column; frame() keeps it there while the view moves
+const pickV = new THREE.Vector3();
+function placePick(w, h) {
+  const el = $('pick');
+  if (!S.pick || !el.innerHTML) return;
+  const {l, m} = S.pick, top = heightAt(X(l + .5), Z(m + .5));
+  pickV.set(X(l + .5), Math.max(0, top), Z(m + .5)).project(camera);
+  const x = (pickV.x * .5 + .5) * w, y = (-pickV.y * .5 + .5) * h, below = y < 250;
+  el.style.display = ''; el.dataset.below = below;
+  el.style.transform = `translate(${Math.min(w - 156, Math.max(156, x)).toFixed(1)}px,${(y + canvas.offsetTop).toFixed(1)}px) translate(-50%,${below ? '14px' : 'calc(-100% - 12px)'})`;
+}
+const what = m => (m + 1) / M <= .3 ? 'Same message' : (m + 1) / M <= .6 ? 'Similar messages' : 'Different messages';
+const nOf = (k, one, many) => `${k} ${k === 1 ? one : many}`;
+let picked = 0;                      // token: a newer pick supersedes a card still loading its posts
+async function showCell() {
+  const y = layers(shown()), f = shown(), el = $('pick'), mine = ++picked;
+  if (!S.pick || !y || !f) return unpick();
+  const {l, m} = S.pick, sel = y.sel[m][l], others = y.others[m][l], rest = y.rest[m][l];
+  const t1 = originMs() - l * BIN_MS, t0 = t1 - BIN_MS;      // the cell's time bin, of the pair's later post
+  const when = `${l * BIN_MIN}–${(l + 1) * BIN_MIN} min before ${nowText()}`;
+  const db = cellDb(y, m, l);
+  const text = said => `<b>${what(m)}, ${when}</b><span>${sel
+    ? `${nOf(sel, 'pair', 'pairs')} of this group's posts here, at most ${PAIR_MAX_SEC / 60} min apart`
+    : 'No pairs of this group here'}${others ? `; ${others} of other groups` : ''}${rest ? `; ${rest} background` : ''}.` +
+    `${db === 'no pairs' ? '' : ` ${db[0].toUpperCase()}${db.slice(1)}.`}${said}</span>`;
+  el.innerHTML = text('');
+  if (!sel) return;
+  let its;
+  try { its = await loadItems(f); } catch { return; }
+  if (mine !== picked) return;
+  if (merged(f.accounts, its)) return;   // masked accounts cannot be told apart: no count per account
+  // the group's posts in pairs that end in this time bin: the later post in it, its partner up to 2 min before
+  const t = it => Date.parse(it.published_at);
+  const keep = new Set();
+  for (const a of its) {
+    if (t(a) < t0 || t(a) >= t1) continue;
+    for (const b of its) if (b.author !== a.author && t(b) <= t(a) && t(a) - t(b) <= PAIR_MAX_SEC * 1000) { keep.add(a); keep.add(b); }
+  }
+  const said = [...keep], lines = points(said).filter(p => p.accounts > 1).length;   // lines said by 2+ accounts
+  if (!said.length) return;
+  const who = `${new Set(said.map(it => it.author)).size} of ${f.accounts.length} accounts posted then`;
+  el.innerHTML = text(` ${who}${lines ? `, repeating ${nOf(lines, 'line', 'lines')}` : ''}.`) +
+    `<button type="button" class="say" data-say="${S.sel}">What they say</button>`;
+}
 canvas.addEventListener('pointerleave', hideTip);
 
 /* ------------------------------------------------------------------ pipeline animation */
@@ -468,6 +655,7 @@ function setPhase(i, s) {
 function openTopic(topic, {instant = false, findingId = null} = {}) {
   liveStart(topic);
   S.topic = topic; S.list = topicFindings(topic);
+  S.pop = null; unpick(); closeSheets();
   S.sel = Math.max(0, S.list.findIndex(f => f.id === findingId));
   S.pickedWeak = S.list[S.sel]?.verdict !== 'coordinated' && !!findingId;
   scrollTw?.kill(); scrollTw = null; mapSeq++;
@@ -476,9 +664,10 @@ function openTopic(topic, {instant = false, findingId = null} = {}) {
   history.replaceState(null, '', `?q=${encodeURIComponent(topic)}`);
   tl?.kill(); selTl?.kill();
   root.dataset.stage = 'scan'; scrollTo(0, 0); hideTip();
-  $('q').value = topicLabel(topic); $('q').blur(); syncClear();
+  $('q').value = topicLabel(topic); $('q').blur(); syncClear(); fixTopic(true);
   if (!ok) return showResult(true);
   gsap.killTweensOf([U.uCarpet, U.uPeak, U.uNoise, U.uGlow, U.uSweep, U.uSweepOn, axisMat, cam]);
+  gsap.to(U.uBeatOn, {value: 0, duration: .4, overwrite: true});   // the landing's sonar stops: the topic's own takes over
   U.uCarpet.value = 0; U.uPeak.value = 0; axisMat.opacity = 0;
   setField(shown());
   const s = topicStats();
@@ -516,25 +705,58 @@ function openTopic(topic, {instant = false, findingId = null} = {}) {
 function showResult(instant) {
   render();
   root.dataset.stage = 'result';
-  resize();
+  dock(); resize(); renderLive();                  // the play button's label depends on the stage
+  if (ok) U.uPingOn.value = reduced ? 0 : 1;
   const d = reduced || instant ? 0 : 1;
   gsap.to('#pipe', {autoAlpha: 0, duration: .25 * d});
   gsap.fromTo('#vTitle', {autoAlpha: 0, y: 14}, {autoAlpha: 1, y: 0, duration: .45 * d, ease: 'power3.out'});
-  gsap.fromTo('#vText,#vRisk', {autoAlpha: 0, y: 8}, {autoAlpha: 1, y: 0, duration: .4 * d, delay: .06 * d, ease: 'power3.out'});
-  gsap.fromTo('#groups', {autoAlpha: 0, y: 6}, {autoAlpha: 1, y: 0, duration: .38 * d, delay: .11 * d, ease: 'power3.out'});
-  gsap.fromTo('#legend', {autoAlpha: 0, y: 8}, {autoAlpha: 1, y: 0, duration: .45 * d, delay: .18 * d, ease: 'power3.out'});
+  gsap.fromTo('#groups', {autoAlpha: 0, y: 10}, {autoAlpha: 1, y: 0, duration: .45 * d, delay: .04 * d, ease: 'power3.out'});
+  gsap.fromTo('#gLine', {autoAlpha: 0, y: 8}, {autoAlpha: 1, y: 0, duration: .4 * d, delay: .06 * d, ease: 'power3.out'});
+  gsap.fromTo('#viewbar', {autoAlpha: 0, y: 8}, {autoAlpha: 1, y: 0, duration: .45 * d, delay: .18 * d, ease: 'power3.out'});
   if (!ok) return;
   gsap.to('#axes', {opacity: 1, duration: .55 * d, delay: .2 * d});
   gsap.to(axisMat, {opacity: .9, duration: .55 * d, delay: .2 * d});
 }
+/* result view = three docked panels: the header, the 3D view under it, the view switch under that.
+   The view's panel is the space between the two, measured (both change height with their content) */
+function dock() {
+  if (root.dataset.stage !== 'result') return;
+  const s = stage.getBoundingClientRect();
+  const top = $('vHead').getBoundingClientRect().bottom - s.top + 8, bot = s.bottom - $('viewbar').getBoundingClientRect().top + 8;
+  stage.style.setProperty('--dock-top', `${Math.round(top)}px`);
+  stage.style.setProperty('--dock-bot', `${Math.round(bot)}px`);
+}
+for (const el of [$('vHead'), $('viewbar'), stage]) new ResizeObserver(dock).observe(el);
+// the sonar turns red while a swarm (a coordinated group with pairs on the map) is on screen
+let pingRed = false;
+function pingColour() {
+  if (!ok) return;
+  const f = shown(), y = layers(f), red = f?.verdict === 'coordinated' && !!y && sum(y.sel) > 0;
+  if (red === pingRed) return;
+  pingRed = red;
+  const c = new THREE.Color(red ? PING_SWARM : PING_IDLE);
+  gsap.to(U.uPingC.value, {r: c.r, g: c.g, b: c.b, duration: reduced ? 0 : .6, overwrite: true});
+}
+// the selected group's colour on the map (caps above the threshold, its contour, the threshold's label): the colour
+// of its verdict, as in the title: a swarm in the accent, a suspicious group in yellow
+const SEL_COLOUR = {coordinated: PAL.sel, watching: PAL.peak, organic: PAL.cool};
+function selColour() {
+  const f = shown(), hex = f ? SEL_COLOUR[heldByNews(f) ? 'watching' : f.verdict] : PAL.sel;
+  stage.style.setProperty('--thr', hex);
+  if (!ok) return;
+  const c = new THREE.Color(hex);
+  gsap.to(U.uSelC.value, {r: c.r, g: c.g, b: c.b, duration: reduced ? 0 : .4, overwrite: true});
+}
 function goHome() {
   liveStop();
+  scrollTw?.kill(); scrollTw = null;                 // a rewind still scrolling would bring the threshold back
   tl?.kill(); selTl?.kill();
-  gsap.killTweensOf('#pipe,#pipeNow,#vTitle,#vText,#vRisk,#groups,#legend,#axes');
+  gsap.killTweensOf('#pipe,#pipeNow,#vTitle,#groups,#gLine,#viewbar,#axes');
+  S.pop = null; unpick(); closeSheets();
   S.topic = null; history.replaceState(null, '', location.pathname);
   root.dataset.stage = 'home'; scrollTo(0, 0);
-  $('q').value = ''; syncClear(); $('q').focus();
-  renderHome();
+  fixTopic(false); $('q').value = ''; syncClear(); $('q').focus();
+  renderHome(); renderLive();
   if (!ok) return;
   const d = reduced ? 0 : 1;
   gsap.to('#pipe', {autoAlpha: 0, duration: .22 * d});
@@ -542,132 +764,191 @@ function goHome() {
   gsap.to(U.uNoise, {value: 1, duration: .85 * d, overwrite: true});
   gsap.to(U.uGlow, {value: .3, duration: .85 * d, overwrite: true});
   gsap.to(axisMat, {opacity: 0, duration: .25 * d, overwrite: true});
+  gsap.to('#axes', {opacity: 0, duration: .25 * d, overwrite: true});
+  U.uThrY.value = 1e3;                               // the landing shows only the moving surface: no threshold contour
+  U.uPingOn.value = 0;
+  gsap.to(U.uBeatOn, {value: reduced ? 0 : 1, duration: .6 * d, overwrite: true});   // the landing's sonar comes back
   gsap.set(U.uSweepOn, {value: 0}); bloom.strength = .38;
-  camTo('home', 1.1); setLegend(null); hideTip(); resize();
+  camTo('home', 1.1); hideTip(); resize();
 }
 
 /* ------------------------------------------------------------------ result copy */
 const VERDICT = {
-  coordinated: {title: 'Coordinated', light: '🔴'},
-  watching: {title: 'Watching', light: '🟡'},
+  coordinated: {title: 'Swarm Detected', light: '🔴'},
+  watching: {title: 'Suspicious', light: '🟡'},
   organic: {title: 'Organic', light: '🟢'},
 };
+const dot = v => `<i class="dot" data-v="${v}"></i>`;
 
-const groupLabel = g => `${VERDICT[g.verdict].light} ${span(g)} UTC · ${g.accounts.length} accounts · ${g.verdict}${g.synthetic ? ` · ${SIM}` : ''}`;
+// The verdict in words: title, one sentence and the risk line with Pfa and SNR. The title and the sentence
+// sit in the "Why" panel of the group, the risk line on top of its "How we got here" sheet.
+function verdictCopy(f) {
+  const weak = S.list.filter(g => g.verdict !== 'coordinated').length;
+  if (!f) return {v: 'organic', title: 'Quiet',
+    text: weak
+      ? `No coordinated group in the last ${WINDOW_HOURS} h of ${topicLabel(S.topic)}; ${weak} weaker look-alike group${weak === 1 ? ' stays' : 's stay'} below the alert threshold.`
+      : `No groups of look-alike accounts in the last ${WINDOW_HOURS} h of ${topicLabel(S.topic)}.`,
+    risk: `🟢 Nothing above the detector threshold. <small>${pfaText()}</small>`};
+  const hit = f.verdict === 'coordinated', n = f.accounts.length;
+  const snr = f.snr_db_single != null ? `SNR ${f.snr_db_single.toFixed(1)} → ${f.snr_db.toFixed(1)} dB` : `SNR ${f.snr_db.toFixed(1)} dB`;
+  return {v: f.verdict, title: VERDICT[f.verdict].title,
+    text: hit && f.explanation?.summary ? f.explanation.summary
+      : hit ? `${n} accounts posted near-identical messages close together in time.`
+      : f.verdict === 'watching' ? `${n} accounts look alike, but the evidence is not strong enough yet.`
+      : `${n} accounts: similar topic, but no coordination signal.`,
+    risk: (hit ? `🔴 ${n} accounts are saying the same thing almost simultaneously.`
+      : f.verdict === 'watching' ? '🟡 Suspicious — not sure yet.' : '🟢 Looks organic.') +
+      ` <small>${pfaText()} · ${snr}</small>`};
+}
 
-// One drop-down for all groups of the topic: alerts first, weaker groups in their own section.
-function groupPicker(f, alerts, weak) {
-  if (!S.list.length) return '';
-  const opt = k => `<option value="${k}"${f && k === S.sel ? ' selected' : ''}>${esc(groupLabel(S.list[k]))}</option>`;
-  const sect = (label, ks) => ks.length ? `<optgroup label="${label} (${ks.length})">${ks.map(opt).join('')}</optgroup>` : '';
-  return `<label class="group-pick"><span>Group${f ? ` ${S.sel + 1} of ${S.list.length}` : ''}</span>
-    <select id="groupSel" aria-label="Group shown on the map">
-      <option value="now">${S.drawnAt ? '⏵ Now · back to the live map' : '⏵ Now · live map'}</option>
-      ${f ? '' : `<option value="" selected disabled>${weak.length} weaker group${weak.length === 1 ? '' : 's'} · not alerts</option>`}
-      ${sect('Alerts', alerts)}${sect('Weaker groups · not alerts', weak)}
-    </select></label>`;
+/* the attack type of the selected group. It comes with the explanation, which the worker requests only for
+   coordinated groups: a possible group says it is not assessed; a coordinated group without one shows nothing */
+function attackType(g) {
+  const t = g.verdict === 'coordinated' ? g.explanation?.technique : null;
+  const text = t ? esc(t) : g.verdict === 'watching' && !heldByNews(g) ? 'not assessed yet' : '';
+  return text ? `<span class="kind"><span>Attack type</span>${text}</span>` : '';
 }
 
 function render() {
+  pingColour(); selColour();
+  renderTitle();
+  if (pressed) headDue = true; else freshHead();    // never rebuilt under a press (map reloads come every ~20 s)
+  if (S.pick) showCell();                           // the picked cell's card follows the new numbers
+  if (!$('says').open && !$('posts').open) shownPoints.clear();   // nothing on screen refers to them any more
+}
+
+/* the big verdict over the group picker, in the verdict's colour: Quiet, a possible group (yellow), or a
+   coordinated one in the accent, named by its attack type once the explanation names it. Why says why */
+function renderTitle() {
+  const f = shown(), c = verdictCopy(f), vt = $('vTitle');
+  vt.dataset.v = f ? f.verdict : 'quiet';
+  vt.textContent = f?.verdict === 'coordinated' && f.explanation?.technique ? f.explanation.technique : c.title;
+}
+/* the header: one tab per group (the letter it carries everywhere), or one dropdown when there are more than
+   MAX_TABS; under it the shown group's line. The tabs stay even for one group: they carry its verdict mark.
+   */
+function renderHead() {
   const f = shown();
-  const vt = $('vTitle');
-  const idx = S.list.map((g, k) => k);
-  const alerts = idx.filter(k => S.list[k].verdict === 'coordinated'), weak = idx.filter(k => S.list[k].verdict !== 'coordinated');
-  $('groups').innerHTML = groupPicker(f, alerts, weak);
-  $('legend').style.display = f ? '' : 'none';
-  if (!f) {
-    vt.dataset.v = 'organic'; vt.textContent = 'Quiet';
-    $('vText').textContent = weak.length
-      ? `No coordinated group in the last ${WINDOW_HOURS} h of ${topicLabel(S.topic)}; ${weak.length} weaker look-alike group${weak.length === 1 ? ' stays' : 's stay'} below the alert threshold.`
-      : `No groups of look-alike accounts in the last ${WINDOW_HOURS} h of ${topicLabel(S.topic)}.`;
-    $('vRisk').innerHTML = `🟢 Nothing above the detector threshold. <small>${pfaText()}</small>`;
-    for (const id of ['evSay', 'evWho', 'evPosts', 'evCorr', 'evDecision', 'evSignal']) $(id).innerHTML = '';
-    $('evSay').innerHTML = `<h3>Nothing to show</h3><p>No look-alike groups right now; the live scan keeps watching this topic.</p>`;
-    return;
-  }
-  const hit = f.verdict === 'coordinated', n = f.accounts.length;
-  vt.dataset.v = f.verdict; vt.textContent = VERDICT[f.verdict].title;
-  $('vText').textContent = hit && f.explanation?.summary ? f.explanation.summary
-    : hit ? `${n} accounts posted near-identical messages close together in time.`
-    : f.verdict === 'watching' ? `${n} accounts look alike, but the evidence is not strong enough yet.`
-    : `${n} accounts: similar topic, but no coordination signal.`;
-  const snr = f.snr_db_single != null ? `SNR ${f.snr_db_single.toFixed(1)} → ${f.snr_db.toFixed(1)} dB` : `SNR ${f.snr_db.toFixed(1)} dB`;
-  $('vRisk').innerHTML = (hit
-    ? `🔴 ${n} accounts are saying the same thing almost simultaneously.`
-    : f.verdict === 'watching'
-      ? '🟡 Keep watching — not sure yet.'
-      : '🟢 Looks organic.') +
-    ` <small>${pfaText()} · ${snr}</small>` +
-    ` <a class="how" href="/explain?id=${encodeURIComponent(f.id)}&topic=${encodeURIComponent(f.topic)}&alpha=${S.alpha}">How we got here →</a>`;
-  const y = layers(f);
-  $('lgSpike').textContent = !y ? 'Loading the map…' : sum(y.sel) ? `${sum(y.sel)} pairs of posts at ${span(f)} UTC, at most 2 min apart`
-    : `Posted at ${span(f)} UTC: older than the ${L * BIN_MIN} min on the map`;
-  $('lgOthers').textContent = y ? `${sum(y.others)} pairs of the other ${S.list.length - 1} group${S.list.length === 2 ? '' : 's'}` : '';
-  $('lgCarpet').textContent = !y ? '' : S.drawnAt ? `${sum(y.rest)} other pairs in the ${L * BIN_MIN} min before ${nowText()} UTC · not live`
-    : `${sum(y.rest)} other pairs in the last ${L * BIN_MIN} min`;
-
-  const x = f.explanation;
-  $('evSay').innerHTML = (x
-    ? `<h3>Technique</h3><blockquote>“${esc(x.quote)}”</blockquote><p>${esc(x.technique)}, ${Math.round(x.confidence * 100)}% confidence</p>`
-    : `<h3>Technique</h3><p>${hit ? 'Explanation is being generated.' : 'Only coordinated groups get an explanation.'}</p>`) +
-    (f.note ? `<p class="note">${esc(f.note)}</p>` : '');
-  $('evWho').innerHTML = `<h3>Accounts</h3><ul class="who">${f.accounts.map(a => `<li>${esc(handle(a))}</li>`).join('')}</ul>
-    <p>${f.item_ids.length} posts, ${hm(f.first_seen)}–${hm(f.last_seen)} UTC${f.synthetic ? ` · ${SIM} (red team console)` : ''}</p>`;
-  renderPosts(f);
-  $('evCorr').innerHTML = corrGrid(f);
-  $('evDecision').innerHTML = `<h3>Sequential test (SPRT)</h3>${trace(f)}<p>${f.decided_at_item != null
-    ? `Crossed the ${f.verdict === 'coordinated' ? 'upper' : 'lower'} threshold at post ${f.decided_at_item + 1}.`
-    : hit ? 'The group these accounts belong to crossed the upper threshold in another wave.'
-    : f.note && f.sprt_trace.length && f.sprt_trace.at(-1) >= f.sprt_upper
-      ? `Crossed the upper threshold after ${f.sprt_trace.length} posts, but downgraded to watching (${esc(f.note.split(':')[0])}).`
-      : `Between thresholds after ${f.sprt_trace.length} posts.`}</p>`;
-  const mx = Math.max(f.snr_db, f.snr_db_single ?? 0, 1);
-  $('evSignal').innerHTML = `<h3>Signal-to-noise</h3><div class="bars">
-      ${f.snr_db_single != null ? `<div><span>Average pair</span><i style="width:${Math.max(0, f.snr_db_single) / mx * 100}%"></i><span>${f.snr_db_single.toFixed(1)} dB</span></div>` : ''}
-      <div><span>Group (${n})</span><i style="width:${Math.max(0, f.snr_db) / mx * 100}%"></i><span>${f.snr_db.toFixed(1)} dB</span></div></div>
-      <p>Combining all account pairs coherently lifts the swarm above the noise.</p>`;
+  // which group is shown is picked on the timeline in the footer (renderStrip)
+  // the shown group: attack type, then Why (panel), What they say and How we got here (sheets); a rewound map can go back to now
+  const why = `<button type="button" data-pop="why" aria-controls="pop" aria-expanded="${S.pop === 'why'}">Why</button>`;
+  setHTML($('gLine'), !S.topic ? '' : !f ? why
+    : `${f.verdict === 'coordinated' ? '' : attackType(f)}${f.synthetic ? `<span class="sim">${SIM}</span>` : ''}${why}
+    <button type="button" data-say="${S.sel}">What they say</button>
+    <button type="button" data-how="${S.sel}">How we got here</button>`);
+  $('pop').hidden = !S.pop;
+  setHTML($('pop'), S.pop === 'why' ? whyHTML(f) : '');
+  renderStrip();
+}
+/* the footer timeline: every group of the topic at its time over the detector window; the bracket = the map's span */
+const strip = createStrip({el: $('strip'), onPick: k => select(k), onTime: timeTo, onNow: goLive});
+function renderStrip() {
+  if (!S.topic) return strip.set(null);
+  const f = shown(), t1 = Date.now();
+  const t0 = Math.min(t1 - WINDOW_HOURS * 3600e3, ...S.list.map(g => Date.parse(g.first_seen)));
+  const marks = S.list.map((g, k) => ({k, start: Date.parse(g.first_seen), end: Date.parse(g.last_seen),
+    verdict: heldByNews(g) ? 'watching' : g.verdict, sel: g === f,
+    title: `${g.accounts.length} accounts · ${verdictLabel(g)} · ${span(g)} UTC${g.synthetic ? ` · ${SIM}` : ''}`}));
+  strip.set({t0, t1, marks, live: !S.mapAt, win: S.tmap ? [originMs() - L * BIN_MS, originMs()] : null});
+}
+// empty time on the timeline: the map goes there (that moment in the middle of its 10 minutes), or back to live
+function timeTo(t) {
+  const at = t + L * BIN_MS / 2;
+  if (at >= Date.now() - BIN_MS) goLive(); else setMapAt(new Date(at).toISOString());
+}
+// sets an element's HTML only when it differs: a rebuild loses the focus and swallows a click in progress
+function setHTML(el, html) {
+  const t = document.createElement('template'); t.innerHTML = html;
+  const n = t.content.childNodes;
+  if (n.length !== el.childNodes.length || ![...n].every((c, i) => c.isEqualNode(el.childNodes[i]))) el.replaceChildren(t.content);
+}
+// "Why": the verdict of the shown group in a sentence, then what made it stand out, one phrase per detector step
+function whyHTML(f) {
+  const c = verdictCopy(f);
+  return `<p>${esc(c.text)}</p>` +
+    (f ? `<ul>${reasons(f).map(r => `<li>${esc(r)}</li>`).join('')}</ul>${f.note ? `<p class="note">${esc(f.note)}</p>` : ''}`
+      : `<p class="risk">${c.risk}</p>`);
 }
 
-async function renderPosts(f) {
+/* the header with the new facts. Never rebuilt under a press, which would swallow its click: it waits for the release */
+let pressed = false, headDue = false;
+function freshHead() {
+  const focus = document.activeElement?.closest?.('#vHead [data-pop],#vHead [data-g]');   // the header is rebuilt: keep the focus
+  renderHead();
+  if (focus) $('vHead').querySelector(focus.dataset.pop ? `[data-pop="${focus.dataset.pop}"]` : `[data-g="${focus.dataset.g}"]`)?.focus();
+}
+addEventListener('pointerdown', () => { pressed = true; }, true);
+for (const type of ['pointerup', 'pointercancel']) addEventListener(type, () => {
+  pressed = false;
+  if (headDue) setTimeout(() => { if (headDue && !pressed) { headDue = false; freshHead(); } });   // after the click itself
+}, true);
+
+/** The group's posts, fetched once and cached (at most 200 ids per request, as the API allows). */
+async function loadItems(f) {
   const want = f.item_ids.filter(i => !S.items.has(i)).slice(0, 200);
-  if (want.length) {
-    $('evPosts').innerHTML = '<h3>Posts</h3><p>Loading…</p>';
-    try { for (const it of await api(`/api/items?ids=${want.map(encodeURIComponent).join(',')}`)) S.items.set(it.id, it); }
-    catch (e) { if (shown() === f) $('evPosts').innerHTML = `<h3>Posts</h3><p>Could not load posts (${esc(e.message)}).</p>`; return; }
-  }
-  if (shown() !== f) return;                              // the user moved on meanwhile
-  const its = f.item_ids.map(i => S.items.get(i)).filter(Boolean).sort((a, b) => a.published_at.localeCompare(b.published_at));
-  const first = its.slice(0, 8);
-  $('evPosts').innerHTML = `<h3>Posts</h3><ul class="posts">${first.map(it => `<li><span class="meta">${esc(handle(it.author))} · ${hm(it.published_at)} UTC${it.platform ? ' · ' + esc(platformLabel(it.platform)) : ''}${it.synthetic ? `<span class="syn">${SIM}</span>` : ''}</span>${esc(it.text)}${/^https?:\/\//i.test(it.url ?? '') ? ` <a href="${esc(it.url)}" target="_blank" rel="noopener">source</a>` : ''}</li>`).join('')}</ul>
-    <p>${first.length < its.length ? `First ${first.length} of ${its.length} posts.` : `${its.length} posts.`}</p>`;
+  if (want.length) for (const it of await api(`/api/items?ids=${want.map(encodeURIComponent).join(',')}`)) S.items.set(it.id, it);
+  return f.item_ids.map(i => S.items.get(i)).filter(Boolean);
 }
 
-function corrGrid(f) {
-  const n = f.accounts.length;
-  if (!n) return '';
-  const cells = [];
-  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
-    const v = Math.max(0, Math.min(1, f.correlation[i][j])), lag = f.lag_sec?.[i]?.[j];
-    const t = `${handle(f.accounts[i])} ↔ ${handle(f.accounts[j])}: ${v.toFixed(2)}${lag != null && i !== j ? `, lag ${Math.round(lag)} s` : ''}`;
-    cells.push(`<div style="--v:${(.06 + .94 * v).toFixed(2)}" title="${esc(t)}" aria-label="${esc(t)}"></div>`);
-  }
-  return `<h3>Account correlation</h3><div class="corr" style="grid-template-columns:repeat(${n},minmax(0,1fr));max-width:${Math.min(420, n * 44)}px">${cells.join('')}</div>
-    <p class="corr-pick" aria-live="polite"></p>
-    <p>Brighter = posts of the two accounts match closer in time and meaning. Hover or tap a cell for the value and lag.</p>`;
+/* one point a group makes. It opens a window of its own with the posts grouped under it: the point stays
+   fixed at the top while the posts scroll, so the grouping can always be checked against it. */
+const shownPoints = new Map();                      // id on the button -> {point, accounts in the group (null: they cannot be told apart), letter}
+const posts = k => `${k} ${k === 1 ? 'post' : 'posts'}`;
+let pointId = 0;
+function pointHTML(p, n, letter) {
+  shownPoints.set(++pointId, {p, n, letter});
+  return `<li><button type="button" data-point="${pointId}"><span>${esc(p.text)}</span><small>${n == null ? posts(p.posts) : `${p.accounts} of ${n} accounts${p.posts > p.accounts ? ` · ${p.posts} posts` : ''}`}</small></button></li>`;
+}
+function showPosts(id) {
+  const s = shownPoints.get(id), dlg = $('posts');
+  if (!s) return;
+  const {p, n, letter} = s;
+  dlg.innerHTML = `<header><span class="tag">${letter}</span><h2>${posts(p.posts)}${n == null ? '' : ` · ${p.accounts} of ${n} accounts`}</h2><button type="button" class="done" data-close>Done</button></header>
+    <p class="frozen">${esc(p.text)}</p>
+    <ul class="posts">${p.items.map(it => `<li><small>${esc(handle(it.author))} · ${hm(it.published_at)} UTC${it.platform ? ' · ' + esc(platformLabel(it.platform)) : ''}${it.synthetic ? `<span class="syn">${SIM}</span>` : ''}</small>${esc(it.text)}${/^https?:\/\//i.test(it.url ?? '') ? ` <a href="${esc(it.url)}" target="_blank" rel="noopener">source</a>` : ''}</li>`).join('')}</ul>`;
+  if (!dlg.open) dlg.showModal();
+  dlg.querySelector('.posts').scrollTop = 0;
 }
 
-function trace(f) {
-  const w = 480, h = 156, pl = 6, pr = 96, t = f.sprt_trace;
-  const lo = Math.min(f.sprt_lower, ...t) - .6, hi = Math.max(f.sprt_upper, ...t) + .9;
-  const x = k => pl + k / Math.max(1, t.length - 1) * (w - pl - pr), y = v => h - (v - lo) / (hi - lo) * h;
-  const pts = t.map((v, k) => `${x(k).toFixed(1)},${y(v).toFixed(1)}`).join(' '), hit = f.verdict === 'coordinated';
-  const rule = (v, label) => `<line x1="0" x2="${w - pr + 8}" y1="${y(v)}" y2="${y(v)}" stroke="${PAL.cool}" stroke-opacity=".32" stroke-dasharray="3 5"/>
-    <text x="${w - pr + 14}" y="${y(v) + 4}" fill="${PAL.muted}" font-size="12">${label} ${v.toFixed(2)}</text>`;
-  const dots = t.map((v, k) => `<circle cx="${x(k).toFixed(1)}" cy="${y(v).toFixed(1)}" r="9" fill="transparent"><title>post ${k + 1}: LLR ${v.toFixed(2)}</title></circle>`).join('');
-  return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Evidence (log-likelihood ratio) after each post">
-    ${rule(f.sprt_upper, 'coordinated')}${rule(f.sprt_lower, 'organic')}
-    ${t.length ? `<polyline points="${pts}" fill="none" stroke="${hit ? PAL.warm : PAL.cool}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-    <circle cx="${x(t.length - 1)}" cy="${y(t.at(-1))}" r="4.5" fill="${hit ? PAL.peak : PAL.cool}"/>` : ''}${dots}</svg>`;
+/* "What they say": the group's joined message when the detector has one, then the lines it repeats */
+const MAX_POINTS = 6;
+let saying = 0;                                     // token: only the latest request may fill the sheet
+async function showSays(k) {
+  const f = S.list[k], dlg = $('says'), mine = ++saying;
+  if (!f) return;
+  const x = f.explanation, n = f.accounts.length;
+  const head = `<header><span class="tag">${LETTER(k)}</span><h2>What they say<small>${n} accounts</small></h2><button type="button" class="done" data-close>Done</button></header>` +
+    (x ? `<p class="lead">${esc(x.summary)}</p><blockquote>“${esc(x.quote)}”</blockquote>${f.verdict === 'coordinated' ? `<p class="foot">Attack type: ${esc(x.technique)}, ${Math.round(x.confidence * 100)}% confidence</p>` : ''}` : '');
+  dlg.innerHTML = head + '<p class="foot">Loading posts…</p>';
+  if (!dlg.open) dlg.showModal();
+  let its;
+  try { its = await loadItems(f); }
+  catch (e) { if (mine === saying) dlg.innerHTML = head + `<p class="foot">Could not load posts (${esc(e.message)}).</p>`; return; }
+  if (mine !== saying || !dlg.open) return;          // superseded, or closed meanwhile
+  const all = points(its), top = all.slice(0, MAX_POINTS);
+  dlg.innerHTML = head + `<h3>Points they make</h3>
+    <ol class="points">${top.map(p => pointHTML(p, merged(f.accounts, its) ? null : n, LETTER(k))).join('')}</ol>
+    <p class="foot">Grouped by shared wording across ${its.length} posts. Select a point to read them.${all.length > top.length ? ` ${all.length - top.length} rarer points hidden.` : ''}</p>`;
+}
+
+/* "How we got here": the risk line, then the detector's steps for one group (steps.js), in a sheet like
+   "What they say"; the same steps open as a page of their own at /explain, for a link to one group */
+let howing = 0;                                     // token: only the latest request may fill the sheet
+async function showHow(k) {
+  const f = S.list[k], dlg = $('how'), mine = ++howing;
+  if (!f) return;
+  // one title, one close button, one sentence of what was found: the steps below say the rest
+  const say = verdictCopy(f).risk.replace(/^\S+\s/, '').replace(/\s*<small>[\s\S]*<\/small>/, '');
+  const head = `<header class="howtop"><button type="button" class="hback" data-close><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 4.5 7 10l5.5 5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Back</span></button><h2>How we got here</h2></header>
+    <p class="lead">${say}</p>`;
+  dlg.innerHTML = head + '<p class="foot">Loading posts…</p>';
+  if (!dlg.open) dlg.showModal();
+  let its = [];
+  try { its = await loadItems(f); } catch (e) { console.warn('items', e); }   // the steps still draw without the posts
+  if (mine !== howing || !dlg.open) return;
+  dlg.innerHTML = head + `<div class="steps">${stepsHTML(f, its, S.points, S.alpha)}</div>`;
+  wireSteps(dlg);
+  dlg.scrollTop = 0; dlg.classList.remove('scrolled');
 }
 
 // A group whose last post is already off the live map (older than L*BIN_MIN minutes) rewinds the map to the
@@ -684,7 +965,7 @@ let scrollTw = null, mapSeq = 0;
 // while a setMapAt request is in flight (S.mapPending); a failure goes back to what is drawn.
 async function setMapAt(at) {
   if (at === S.mapAt && at === S.drawnAt && S.tmap && !S.mapPending) return;
-  S.mapAt = at; S.mapPending = true; hideTip();
+  S.mapAt = at; S.mapPending = true; hideTip(); if (S.pick) unpick();
   const topic = S.topic, asked = S.alpha, seq = ++mapSeq;
   const target = at ? Date.parse(at) : Date.now(), from = S.tmap ? originMs() : target;
   const end = Math.max(from, target), live = !at;
@@ -724,41 +1005,95 @@ function goLive() {
 function select(i, instant) {
   if (i === S.sel && shown()) { setMapAt(rewindFor(shown())); return; }  // already shown: only bring its wave on screen
   // (in the Quiet view index 0 is "selected" but not shown: fall through and open it)
-  S.sel = i; S.pickedWeak = S.list[i]?.verdict !== 'coordinated'; hideTip(); selTl?.kill();
+  S.sel = i; S.pickedWeak = S.list[i]?.verdict !== 'coordinated'; S.pop = null; hideTip(); unpick(); selTl?.kill();
   setMapAt(rewindFor(shown()));
   const d = reduced || instant ? 0 : 1;
-  selTl = gsap.timeline().to('#vTitle,#vText,#vRisk', {autoAlpha: 0, duration: .14 * d}).call(render).to('#vTitle,#vText,#vRisk', {autoAlpha: 1, duration: .26 * d});
+  selTl = gsap.timeline().to('#vTitle,#gLine', {autoAlpha: 0, duration: .14 * d}).call(render).to('#vTitle,#gLine', {autoAlpha: 1, duration: .26 * d});
   if (!ok) return;
   setField(shown());  // the surface stays as it is: only the accent colour moves to the picked group
-  setLegend(null); camTo('over', 1.3 * d);
+  camTo('over', 1.3 * d);
 }
-function setLegend(btn) {
-  document.querySelectorAll('#legend .lg-btn').forEach(b => b.setAttribute('aria-pressed', b === btn));
+// on a topic's screen the field is the topic's name, fixed: no typing, no suggestions. Another topic = back home first
+function fixTopic(on) {
+  const q = $('q');
+  q.readOnly = on; q.tabIndex = on ? -1 : 0;
+  if (on) suggest(false);
 }
 function syncClear() { $('clear').classList.toggle('visible', $('q').value.length > 0); }
 
 /* ------------------------------------------------------------------ home: topics + feed */
-function renderHome() {
-  const count = t => S.findings.filter(f => f.topic === t && f.verdict === 'coordinated').length;
-  $('samples').innerHTML = S.topics.map(t =>
-    `<button class="sample-chip" type="button" data-sample="${esc(t)}">${esc(topicLabel(t))}${count(t) ? `<b>${count(t)}</b>` : ''}</button>`).join('');
-  $('topicList').innerHTML = S.topics.map(t => `<option value="${esc(topicLabel(t))}">`).join('');
-  const feed = S.findings.filter(f => f.verdict !== 'organic' && S.topics.includes(f.topic))
-    .sort((a, b) => RANK[a.verdict] - RANK[b.verdict] || b.created_at.localeCompare(a.created_at)).slice(0, 6);
-  $('feed').innerHTML = feed.length ? feed.map(f =>
-    `<li><button type="button" data-topic="${esc(f.topic)}" data-fid="${esc(f.id)}"><span>${VERDICT[f.verdict].light} ${VERDICT[f.verdict].title}</span>
-      <span>${esc(topicLabel(f.topic))} · ${f.accounts.length} accounts${f.synthetic ? ` · ${SIM}` : ''}</span><span class="t">${ago(f.created_at)}</span></button></li>`).join('')
-    : '<li class="empty">No alerts in the current window.</li>';
+/* home: the topic picker under the search field: the monitored topics, then the latest alerts, filtered as you type */
+let sugItems = [], sugAt = -1;                       // the options on screen ({topic, fid?}) and the highlighted one
+const SUG_TOPICS = 5, SUG_ALERTS = 5;                // any number of topics: the 5 most recently active (or best matching) ones
+function renderHome() { if (!$('suggest').hidden) renderSuggest(); }
+// every typed word must appear in the topic's name (or its id), in any order
+const topicHit = typed => {
+  const words = typed.toLowerCase().split(/\s+/).filter(Boolean);
+  return t => { const name = `${topicLabel(t).toLowerCase()} ${t}`; return words.every(w => name.includes(w)); };
+};
+// the topics that match, most recently active first (their newest finding), then the rest in the API's order
+function matchTopics(typed) {
+  const hit = topicHit(typed), last = new Map();
+  for (const f of S.findings) if (f.created_at > (last.get(f.topic) ?? '')) last.set(f.topic, f.created_at);
+  return S.topics.filter(hit).map((t, i) => ({t, i})).sort((a, b) => (last.get(b.t) ?? '').localeCompare(last.get(a.t) ?? '') || a.i - b.i).map(o => o.t);
 }
-
-function renderStatus() {
-  const el = $('updated');
-  el.innerHTML = S.lastPoll
-    ? `<span class="live${Date.now() - Date.parse(S.lastPoll) > 15 * 60000 ? ' stale' : ''}"></span>updated ${ago(S.lastPoll)}`
-    : '<span class="live stale"></span>no live ingest yet';
+function renderSuggest() {
+  const typed = $('q').value.trim(), hit = topicHit(typed);
+  const count = t => S.findings.filter(f => f.topic === t && f.verdict === 'coordinated').length;
+  const all = matchTopics(typed);
+  const topics = all.slice(0, SUG_TOPICS), more = all.length - topics.length;
+  const alerts = S.findings.filter(f => f.verdict !== 'organic' && S.topics.includes(f.topic) && hit(f.topic))
+    .sort((a, b) => RANK[a.verdict] - RANK[b.verdict] || b.created_at.localeCompare(a.created_at)).slice(0, SUG_ALERTS);
+  sugItems = [...topics.map(t => ({topic: t})), ...alerts.map(f => ({topic: f.topic, fid: f.id}))];
+  sugAt = Math.min(sugAt, sugItems.length - 1);
+  let i = 0;
+  const opt = html => { const k = i++; return `<button type="button" class="opt" role="option" id="sug${k}" data-i="${k}" aria-selected="${k === sugAt}">${html}</button>`; };
+  $('suggest').innerHTML =
+    (topics.length ? '<h3>Topics</h3>' + topics.map(t => opt(`<b>${esc(topicLabel(t))}</b>${count(t) ? `<span class="n" title="Swarms detected">${count(t)}</span>` : ''}`)).join('') +
+      (more ? `<p class="more">+${more} more · keep typing to narrow</p>` : '') : '') +
+    (alerts.length ? '<h3>Latest alerts</h3>' + alerts.map(f => opt(`${dot(f.verdict)}<span>${VERDICT[f.verdict].title}</span>
+      <span class="m">${esc(topicLabel(f.topic))} · ${f.accounts.length} accounts${f.synthetic ? ` · ${SIM}` : ''}</span><span class="t">${ago(f.created_at)}</span>`)).join('') : '') ||
+    `<p class="none">No monitored topic matches “${esc(typed)}”.</p>`;
+  if (sugAt >= 0) { $('q').setAttribute('aria-activedescendant', `sug${sugAt}`); $(`sug${sugAt}`)?.scrollIntoView({block: 'nearest'}); }
+  else $('q').removeAttribute('aria-activedescendant');
+}
+function suggest(on) {
+  on &&= root.dataset.stage === 'home';
+  $('suggest').hidden = !on; $('q').setAttribute('aria-expanded', on);
+  if (on) renderSuggest(); else sugAt = -1;
+}
+// picking fills the field; the check itself starts with Play (or Enter). An alert remembers its group for that
+let pickedFid = null;
+function pickSuggest(i) {
+  const it = sugItems[i];
+  if (!it) return;
+  suggest(false);
+  $('q').value = topicLabel(it.topic); syncClear();
+  pickedFid = it.fid ? {topic: it.topic, id: it.fid} : null;
+  $('playBtn').focus();
 }
 
 /* ------------------------------------------------------------------ data */
+// one sonar ring from the map's origin (result view), the moment the radar asks for new data
+function pulse() {
+  if (ok && !reduced) U.uPingT.value = U.uTime.value;
+  tickEl.classList.remove('emit'); void tickEl.getBoundingClientRect(); tickEl.classList.add('emit');
+}
+
+/* One clock for all updates. The antenna at the map's origin fills up over the wait; when it is full the update is
+   called and the sonar fires, in that same moment: every live frame (10 s) while scanning, every poll (15 s) when not */
+const clock = {at: performance.now(), ms: POLL_MS, timer: 0};
+function schedule(ms) {
+  clearTimeout(clock.timer);
+  clock.at = performance.now(); clock.ms = ms;
+  clock.timer = setTimeout(update, ms);
+}
+async function update() {
+  const L = S.live;
+  if (root.dataset.stage === 'result') pulse();
+  schedule(L?.session ? LIVE_MS : POLL_MS);           // the next wait starts now, so the antenna fills at an even pace
+  if (L?.session) await liveTick(L); else await refresh();
+}
 async function refresh() {
   try {
     const asked = S.alpha;
@@ -766,7 +1101,6 @@ async function refresh() {
     if (asked !== S.alpha) return false;  // the selector changed while this request was in flight
     S.findings = r.findings; S.lastPoll = r.last_poll_at;
   } catch (e) { console.warn('alerts', e); return false; }
-  renderStatus();
   if (root.dataset.stage === 'home') renderHome();
   else if (S.topic && root.dataset.stage === 'result') {
     const cur = shown()?.id, next = topicFindings(S.topic);
@@ -787,7 +1121,11 @@ async function refresh() {
 }
 
 // time x meaning map of the open topic, live or rewound; the scene shows a flat floor until it arrives
-const setOrigin = () => { AXES[2].el.textContent = `${nowText()} UTC`; };  // the origin label = the moment on screen
+// the time axis: every label is a local clock time, counted back from the moment on screen (the origin)
+const setOrigin = () => {
+  for (const d of AXES) if (d.tk != null) d.el.textContent = S.tmap ? localHM(originMs() - d.tk * LABEL_EVERY * BIN_MS) : (d.tk ? '' : 'now');
+  renderStrip();
+};
 function showMap() {
   setOrigin();
   if (ok) setField(shown());
@@ -826,15 +1164,15 @@ async function liveStart(topic) {
     return;
   }
   if (S.live !== L) { closeSession(L.session); return; }  // stopped or another topic meanwhile
-  L.timer = setInterval(() => liveTick(L), LIVE_MS);
-  liveTick(L);
+  update();                                           // the scan runs on the update clock from now on
 }
 
 function liveStop(msg) {
   const L = S.live;
   if (!L) return;
-  clearInterval(L.timer); S.live = null;
+  S.live = null;
   if (L.session) closeSession(L.session);
+  schedule(POLL_MS);                                  // back to polling, counted from now
   renderLive(msg, L);
 }
 
@@ -852,7 +1190,10 @@ async function liveTick(L) {
       return;
     }
     if (S.live !== L) return;
-    if (frames.length) { L.frame = frames.at(-1); L.since = L.frame.at; }
+    if (frames.length) {
+      const f = frames.at(-1);
+      L.frame = f; L.since = f.at;
+    }
     if (!(await refresh())) throw new Error('alerts unavailable');
     L.error = null;
   } catch (e) {
@@ -863,73 +1204,118 @@ async function liveTick(L) {
   }
 }
 
-function renderLive(msg, last) {
-  const L = S.live, btn = $('liveBtn'), out = $('liveMsg');
-  btn.dataset.on = String(!!L);
-  btn.textContent = L ? 'Stop' : 'Resume live scan';
-  btn.disabled = !L && !S.topic;
-  if (!L) { out.innerHTML = `<span class="live-dot"></span>${esc(msg ?? (last ? 'Live scan stopped.' : ''))}`; return; }
-  const f = L.frame;
-  const bits = f
-    ? [`frame ${f.at.slice(11, 19)} UTC`, `${f.n_items} posts from ${f.n_accounts} accounts in ${WINDOW_HOURS} h`,
-       ...(f.n_watching ? [`${f.n_watching} group${f.n_watching === 1 ? '' : 's'} on watch`] : []),
-       ...(f.top_verdict === 'coordinated' ? [`swarm of ${f.top_n_accounts} accounts`] : [])]
-    : ['starting the scan…'];
-  // the live frame is the design alpha; other slider points are recomputed on the worker's slow pass only
-  if (S.alpha !== DESIGN_ALPHA) bits.push(`live at ${pct(DESIGN_ALPHA)}; the ${pct(S.alpha)} view refreshes every ~5 min`);
-  out.innerHTML = `<span class="live-dot on"></span>Live · ${esc(bits.join(' · '))}${L.error ? ` · ${esc(L.error)}` : ''}`;
+// the player controls in the search field: play checks the topic (or resumes its scan), pause pauses the scan
+function renderLive() {
+  const btn = $('playBtn'), on = !!S.live;
+  btn.dataset.state = on ? 'pause' : 'play';
+  btn.type = on ? 'button' : 'submit';
+  const label = on ? 'Pause the live scan' : S.topic && root.dataset.stage === 'result' && sameTopic() ? 'Resume the live scan' : 'Check';
+  btn.setAttribute('aria-label', label); btn.title = label;
 }
+// the search field still names the open topic: play resumes it instead of checking a new one
+const sameTopic = () => !!S.topic && root.dataset.stage !== 'home';   // the topic's screen: play resumes its scan
 
 /* ------------------------------------------------------------------ wiring */
 $('q').addEventListener('input', syncClear);
 $('search').addEventListener('submit', e => {
   e.preventDefault();
+  if (root.dataset.stage !== 'home') return;        // the topic is fixed on its screen: Enter does not check it again
   const q = $('q').value.trim();
   if (!q) return;
   const lq = q.toLowerCase();
-  const t = S.topics.find(t => t === q || topicLabel(t).toLowerCase() === lq) ?? S.topics.find(t => t.includes(lq.replace(/\s+/g, '-')));
-  if (t) openTopic(t); else { $('q').value = ''; $('q').placeholder = `Not monitored: ${q}`; syncClear(); }
+  const t = S.topics.find(t => t === q || topicLabel(t).toLowerCase() === lq) ?? matchTopics(q)[0];   // else the first in the picker
+  if (t) { const fid = pickedFid?.topic === t ? pickedFid.id : null; pickedFid = null; openTopic(t, fid ? {findingId: fid} : {}); } else { $('q').value = ''; $('q').placeholder = `Not monitored: ${q}`; syncClear(); }
 });
-$('samples').addEventListener('click', e => { const b = e.target.closest('[data-sample]'); if (b) openTopic(b.dataset.sample); });
-$('feed').addEventListener('click', e => { const b = e.target.closest('[data-topic]'); if (b) openTopic(b.dataset.topic, {findingId: b.dataset.fid}); });
+// the picker opens on a click or on typing (not on the page's own focus), arrows move in it, Enter picks
+$('q').addEventListener('pointerdown', () => { if ($('suggest').hidden) suggest(true); });
+$('q').addEventListener('input', () => { sugAt = -1; pickedFid = null; suggest(true); });
+$('q').addEventListener('blur', () => suggest(false));
+$('q').addEventListener('keydown', e => {
+  if (root.dataset.stage !== 'home') return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    if ($('suggest').hidden) { suggest(true); if (e.key === 'ArrowUp') return; }
+    const n = sugItems.length; if (!n) return;
+    sugAt = e.key === 'ArrowDown' ? (sugAt + 1) % n : (sugAt <= 0 ? n - 1 : sugAt - 1);
+    renderSuggest();
+  } else if (e.key === 'Enter' && !$('suggest').hidden && sugAt >= 0) { e.preventDefault(); pickSuggest(sugAt); }
+  else if (e.key === 'Escape' && !$('suggest').hidden) { e.stopPropagation(); suggest(false); }
+});
+$('suggest').addEventListener('pointerdown', e => e.preventDefault());   // keep the focus in the field
+$('suggest').addEventListener('click', e => { const o = e.target.closest('.opt'); if (o) pickSuggest(+o.dataset.i); });
 $('clear').addEventListener('click', () => {
   if (root.dataset.stage === 'home') { $('q').value = ''; syncClear(); $('q').focus(); }
   else goHome();
 });
 $('brandBtn').addEventListener('click', () => { if (root.dataset.stage !== 'home') goHome(); });
-$('resetCam').addEventListener('click', () => { setLegend(null); camTo('over', 1.0); });
-addEventListener('keydown', e => { if (e.key === 'Escape' && root.dataset.stage !== 'home') goHome(); });
-$('groups').addEventListener('change', e => {
-  if (e.target.id !== 'groupSel' || e.target.value === '') return;
-  if (e.target.value === 'now') goLive(); else select(+e.target.value);
+// Escape closes the innermost thing: a sheet (the dialog does that itself), the sensitivity menu, a header
+// panel, a card over the plot, and only then leaves the topic
+addEventListener('keydown', e => {
+  if (e.key !== 'Escape' || document.querySelector('dialog[open]')) return;
+  if (!$('fa').hidden) { sensitivity(false); $('alphaChip').focus(); return; }
+  if (S.pop) { closePop(); return; }
+  if (root.dataset.stage === 'home') return;
+  if ($('pick').innerHTML) unpick(); else goHome();
 });
-$('legend').addEventListener('click', e => {
-  const b = e.target.closest('.lg-btn'); if (!b || !ok) return;
-  const on = b.getAttribute('aria-pressed') === 'true';
-  setLegend(on ? null : b); camTo(on ? 'over' : b.dataset.cam);
+$('vHead').addEventListener('click', e => {
+  const say = e.target.closest('[data-say]'), how = e.target.closest('[data-how]'), pop = e.target.closest('[data-pop]'), b = e.target.closest('[data-g]');
+  if (say) showSays(+say.dataset.say);
+  else if (how) showHow(+how.dataset.how);
+  else if (e.target.closest('[data-now]')) goLive();
+  else if (pop) {                                     // render rebuilds the button: keep the keyboard focus on it
+    S.pop = S.pop === pop.dataset.pop ? null : pop.dataset.pop;
+    if (S.pop) unpick();                              // the panel replaces an open cell card
+    renderHead();
+    $('vHead').querySelector(`[data-pop="${pop.dataset.pop}"]`)?.focus();
+  } else if (b) select(+b.dataset.g);
 });
-$('liveBtn').addEventListener('click', () => { if (S.live) liveStop(); else if (S.topic) liveStart(S.topic); });
+// closes the panel in place: no render(), which would rebuild the header under a press and swallow its click
+function closePop() {
+  S.pop = null; $('pop').hidden = true;
+  for (const b of $('vHead').querySelectorAll('[data-pop]')) b.setAttribute('aria-expanded', 'false');
+}
+addEventListener('pointerdown', e => { if (S.pop && !e.target.closest('#pop,[data-pop]')) closePop(); });
+const closeSheets = () => { for (const id of ['says', 'posts', 'how']) if ($(id).open) $(id).close(); };
+$('how').addEventListener('close', () => { howing++; });
+// the Back button rides along while the sheet scrolls, tucked into a round button (as on /metrics)
+$('how').addEventListener('scroll', e => e.currentTarget.classList.toggle('scrolled', e.currentTarget.scrollTop > 30), {passive: true});
+$('says').addEventListener('close', () => { saying++; });
+for (const id of ['says', 'posts', 'how']) $(id).addEventListener('click', e => {
+  const pt = e.target.closest('[data-point]');
+  if (pt) showPosts(+pt.dataset.point);
+  else if (e.target.closest('[data-close]')) $(id).close();                                 // Done
+  else if (e.target === $(id)) {                     // the backdrop: outside the sheet's box, not its own padding
+    const r = $(id).getBoundingClientRect();
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) $(id).close();
+  }
+});
+$('pick').addEventListener('click', e => { const say = e.target.closest('[data-say]'); if (say) showSays(+say.dataset.say); });
+// the sensitivity menu of the scan pill: the sonar button toggles it, a click elsewhere or Escape closes it
+function sensitivity(on) {
+  $('fa').hidden = !on; $('alphaChip').setAttribute('aria-expanded', on);
+  if (on) $('alphaRange').focus({preventScroll: true});
+  else details(false);                              // the menu opens short again
+}
+function details(on) { $('alphaMore').hidden = !on; $('alphaInfo').setAttribute('aria-expanded', on); }
+$('alphaInfo').addEventListener('click', () => details($('alphaMore').hidden));
+$('alphaChip').addEventListener('click', () => sensitivity($('fa').hidden));
+addEventListener('pointerdown', e => { if (!$('fa').hidden && !e.target.closest('#fa,#alphaChip')) sensitivity(false); });
+$('playBtn').addEventListener('click', e => {
+  if (S.live) { e.preventDefault(); liveStop(); }                                     // pause
+  else if (sameTopic()) { e.preventDefault(); liveStart(S.topic); }                  // resume
+});                                                                                    // otherwise: submit = Check
+$('stopBtn').addEventListener('click', () => { liveStop(); goHome(); });              // stop: the scan ends, back to the start
 addEventListener('pagehide', () => { if (S.live?.session) navigator.sendBeacon?.(`/api/scan/${S.live.session}/stop`); });
-for (const ev of ['click', 'pointerover']) $('evCorr').addEventListener(ev, e => {
-  const c = e.target.closest('.corr div'), out = $('evCorr').querySelector('.corr-pick');
-  if (c && out) out.textContent = c.getAttribute('aria-label');
-});
-for (const [tab, panel] of [['tabMain', 'panelMain'], ['tabDetails', 'panelDetails']])
-  $(tab).addEventListener('click', () => {
-    for (const [t2, p2] of [['tabMain', 'panelMain'], ['tabDetails', 'panelDetails']]) {
-      $(t2).setAttribute('aria-selected', t2 === tab); $(p2).hidden = p2 !== panel;
-    }
-  });
-
 // T12c false-alarm slider: one stop per SPRT alpha, hint from the measured point (/api/operating_points)
 const per = a => `~${Math.round(1 / a)}`;
+// one short line under the slider; the rest (what it catches, how it was measured) behind the "!" button
 function alphaHint(a) {
   const p = S.points?.points?.find(q => Math.abs(q.alpha - a) < 1e-9);
-  const lim = `Design target: <b>1 false alarm per ${per(a)}</b> quiet windows (6 h of one topic)`;
-  if (!p) return [`${lim}. Not measured yet.${a !== DESIGN_ALPHA ? ` Live scan updates at ${pct(DESIGN_ALPHA)}; this point refreshes every ~5 min.` : ''}`, ''];
-  const dec = p.posts_to_decision != null ? ` · decides after <b>~${p.posts_to_decision.toFixed(1)} posts</b>` : '';
-  const lag = a !== DESIGN_ALPHA ? ` · live scan updates at ${pct(DESIGN_ALPHA)}; this point refreshes every ~5 min` : '';
-  const hint = `${lim} · catches <b>${pct(p.pd_small)}</b> of 3-account swarms${dec}${lag}`;
+  const hint = `About 1 false alarm per ${per(a)} quiet windows`;
+  const live = a !== DESIGN_ALPHA ? ` The live scan updates at ${pct(DESIGN_ALPHA)}; this point refreshes every ~5 min.` : '';
+  if (!p) return [hint, `A quiet window = ${WINDOW_HOURS} h of one topic. Not measured yet.${live}`, ''];
+  const dec = p.posts_to_decision != null ? `, deciding after <b>~${p.posts_to_decision.toFixed(1)} posts</b>` : '';
+  const detail = `A quiet window = ${WINDOW_HOURS} h of one topic. Catches <b>${pct(p.pd_small)}</b> of 3-account swarms${dec}.${live}`;
   const alarms = Math.round(p.pfa * p.n_background);
   let meas = `Measured: ${alarms} false alarm${alarms === 1 ? '' : 's'} in ${p.n_background} test windows (≤ ${pct(p.pfa_upper95)} at 95%)`;
   if (p.n_independent) {
@@ -937,7 +1323,7 @@ function alphaHint(a) {
     meas += ` · ${ia} in ${p.n_independent} independent live windows` +
       (p.pfa_independent_upper95 != null ? ` (≤ ${pct(p.pfa_independent_upper95)})` : '');
   }
-  return [hint, meas];
+  return [hint, detail, meas];
 }
 
 function setupAlpha() {
@@ -949,7 +1335,7 @@ function setupAlpha() {
   try { saved = parseFloat(localStorage.getItem('ltr.alpha')); } catch {}
   S.alpha = alphas.includes(saved) ? saved : (alphas.includes(DESIGN_ALPHA) ? DESIGN_ALPHA : alphas[0]);
   range.max = String(alphas.length - 1);
-  $('fa').hidden = alphas.length < 2;  // one served stop: nothing to choose
+  $('alphaChip').hidden = alphas.length < 2;  // one served stop: nothing to choose
   range.value = String(alphas.indexOf(S.alpha));
   const at = i => i / Math.max(1, alphas.length - 1) * 100;
   $('alphaStops').innerHTML = alphas.map((a, i) =>
@@ -959,10 +1345,13 @@ function setupAlpha() {
     range.style.setProperty('--p', `${at(i)}%`);
     range.setAttribute('aria-valuetext', `${pct(a)} false alarm limit`);
     $('alphaVal').textContent = pct(a);
-    $('alphaChipVal').textContent = pct(a);
     for (const b of $('alphaStops').children) b.classList.toggle('on', +b.dataset.i === i);
-    const [hint, meas] = alphaHint(a);
-    $('alphaHint').innerHTML = hint; $('alphaMeas').textContent = meas;
+    const [hint, detail, meas] = alphaHint(a);
+    $('alphaHint').textContent = hint; $('alphaDetail').innerHTML = detail; $('alphaMeas').textContent = meas;
+    // the landing's sonar follows the slider at once, while dragging: more sensitive = more swarms found
+    sens = alphas.length > 1 ? i / (alphas.length - 1) : .5;
+    const per = Math.max(1, Math.round(1 / spotP(sens)));
+    $('alphaDemo').textContent = per === 1 ? 'On the radar below: almost every ping finds a swarm' : `On the radar below: about 1 ping in ${per} finds a swarm`;
   };
   const commit = async () => {
     const a = alphas[+range.value];
@@ -982,12 +1371,11 @@ function setupAlpha() {
     const b = e.target.closest('button'); if (!b) return;
     range.value = b.dataset.i; show(+b.dataset.i); commit(); range.focus();
   });
-  $('alphaChip').addEventListener('click', () => { goHome(); setTimeout(() => range.focus({preventScroll: true}), 50); });
   show(+range.value);
 }
 
 try { buildScene(); } catch (err) { ok = false; console.error(err); canvas.style.display = 'none'; }
-if (ok) { new ResizeObserver(resize).observe(stage); resize(); requestAnimationFrame(frame); }
+if (ok) { new ResizeObserver(resize).observe(canvas); resize(); requestAnimationFrame(frame); }
 
 (async () => {
   const [topics, metrics, points, served] = await Promise.allSettled(
@@ -1001,6 +1389,6 @@ if (ok) { new ResizeObserver(resize).observe(stage); resize(); requestAnimationF
   renderHome();
   const q = new URLSearchParams(location.search).get('q');
   if (q && S.topics.includes(q)) openTopic(q, {instant: true});
-  setInterval(refresh, POLL_MS);
-  setInterval(renderStatus, 30000);
+  schedule(POLL_MS);
+  setInterval(renderStrip, 30000);   // "now" moves on the timeline
 })();
