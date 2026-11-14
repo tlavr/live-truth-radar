@@ -67,13 +67,17 @@ def _item(row: dict) -> Item:
     return Item.model_validate({c: row[c] for c in ITEM_COLS})
 
 
-def get_items(conn: psycopg.Connection, ids: list[str]) -> list[Item]:
-    """Items by id, in time order; unknown ids are skipped."""
+def get_items(conn: psycopg.Connection, ids: list[str], until: datetime | None = None) -> list[Item]:
+    """Items by id, in time order; unknown ids are skipped. `until`: only items published by then (T12d: an
+    attack's future posts stay hidden until their time)."""
     if not ids:
         return []
-    rows = conn.execute(
-        f"SELECT {', '.join(ITEM_COLS)} FROM items WHERE id = ANY(%s) ORDER BY published_at, id", (list(ids),)
-    ).fetchall()
+    sql = f"SELECT {', '.join(ITEM_COLS)} FROM items WHERE id = ANY(%s)"
+    params: tuple = (list(ids),)
+    if until is not None:
+        sql += " AND published_at <= %s"
+        params += (until,)
+    rows = conn.execute(sql + " ORDER BY published_at, id", params).fetchall()
     return [_item(r) for r in rows]
 
 
@@ -149,10 +153,24 @@ FINDINGS_ALPHA_DDL = (
 )
 
 
+T12D_DDL = (
+    "CREATE TABLE IF NOT EXISTS scan_sessions (id bigserial PRIMARY KEY, topics text[] NOT NULL, "
+    "started_at timestamptz NOT NULL DEFAULT now(), last_seen_at timestamptz NOT NULL DEFAULT now(), "
+    "stopped_at timestamptz)",
+    "CREATE INDEX IF NOT EXISTS scan_sessions_open_idx ON scan_sessions (last_seen_at) WHERE stopped_at IS NULL",
+    "CREATE TABLE IF NOT EXISTS radar_frames (topic text NOT NULL, at timestamptz NOT NULL, frame jsonb NOT NULL)",
+    "CREATE INDEX IF NOT EXISTS radar_frames_topic_at_idx ON radar_frames (topic, at)",
+    "CREATE TABLE IF NOT EXISTS attacks (campaign_id text PRIMARY KEY, topic text NOT NULL, "
+    "n_accounts integer NOT NULL, starts_at timestamptz NOT NULL, ends_at timestamptz NOT NULL, "
+    "created_at timestamptz NOT NULL DEFAULT now())",
+    "CREATE INDEX IF NOT EXISTS attacks_topic_idx ON attacks (topic, created_at)",
+)
+
+
 def ensure_schema(conn: psycopg.Connection) -> None:
     """Tables added after the first deploy (infra/schema.sql runs only on a fresh DB volume)."""
     with conn.transaction():
-        for ddl in FINDINGS_ALPHA_DDL:
+        for ddl in FINDINGS_ALPHA_DDL + T12D_DDL:
             conn.execute(ddl)
 
 
@@ -264,3 +282,97 @@ def set_last_poll(conn: psycopg.Connection, ts: datetime | None = None) -> None:
         "INSERT INTO worker_state (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
         (LAST_POLL, ts or datetime.now(timezone.utc)),
     )
+
+
+def last_inject_at(conn: psycopg.Connection, topic: str) -> datetime | None:
+    """T12d: time of the newest inject request on the topic (the public inject is rate-limited per topic)."""
+    row = conn.execute("SELECT max(created_at) AS at FROM inject_requests WHERE topic = %s", (topic,)).fetchone()
+    return None if row is None else row["at"]
+
+
+# ---------------------------------------------------------------- T12d: scan sessions, radar frames, attacks
+
+
+def open_scan(conn: psycopg.Connection, topics: list[str]) -> int:
+    row = conn.execute("INSERT INTO scan_sessions (topics) VALUES (%s) RETURNING id", (list(topics),)).fetchone()
+    return int(row["id"])
+
+
+def touch_scan(conn: psycopg.Connection, session_id: int, stale_sec: float) -> list[str] | None:
+    """Heartbeat: the session's topics if it is open and fresh (last_seen_at moves to now), else None."""
+    row = conn.execute(
+        "UPDATE scan_sessions SET last_seen_at = now() WHERE id = %s AND stopped_at IS NULL "
+        "AND last_seen_at >= now() - %s * interval '1 second' RETURNING topics",
+        (session_id, stale_sec),
+    ).fetchone()
+    return None if row is None else list(row["topics"])
+
+
+def stop_scan(conn: psycopg.Connection, session_id: int) -> bool:
+    row = conn.execute(
+        "UPDATE scan_sessions SET stopped_at = now() WHERE id = %s AND stopped_at IS NULL RETURNING id", (session_id,)
+    ).fetchone()
+    return row is not None
+
+
+def scanned_topics(conn: psycopg.Connection, stale_sec: float) -> set[str]:
+    """Union of the topics of open sessions with a heartbeat in the last stale_sec."""
+    rows = conn.execute(
+        "SELECT DISTINCT unnest(topics) AS topic FROM scan_sessions WHERE stopped_at IS NULL "
+        "AND last_seen_at >= now() - %s * interval '1 second'",
+        (stale_sec,),
+    ).fetchall()
+    return {r["topic"] for r in rows}
+
+
+def add_frame(conn: psycopg.Connection, frame: dict) -> None:
+    conn.execute("INSERT INTO radar_frames (topic, at, frame) VALUES (%s, %s, %s)",
+                 (frame["topic"], frame["at"], Jsonb(frame)))
+
+
+def load_frames(conn: psycopg.Connection, topic: str, since: datetime) -> list[dict]:
+    rows = conn.execute(
+        "SELECT frame FROM radar_frames WHERE topic = %s AND at > %s ORDER BY at", (topic, since)
+    ).fetchall()
+    return [json.loads(r["frame"]) if isinstance(r["frame"], str) else r["frame"] for r in rows]
+
+
+def prune_frames(conn: psycopg.Connection, keep_hours: float) -> int:
+    cur = conn.execute("DELETE FROM radar_frames WHERE at < now() - %s * interval '1 hour'", (keep_hours,))
+    return max(cur.rowcount, 0)
+
+
+def add_attack(conn: psycopg.Connection, campaign_id: str, topic: str, n_accounts: int, starts_at: datetime,
+               ends_at: datetime) -> None:
+    conn.execute(
+        "INSERT INTO attacks (campaign_id, topic, n_accounts, starts_at, ends_at) VALUES (%s, %s, %s, %s, %s)",
+        (campaign_id, topic, n_accounts, starts_at, ends_at),
+    )
+
+
+def last_attack_at(conn: psycopg.Connection, topic: str) -> datetime | None:
+    """T12d: time of the newest attack on the topic (one attack per 5 min per topic)."""
+    row = conn.execute("SELECT max(created_at) AS at FROM attacks WHERE topic = %s", (topic,)).fetchone()
+    return None if row is None else row["at"]
+
+
+def active_attack_topics(conn: psycopg.Connection, ttl_sec: float) -> set[str]:
+    rows = conn.execute(
+        "SELECT DISTINCT topic FROM attacks WHERE ends_at + %s * interval '1 second' > now()", (ttl_sec,)
+    ).fetchall()
+    return {r["topic"] for r in rows}
+
+
+def get_attack(conn: psycopg.Connection, campaign_id: str) -> dict | None:
+    return conn.execute(
+        "SELECT campaign_id, topic, n_accounts, starts_at, ends_at FROM attacks WHERE campaign_id = %s", (campaign_id,)
+    ).fetchone()
+
+
+def campaign_items(conn: psycopg.Connection, campaign_id: str, until: datetime) -> list[Item]:
+    rows = conn.execute(
+        f"SELECT {', '.join(ITEM_COLS)} FROM items WHERE campaign_id = %s AND published_at <= %s "
+        "ORDER BY published_at, id",
+        (campaign_id, until),
+    ).fetchall()
+    return [_item(r) for r in rows]

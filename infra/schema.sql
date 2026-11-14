@@ -94,6 +94,32 @@ CREATE TABLE IF NOT EXISTS inject_requests (
 CREATE INDEX IF NOT EXISTS inject_requests_pending_idx
     ON inject_requests (created_at) WHERE processed_at IS NULL;
 
+-- T12d: live scan sessions (heartbeat via GET /api/radar), radar frames of the scanned topics (kept 2 h),
+-- red-team attacks (one per 5 min per topic). Also created by ingest.store.ensure_schema.
+CREATE TABLE IF NOT EXISTS scan_sessions (
+    id           bigserial PRIMARY KEY,
+    topics       text[] NOT NULL,
+    started_at   timestamptz NOT NULL DEFAULT now(),
+    last_seen_at timestamptz NOT NULL DEFAULT now(),
+    stopped_at   timestamptz
+);
+CREATE INDEX IF NOT EXISTS scan_sessions_open_idx ON scan_sessions (last_seen_at) WHERE stopped_at IS NULL;
+CREATE TABLE IF NOT EXISTS radar_frames (
+    topic text NOT NULL,
+    at    timestamptz NOT NULL,
+    frame jsonb NOT NULL
+);
+CREATE INDEX IF NOT EXISTS radar_frames_topic_at_idx ON radar_frames (topic, at);
+CREATE TABLE IF NOT EXISTS attacks (
+    campaign_id text PRIMARY KEY,
+    topic       text NOT NULL,
+    n_accounts  integer NOT NULL,
+    starts_at   timestamptz NOT NULL,
+    ends_at     timestamptz NOT NULL,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS attacks_topic_idx ON attacks (topic, created_at);
+
 -- Small key/value state, e.g. key 'last_poll_at' = last successful ingest cycle (AlertsResponse.last_poll_at).
 CREATE TABLE IF NOT EXISTS worker_state (
     key   text PRIMARY KEY,

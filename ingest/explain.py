@@ -261,8 +261,7 @@ def _cache_path(finding_id: str) -> Path:
     return CACHE_DIR / f"{re.sub(r'[^A-Za-z0-9_-]', '_', finding_id)}.json"
 
 
-def explain(finding: Finding, items: list[Item]) -> Explanation:
-    """Explanation for the finding: disk cache, then Gemini, then AI Router. Raises if all fail."""
+def _prepare(finding: Finding, items: list[Item]) -> tuple[list[Item], list[str], re.Pattern[str]]:
     item_ids = set(finding.item_ids)
     group = [it for it in items if it.id in item_ids]
     if not group:
@@ -270,14 +269,37 @@ def explain(finding: Finding, items: list[Item]) -> Explanation:
     handles = _redaction_pattern(finding, group)
     # Do not accept an excerpt spanning or cutting through a redaction.
     texts = [excerpt for it in group for excerpt in handles.split(it.text)]
+    return group, texts, handles
+
+
+def _from_cache(finding: Finding, texts: list[str], handles: re.Pattern[str]) -> Explanation | None:
     path = _cache_path(finding.id)
     try:
         # Cached quotes must still be valid for the current posts of this finding.
         return _validate(path.read_text(encoding="utf-8"), texts, handles)
     except FileNotFoundError:
-        pass
+        return None
     except (OSError, ValueError):
         log.warning("bad cached explanation %s; regenerating", path.name)
+        return None
+
+
+def cached_explanation(finding: Finding, items: list[Item]) -> Explanation | None:
+    """T12d: the disk-cached explanation only (no LLM call, never raises); None if missing or no longer valid."""
+    try:
+        _, texts, handles = _prepare(finding, items)
+    except ValueError:
+        return None
+    return _from_cache(finding, texts, handles)
+
+
+def explain(finding: Finding, items: list[Item]) -> Explanation:
+    """Explanation for the finding: disk cache, then Gemini, then AI Router. Raises if all fail."""
+    group, texts, handles = _prepare(finding, items)
+    path = _cache_path(finding.id)
+    cached = _from_cache(finding, texts, handles)
+    if cached is not None:
+        return cached
     prompt = build_prompt(finding, group)
     errors = []
     for name, provider in PROVIDERS:

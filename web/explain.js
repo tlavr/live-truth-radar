@@ -107,7 +107,7 @@ function render(f, items, points) {
   const n = f.accounts.length, posts = f.item_ids.length, hit = f.verdict === 'coordinated';
   const dur = (Date.parse(f.last_seen) - Date.parse(f.first_seen)) / 1000;
   const news = items.filter(it => it.source === 'context_news').length;
-  $('intro').innerHTML = `Alert in <b>${esc(topicLabel(f.topic))}</b>: ${n} accounts, ${posts} posts${f.synthetic ? ' (an injected test campaign)' : ''}. ` +
+  $('intro').innerHTML = `Alert in <b>${esc(topicLabel(f.topic))}</b>: ${n} accounts, ${posts} posts${f.synthetic ? ' (a simulated attack from the red team console)' : ''}. ` +
     'Here is every step the detector took, in order, from raw posts to the verdict.';
   $('back').href = `/?q=${encodeURIComponent(f.topic)}`;
 
