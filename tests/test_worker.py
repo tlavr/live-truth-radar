@@ -53,7 +53,7 @@ def test_failing_topic_does_not_stall_other_topics_injects_or_poll_interval(monk
 
     monkeypatch.setattr(worker, "ingest_cycle", ingest_cycle)
     monkeypatch.setenv("TOPICS", "bad,good")
-    st = worker.LoopState(detector_name="real", detector=detector, interval=180, window_hours=6)
+    st = worker.LoopState(detector=detector, interval=180, window_hours=6)
     conn = FakeConn()
     for k in range(5):  # 5 ticks of ~10 s, all inside one poll interval
         worker.tick(conn, st, now=10.0 * k)
@@ -95,3 +95,29 @@ def test_detect_topic_ends_the_read_transaction_before_the_llm_call(monkeypatch)
     assert worker.detect_topic(conn, f.topic, lambda items: [f], 6) == 1
     assert seen["commits"] == 1  # no DB transaction is held open during the slow provider call
     assert [x.id for x in seen["stored"]] == [f.id]  # the write still happens, in the unit's own transaction
+
+
+def test_real_detector_alerts_on_each_of_two_injects(monkeypatch):
+    """I1 offline: inject -> process_injects -> coordinated synthetic finding; the second inject alerts too."""
+    from datetime import datetime, timedelta, timezone
+
+    from synth.campaign import make_campaign
+
+    topic, now = "helsinki-tram-fares", datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc)
+    window: list = []
+    stored: dict[str, list[Finding]] = {}
+    pending: list[dict] = []
+    monkeypatch.setattr(worker.store, "window_items", lambda conn, t, h: [it for it in window if it.topic == t])
+    monkeypatch.setattr(worker.store, "replace_findings", lambda conn, t, fs: stored.__setitem__(t, fs))
+    monkeypatch.setattr(worker.store, "pending_injects", lambda conn: list(pending))
+    monkeypatch.setattr(worker.store, "mark_injects_processed", lambda conn, ids: pending.clear())
+    monkeypatch.setattr(worker, "_with_explanation", lambda f, posts: f)  # no LLM in tests
+    monkeypatch.setattr(worker.store, "get_items", lambda conn, ids: [], raising=False)
+    detector = worker.load_detector()
+
+    for k in range(2):
+        window += make_campaign(topic, now + timedelta(minutes=20 * k))
+        pending.append({"id": k, "topic": topic})
+        assert worker.process_injects(FakeConn(), detector, window_hours=6) == 1
+        alerts = [f for f in stored[topic] if f.verdict == "coordinated" and f.synthetic]
+        assert len(alerts) == k + 1

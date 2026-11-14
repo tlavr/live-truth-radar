@@ -273,3 +273,17 @@ def test_beam_thresholds_follow_the_embedder_that_ran(monkeypatch):
     assert not [f for f in detect(items) if f.verdict == "coordinated"]
     monkeypatch.setattr(pipeline, "embed_with_backend", lambda texts: (hash_embed(texts), "hash"))
     assert [f for f in detect(items) if f.verdict == "coordinated"]
+
+
+def test_second_inject_in_the_same_topic_does_not_mask_the_first():
+    """Two injected swarms in one window: each must stay coordinated (the other one is not its H0)."""
+    now = datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc)
+    first = make_campaign("helsinki-tram-fares", now)
+    second = make_campaign("helsinki-tram-fares", now + timedelta(minutes=20))
+    found = [f for f in detect(first + second) if f.verdict == "coordinated"]
+    assert len(found) == 2
+    assert {frozenset(f.accounts) for f in found} == {
+        frozenset(it.author for it in first),
+        frozenset(it.author for it in second),
+    }
+    assert all(f.synthetic for f in found)
