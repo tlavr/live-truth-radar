@@ -822,11 +822,11 @@ function render() {
 }
 
 /* the big verdict over the group picker, in the verdict's colour: Quiet, a possible group (yellow), or a
-   coordinated one in the accent, named by its attack type once the explanation names it. Why says why */
+   coordinated one in the accent ("Swarm Detected"); its attack type heads the Why panel, not the title */
 function renderTitle() {
   const f = shown(), c = verdictCopy(f), vt = $('vTitle');
   vt.dataset.v = f ? f.verdict : 'quiet';
-  vt.textContent = f?.verdict === 'coordinated' && f.explanation?.technique ? f.explanation.technique : c.title;
+  vt.textContent = c.title;   // always the verdict; the attack type heads the Why panel (whyHTML)
 }
 /* the header: one tab per group (the letter it carries everywhere), or one dropdown when there are more than
    MAX_TABS; under it the shown group's line. The tabs stay even for one group: they carry its verdict mark.
@@ -866,10 +866,29 @@ function setHTML(el, html) {
   const n = t.content.childNodes;
   if (n.length !== el.childNodes.length || ![...n].every((c, i) => c.isEqualNode(el.childNodes[i]))) el.replaceChildren(t.content);
 }
-// "Why": the verdict of the shown group in a sentence, then what made it stand out, one phrase per detector step
+// the attack types the explanation may name (ingest/explain.py TECHNIQUES), each with what it means in one line
+const TECHNIQUE_INFO = {
+  'fear appeal': 'Scares readers so they react before they think: danger, threat, "it could be you next".',
+  'call to action': 'Tells readers what to do right now: share, sign, boycott, show up, demand.',
+  'conspiracy / hidden truth': 'Claims a secret plot or a truth "they" hide, which only this message reveals.',
+  'loaded language': 'Emotional, charged words that push a judgement instead of stating facts.',
+  'bandwagon': '"Everyone already agrees": pressure to join the side that looks like the majority.',
+  'discrediting': 'Attacks the people or institutions involved instead of their arguments.',
+  'exaggeration': 'Blows the facts up: bigger numbers, worse outcomes, "the worst ever".',
+  'whataboutism': 'Deflects criticism by pointing at someone else\'s wrongdoing.',
+};
+// the Why panel's heading for a coordinated group: its attack type(s) with a short meaning; "other" and unknown labels are left out
+function attackHTML(f) {
+  const t = f?.verdict === 'coordinated' ? f.explanation?.technique : null;
+  if (!t) return '';
+  const known = [...new Set(t.toLowerCase().split(' + ').map(s => s.trim()))].filter(s => TECHNIQUE_INFO[s]);
+  return known.map(s => `<div class="atk"><b><span>Attack type</span>${esc(s[0].toUpperCase() + s.slice(1))}</b><p>${esc(TECHNIQUE_INFO[s])}</p></div>`).join('');
+}
+// "Why": the attack type (coordinated, once explained), the verdict of the shown group in a sentence,
+// then what made it stand out, one phrase per detector step
 function whyHTML(f) {
   const c = verdictCopy(f);
-  return `<p>${esc(c.text)}</p>` +
+  return attackHTML(f) + `<p>${esc(c.text)}</p>` +
     (f ? `<ul>${reasons(f).map(r => `<li>${esc(r)}</li>`).join('')}</ul>${f.note ? `<p class="note">${esc(f.note)}</p>` : ''}`
       : `<p class="risk">${c.risk}</p>`);
 }
@@ -888,9 +907,13 @@ for (const type of ['pointerup', 'pointercancel']) addEventListener(type, () => 
 }, true);
 
 /** The group's posts, fetched once and cached (at most 200 ids per request, as the API allows). */
+const ITEMS_PER_CALL = 200;                          // the API's limit of ids per /api/items request
 async function loadItems(f) {
-  const want = f.item_ids.filter(i => !S.items.has(i)).slice(0, 200);
-  if (want.length) for (const it of await api(`/api/items?ids=${want.map(encodeURIComponent).join(',')}`)) S.items.set(it.id, it);
+  const want = f.item_ids.filter(i => !S.items.has(i));
+  for (let k = 0; k < want.length; k += ITEMS_PER_CALL) {   // a big group: one call per 200 ids, not one cut-off call
+    const ids = want.slice(k, k + ITEMS_PER_CALL);
+    for (const it of await api(`/api/items?ids=${ids.map(encodeURIComponent).join(',')}`)) S.items.set(it.id, it);
+  }
   return f.item_ids.map(i => S.items.get(i)).filter(Boolean);
 }
 
@@ -898,40 +921,85 @@ async function loadItems(f) {
    fixed at the top while the posts scroll, so the grouping can always be checked against it. */
 const shownPoints = new Map();                      // id on the button -> {point, accounts in the group (null: they cannot be told apart), letter}
 const posts = k => `${k} ${k === 1 ? 'post' : 'posts'}`;
+/* one header for every sheet: a Back button that shrinks to its arrow once the sheet scrolls, the group's letter, the title */
+const sheetTop = (title, letter) => `<header class="howtop"><button type="button" class="hback" data-close><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 4.5 7 10l5.5 5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Back</span></button>${letter ? `<span class="tag">${letter}</span>` : ''}<h2>${title}</h2></header>`;
+function sheetOpen(dlg) { if (!dlg.open) dlg.showModal(); dlg.scrollTop = 0; dlg.classList.remove('scrolled'); }
+// "More": the list shows its first SHOWN rows; the button reveals the rest (and goes away)
+const moreHTML = n => n > SHOWN ? `<button type="button" class="more-btn" data-more>${n - SHOWN} more</button>` : '';
+// a clamped text that does not fit gets its "Read more" toggle (measured after layout)
+function markLong(root) {
+  requestAnimationFrame(() => root.querySelectorAll('.posts li:not(.measured) .clip').forEach(c => {
+    const li = c.closest('li');
+    li.classList.toggle('long', c.scrollHeight > c.clientHeight + 1); li.classList.add('measured');
+  }));
+}
 let pointId = 0;
 function pointHTML(p, n, letter) {
   shownPoints.set(++pointId, {p, n, letter});
-  return `<li><button type="button" data-point="${pointId}"><span>${esc(p.text)}</span><small>${n == null ? posts(p.posts) : `${p.accounts} of ${n} accounts${p.posts > p.accounts ? ` · ${p.posts} posts` : ''}`}</small></button></li>`;
+  return `<li><button type="button" data-point="${pointId}"><span class="clip">${esc(p.text)}</span><small>${n == null ? posts(p.posts) : `${p.accounts} of ${n} accounts${p.posts > p.accounts ? ` · ${p.posts} posts` : ''}`}</small></button></li>`;
 }
+/* the posts under a point arrive a page at a time while the sheet scrolls: when the footer under the list
+   (skeleton rows) comes within 200 px of the sheet's bottom edge the next page is added; at the end a quiet
+   line says all are shown. A scroll check, not an IntersectionObserver: created in the same task as
+   showModal() the observer never reported in Chromium */
+const PAGE = 10;
+let pager = null;                                   // the open sheet's "load more" check: dropped on close or a new point
+const postHTML = it => `<li><small>${esc(handle(it.author))} · ${hm(it.published_at)} UTC${it.platform ? ' · ' + esc(platformLabel(it.platform)) : ''}${it.synthetic ? `<span class="syn">${SIM}</span>` : ''}</small><span class="clip">${esc(it.text)}</span><button type="button" class="rm" data-expand>Read more</button>${/^https?:\/\//i.test(it.url ?? '') ? ` <a href="${esc(it.url)}" target="_blank" rel="noopener">source</a>` : ''}</li>`;
+function stopPaging() { if (pager) $('posts').removeEventListener('scroll', pager); pager = null; }
 function showPosts(id) {
   const s = shownPoints.get(id), dlg = $('posts');
   if (!s) return;
-  const {p, n, letter} = s;
-  dlg.innerHTML = `<header><span class="tag">${letter}</span><h2>${posts(p.posts)}${n == null ? '' : ` · ${p.accounts} of ${n} accounts`}</h2><button type="button" class="done" data-close>Done</button></header>
+  const {p, n, letter} = s, items = p.items;
+  stopPaging();
+  dlg.innerHTML = `${sheetTop(`${posts(p.posts)}${n == null ? '' : `<small>${p.accounts} of ${n} accounts</small>`}`, letter)}
     <p class="frozen">${esc(p.text)}</p>
-    <ul class="posts">${p.items.map(it => `<li><small>${esc(handle(it.author))} · ${hm(it.published_at)} UTC${it.platform ? ' · ' + esc(platformLabel(it.platform)) : ''}${it.synthetic ? `<span class="syn">${SIM}</span>` : ''}</small>${esc(it.text)}${/^https?:\/\//i.test(it.url ?? '') ? ` <a href="${esc(it.url)}" target="_blank" rel="noopener">source</a>` : ''}</li>`).join('')}</ul>`;
-  if (!dlg.open) dlg.showModal();
-  dlg.querySelector('.posts').scrollTop = 0;
+    <ul class="posts"></ul>
+    <div class="pager" aria-live="polite"></div>`;
+  const list = dlg.querySelector('.posts'), foot = dlg.querySelector('.pager');
+  let shown = 0;
+  const next = () => {
+    const batch = items.slice(shown, shown + PAGE);
+    list.insertAdjacentHTML('beforeend', batch.map(postHTML).join(''));
+    if (!reduced && shown) [...list.children].slice(shown).forEach((li, k) => li.animate(
+      [{opacity: 0, transform: 'translateY(6px)'}, {opacity: 1, transform: 'none'}],
+      {duration: 260, delay: 40 * k, easing: 'cubic-bezier(.2,.7,.2,1)', fill: 'backwards'}));
+    shown += batch.length;
+    markLong(list);
+    if (shown < items.length) {
+      foot.innerHTML = `<div class="sk"></div><div class="sk"></div><div class="sk"></div><p>${shown} of ${items.length} posts</p>`;
+    } else {
+      stopPaging();
+      foot.innerHTML = items.length > PAGE ? `<p>All ${items.length} posts shown</p>` : '';
+    }
+  };
+  next();
+  sheetOpen(dlg);
+  if (shown < items.length) {
+    const near = () => foot.getBoundingClientRect().top < dlg.getBoundingClientRect().bottom + 200;
+    pager = () => { while (pager && near()) next(); };   // fills a tall sheet at once, then one page per scroll step
+    dlg.addEventListener('scroll', pager, {passive: true});
+    requestAnimationFrame(() => pager?.());
+  }
 }
 
 /* "What they say": the group's joined message when the detector has one, then the lines it repeats */
-const MAX_POINTS = 6;
+const MAX_POINTS = 12, SHOWN = 3;                  // points (and posts) on screen; the rest behind "More"
 let saying = 0;                                     // token: only the latest request may fill the sheet
 async function showSays(k) {
   const f = S.list[k], dlg = $('says'), mine = ++saying;
   if (!f) return;
   const x = f.explanation, n = f.accounts.length;
-  const head = `<header><span class="tag">${LETTER(k)}</span><h2>What they say<small>${n} accounts</small></h2><button type="button" class="done" data-close>Done</button></header>` +
-    (x ? `<p class="lead">${esc(x.summary)}</p><blockquote>“${esc(x.quote)}”</blockquote>${f.verdict === 'coordinated' ? `<p class="foot">Attack type: ${esc(x.technique)}, ${Math.round(x.confidence * 100)}% confidence</p>` : ''}` : '');
+  const head = sheetTop(`What they say<small>${n} accounts</small>`, LETTER(k)) +
+    (x ? `<p class="lead">${esc(x.summary)}</p><blockquote>“${esc(x.quote)}”</blockquote>${f.verdict === 'coordinated' && x.technique.toLowerCase() !== 'other' ? `<p class="foot">Attack type: ${esc(x.technique)}, ${Math.round(x.confidence * 100)}% confidence</p>` : ''}` : '');
   dlg.innerHTML = head + '<p class="foot">Loading posts…</p>';
-  if (!dlg.open) dlg.showModal();
+  sheetOpen(dlg);
   let its;
   try { its = await loadItems(f); }
   catch (e) { if (mine === saying) dlg.innerHTML = head + `<p class="foot">Could not load posts (${esc(e.message)}).</p>`; return; }
   if (mine !== saying || !dlg.open) return;          // superseded, or closed meanwhile
   const all = points(its), top = all.slice(0, MAX_POINTS);
   dlg.innerHTML = head + `<h3>Points they make</h3>
-    <ol class="points">${top.map(p => pointHTML(p, merged(f.accounts, its) ? null : n, LETTER(k))).join('')}</ol>
+    <ol class="points">${top.map(p => pointHTML(p, merged(f.accounts, its) ? null : n, LETTER(k))).join('')}</ol>${moreHTML(top.length)}
     <p class="foot">Grouped by shared wording across ${its.length} posts. Select a point to read them.${all.length > top.length ? ` ${all.length - top.length} rarer points hidden.` : ''}</p>`;
 }
 
@@ -943,10 +1011,10 @@ async function showHow(k) {
   if (!f) return;
   // one title, one close button, one sentence of what was found: the steps below say the rest
   const say = verdictCopy(f).risk.replace(/^\S+\s/, '').replace(/\s*<small>[\s\S]*<\/small>/, '');
-  const head = `<header class="howtop"><button type="button" class="hback" data-close><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 4.5 7 10l5.5 5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Back</span></button><h2>How we got here</h2></header>
+  const head = `${sheetTop('How we got here')}
     <p class="lead">${say}</p>`;
   dlg.innerHTML = head + '<p class="foot">Loading posts…</p>';
-  if (!dlg.open) dlg.showModal();
+  sheetOpen(dlg);
   let its = [];
   try { its = await loadItems(f); } catch (e) { console.warn('items', e); }   // the steps still draw without the posts
   if (mine !== howing || !dlg.open) return;
@@ -1282,11 +1350,15 @@ addEventListener('pointerdown', e => { if (S.pop && !e.target.closest('#pop,[dat
 const closeSheets = () => { for (const id of ['says', 'posts', 'how']) if ($(id).open) $(id).close(); };
 $('how').addEventListener('close', () => { howing++; });
 // the Back button rides along while the sheet scrolls, tucked into a round button (as on /metrics)
-$('how').addEventListener('scroll', e => e.currentTarget.classList.toggle('scrolled', e.currentTarget.scrollTop > 30), {passive: true});
+for (const id of ['says', 'posts', 'how'])
+  $(id).addEventListener('scroll', e => e.currentTarget.classList.toggle('scrolled', e.currentTarget.scrollTop > 30), {passive: true});
 $('says').addEventListener('close', () => { saying++; });
+$('posts').addEventListener('close', stopPaging);
 for (const id of ['says', 'posts', 'how']) $(id).addEventListener('click', e => {
-  const pt = e.target.closest('[data-point]');
-  if (pt) showPosts(+pt.dataset.point);
+  const pt = e.target.closest('[data-point]'), more = e.target.closest('[data-more]'), ex = e.target.closest('[data-expand]');
+  if (more) { more.previousElementSibling?.classList.add('all'); more.remove(); markLong($(id)); }
+  else if (ex) { const li = ex.closest('li'); li.classList.toggle('open'); ex.textContent = li.classList.contains('open') ? 'Show less' : 'Read more'; }
+  else if (pt) showPosts(+pt.dataset.point);
   else if (e.target.closest('[data-close]')) $(id).close();                                 // Done
   else if (e.target === $(id)) {                     // the backdrop: outside the sheet's box, not its own padding
     const r = $(id).getBoundingClientRect();

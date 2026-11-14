@@ -144,7 +144,7 @@ export function stepsHTML(f, items, points, alpha) {
   s.push(step('✓', 'Verdict',
     `<span class="vmark"><i class="dot" data-v="${f.verdict}"></i>${esc(label)}</span>`,
     x && hit ? `<blockquote>“${esc(x.quote)}”</blockquote><p class="say">${esc(x.summary ?? '')}</p>
-         <p class="hint">Technique: ${esc(x.technique)}.</p>` : '',
+         ${x.technique.toLowerCase() !== 'other' ? `<p class="hint">Technique: ${esc(x.technique)}.</p>` : ''}` : '',
     `Set to allow ${pct(alpha)} false alarms${p ? ` (measured: ${pct(p.pfa)})` : ''}.`, 'final'));
   return s.join('');
 }
