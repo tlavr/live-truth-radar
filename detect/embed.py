@@ -24,6 +24,8 @@ GEMINI_BATCH = 100
 CACHE_DIR = Path(__file__).resolve().parent.parent / "cache" / "embeddings"
 
 _TOKEN = re.compile(r"[^\W_]+")
+# In-process memo over the disk cache: eval calls detect() thousands of times on the same texts.
+_MEMO: dict[tuple[str, str], np.ndarray] = {}
 
 
 def _normalize(E: np.ndarray) -> np.ndarray:
@@ -81,8 +83,10 @@ def gemini_embed(texts: list[str]) -> np.ndarray:
     missing: list[str] = []
     for text in dict.fromkeys(texts):
         path = _cache_path(model, text)
-        if path.exists():
-            vectors[text] = np.load(path)
+        if (model, text) in _MEMO:
+            vectors[text] = _MEMO[(model, text)]
+        elif path.exists():
+            vectors[text] = _MEMO[(model, text)] = np.load(path)
         else:
             missing.append(text)
 
@@ -100,7 +104,7 @@ def gemini_embed(texts: list[str]) -> np.ndarray:
             tmp = path.with_name(f"{path.stem}.{os.getpid()}.tmp.npy")
             np.save(tmp, vec)
             os.replace(tmp, path)  # atomic: a concurrent reader never sees a partial file
-            vectors[text] = vec
+            vectors[text] = _MEMO[(model, text)] = vec
 
     return _normalize(np.stack([vectors[t] for t in texts]))
 
