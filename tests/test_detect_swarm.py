@@ -1,0 +1,174 @@
+"""T10: pair correlator, CFAR, SPRT, news echo and the full detect() on fixtures (offline, hash embedder)."""
+
+import time
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import numpy as np
+import pytest
+from pydantic import TypeAdapter
+
+from contracts.models import Item
+from detect import cfar, sprt
+from detect.config import DEFAULT
+from detect.correlation import TopicSignal, pair_correlation
+from detect.pipeline import detect
+from synth.campaign import make_campaign
+
+FIX = Path(__file__).resolve().parent.parent / "fixtures"
+TOPIC = "helsinki-tram-fares"
+
+
+def _items(name: str) -> list[Item]:
+    return TypeAdapter(list[Item]).validate_json((FIX / name).read_text(encoding="utf-8"))
+
+
+def _signal(t, acct, code, gain=None) -> TopicSignal:
+    """Hand-made topic signal (posts already in time order)."""
+    t, acct, code = np.asarray(t, float), np.asarray(acct), np.asarray(code, float)
+    gain = np.ones(len(t)) if gain is None else np.asarray(gain, float)
+    close = np.sqrt(np.outer(gain, gain)) * np.clip(code @ code.T, 0, None)
+    close[acct[:, None] == acct[None, :]] = 0
+    return TopicSignal(t=t, acct=acct, accounts=[f"a{k}" for k in range(acct.max() + 1)],
+                       gain=gain, code=code, close=close)
+
+
+def test_correlation_peaks_at_true_lag():
+    # Account 1 echoes account 0 ninety seconds later, three volleys with three different codes.
+    codes = np.eye(4)
+    t, acct, code = [], [], []
+    for v, start in enumerate((0.0, 2000.0, 4000.0)):
+        t += [start, start + 90.0]
+        acct += [0, 1]
+        code += [codes[v], codes[v]]
+    t += [900.0]  # an unrelated post of a third account
+    acct += [2]
+    code += [codes[3]]
+    R, lag = pair_correlation(_signal(t, acct, code))
+    assert lag[0, 1] == 90.0 and lag[1, 0] == -90.0
+    # Three volleys add up in one lag cell: 3 * 1.0 / sqrt(3 * 3) * exp(-90 / 120).
+    assert R[0, 1] == pytest.approx(np.exp(-90 / 120))
+    assert R[0, 2] == 0.0 and R[1, 2] == 0.0
+    assert np.allclose(R, R.T) and np.allclose(np.diag(R), 1.0)
+
+
+def test_independent_accounts_raise_no_alarm():
+    rng = np.random.default_rng(7)
+    n_posts, n_acc, dim = 300, 30, 64
+    t = np.sort(rng.uniform(0, 6 * 3600, n_posts))
+    acct = rng.integers(0, n_acc, n_posts)
+    acct[:n_acc] = np.arange(n_acc)  # every account posts at least once
+    code = rng.normal(size=(n_posts, dim))
+    code /= np.linalg.norm(code, axis=1, keepdims=True)
+    R, _ = pair_correlation(_signal(t, acct, code))
+    assert cfar.swarm_groups(cfar.pair_z(R)) == []
+
+
+def test_cfar_silent_on_flat_background_and_finds_planted_group():
+    n = 12
+    flat = np.zeros((n, n))
+    np.fill_diagonal(flat, 1.0)
+    z = cfar.pair_z(flat)  # median = MAD = 0: the sigma floor keeps z finite
+    assert np.isfinite(z).all() and cfar.swarm_groups(z) == []
+
+    R = flat.copy()
+    for i in (2, 5, 7, 9):
+        for j in (2, 5, 7, 9):
+            if i != j:
+                R[i, j] = 0.6
+    z = cfar.pair_z(R)
+    assert cfar.swarm_groups(z) == [[2, 5, 7, 9]]
+    integ = cfar.integrate(z, [2, 5, 7, 9])
+    # 6 pairs at z = 0.6 / 0.05 = 12 -> Z = 6 * 12 / sqrt(6); gain = 10 lg 6 dB.
+    assert integ.mean_z == pytest.approx(12.0)
+    assert integ.snr_db - integ.snr_db_single == pytest.approx(10 * np.log10(6))
+
+
+def test_two_accounts_are_never_a_swarm():
+    R = np.zeros((10, 10))
+    np.fill_diagonal(R, 1.0)
+    R[3, 4] = R[4, 3] = 0.9  # a perfect pair (dialogue or chance), but only N = 2
+    assert cfar.swarm_groups(cfar.pair_z(R)) == []
+
+
+def test_sprt_crosses_upper_and_lower_on_known_echo():
+    upper, lower = sprt.thresholds(0.02, 0.1)
+    assert upper == pytest.approx(np.log(45)) and lower == pytest.approx(np.log(0.1 / 0.98))
+    # docs 3.7 example: mu0 = 0.1, sigma = 0.25, mu1 = 0.5; first post is the probe.
+    hit = sprt.run(np.array([0.0, 0.65, 0.65, 0.65, 0.65]), 0.1, 0.25, alpha=0.02, beta=0.1)
+    assert hit.verdict == "coordinated" and hit.decided_at == 3
+    assert hit.trace == [0.0, 1.5, 3.0, 4.5]  # clipped at +1.5, stops at the decision
+    miss = sprt.run(np.array([0.9, 0.05, 0.05, 0.05]), 0.1, 0.25, alpha=0.02, beta=0.1)
+    assert miss.verdict == "organic" and miss.decided_at == 3 and miss.trace == [0.0, -1.0, -2.0, -3.0]
+    wait = sprt.run(np.array([0.0, 0.65]), 0.1, 0.25, alpha=0.02, beta=0.1)
+    assert wait.verdict == "watching" and wait.decided_at is None
+
+
+def test_fixture_swarm_coordinated_organic_quiet_and_fast():
+    items = _items("items.json")
+    swarm = {it.author for it in items if it.synthetic}
+    t0 = time.perf_counter()
+    findings = detect(items)
+    assert time.perf_counter() - t0 < 2.0
+    hits = [f for f in findings if f.verdict == "coordinated"]
+    assert len(hits) == 1 and set(hits[0].accounts) == swarm
+    f = hits[0]
+    assert f.synthetic and f.snr_db > f.snr_db_single and f.llr >= f.sprt_upper
+    assert f.ambiguity is not None and sum(map(sum, f.ambiguity.counts)) > 0
+    assert f.lag_sec is not None and all(f.lag_sec[i][i] == 0 for i in range(len(f.accounts)))
+
+    organic = [it for it in items if not it.synthetic]
+    assert not [f for f in detect(organic) if f.verdict == "coordinated"]
+
+
+def test_live_sample_has_no_coordinated_if_present():
+    path = FIX / "items_live_sample.json"
+    if not path.exists():
+        pytest.skip("live sample not committed yet (T2)")
+    assert not [f for f in detect(_items(path.name)) if f.verdict == "coordinated"]
+
+
+def test_injected_15_minute_campaign_is_caught():
+    organic = [it for it in _items("items.json") if not it.synthetic]
+    injected = make_campaign(TOPIC, datetime(2026, 11, 13, 19, 30, tzinfo=timezone.utc), n_accounts=12, seed=1)
+    hits = [f for f in detect(organic + injected) if f.verdict == "coordinated"]
+    assert len(hits) == 1
+    assert set(hits[0].accounts) == {it.author for it in injected}
+    assert hits[0].synthetic
+
+
+def _news_burst(with_article: bool) -> list[Item]:
+    organic = [it for it in _items("items.json") if not it.synthetic]
+    t0 = datetime(2026, 11, 13, 19, 0, tzinfo=timezone.utc)
+    headline = "HSL board approves 20 percent tram fare rise from January after budget vote"
+    burst = [
+        Item(id=f"echo-{k}", source="context_social", author=f"reader_{k}", topic=TOPIC,
+             published_at=t0 + timedelta(minutes=10, seconds=20 * k + 7 * k * k),
+             text=f"{prefix} {headline}")
+        for k, prefix in enumerate(["Wow:", "Ugh,", "Breaking:", "Seriously?", "Just read:", "Noooo"])
+    ]
+    for k, it in enumerate(burst[:3]):  # a second wave: people keep discussing it
+        burst.append(it.model_copy(update={"id": f"echo2-{k}", "published_at": it.published_at + timedelta(minutes=40),
+                                           "text": f"Still can't believe it: {headline}"}))
+    article = Item(id="news-1", source="context_news", author="hs.fi", topic=TOPIC, published_at=t0,
+                   text=headline)
+    return organic + burst + ([article] if with_article else [])
+
+
+def test_news_echo_is_never_coordinated():
+    control = [f for f in detect(_news_burst(with_article=False)) if f.verdict == "coordinated"]
+    assert control and control[0].note is None  # without the article this burst does look coordinated
+    findings = [f for f in detect(_news_burst(with_article=True)) if "reader_0" in f.accounts]
+    assert findings
+    for f in findings:
+        assert f.verdict != "coordinated"
+        assert f.note is not None and f.note.startswith("news echo: HSL board approves")
+        assert f.decided_at_item is None or f.verdict == "organic"
+
+
+def test_news_echo_rule_can_be_switched_off():
+    from dataclasses import replace
+
+    cfg = replace(DEFAULT, news_echo_enabled=False)
+    findings = [f for f in detect(_news_burst(with_article=True), cfg=cfg) if "reader_0" in f.accounts]
+    assert findings and all(f.note is None for f in findings)
