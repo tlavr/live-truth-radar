@@ -22,6 +22,7 @@ from detect.config import DEFAULT, AnalyzerConfig
 from detect.correlation import TopicSignal
 
 NOTE_PREFIX = "news echo: "
+REPRINT_PREFIX = "news reprint: "
 NOTE_CHARS = 80
 
 
@@ -61,3 +62,18 @@ def news_echo_note(
     if best is None:
         return None
     return NOTE_PREFIX + texts[best][:NOTE_CHARS]
+
+
+def news_reprint_note(
+    is_news: np.ndarray, texts: list[str], group_posts: np.ndarray, cfg: AnalyzerConfig = DEFAULT
+) -> str | None:
+    """Note "news reprint: <first 80 chars of the earliest article>" if every post of the group is
+    a context_news article (outlets syndicating one wire story), else None.
+
+    Works in the news-only [ALT] stream too: outlets are not people, so a group of outlets alone is
+    never a coordinated swarm. A group with any synthetic or social post is left alone.
+    group_posts is in time order, so its first post is the earliest article.
+    """
+    if not cfg.news_reprint_enabled or len(group_posts) == 0 or not is_news[group_posts].all():
+        return None
+    return REPRINT_PREFIX + texts[int(group_posts[0])][:NOTE_CHARS]

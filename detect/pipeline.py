@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 
@@ -30,20 +30,31 @@ from detect import cfar, sprt
 from detect.config import DEFAULT, AnalyzerConfig
 from detect.correlation import TopicSignal, n_lag_steps, pair_correlation, require_window, topic_signal
 from detect.embed import embed_with_backend
-from detect.news_echo import news_echo_note
+from detect.news_echo import news_echo_note, news_reprint_note
 
 MISMATCH_EDGES = [round(0.1 * k, 1) for k in range(11)]
 
 
 def detect(
-    items: list[Item], *, alpha: float = 0.02, beta: float = 0.1, cfg: AnalyzerConfig = DEFAULT
+    items: list[Item],
+    *,
+    alpha: float = 0.02,
+    beta: float = 0.1,
+    cfg: AnalyzerConfig = DEFAULT,
+    now: datetime | None = None,
 ) -> list[Finding]:
     """Run the detector over items and return findings (one per swarm candidate group).
 
     alpha: target false-alarm probability (SPRT upper threshold A = (1-beta)/alpha).
     beta: target miss probability (SPRT lower threshold B = beta/(1-alpha)).
     cfg: analyzer parameters (eval sweeps cfar_k through it); its alpha/beta are overridden.
+    now: live run time (worker). When given, an injected campaign whose newest post is older than
+        cfg.synthetic_ttl_sec drops out; None (tests, eval) keeps every item.
     """
+    if now is not None and (now.tzinfo is None or now.utcoffset() is None):
+        raise ValueError("now must be timezone-aware")
+    if now is not None:
+        items = drop_expired_synthetic(items, now, cfg.synthetic_ttl_sec)
     if not items:
         return []
     cfg = replace(cfg, alpha=alpha, beta=beta)
@@ -56,7 +67,7 @@ def detect(
     flat = [it for group in ordered.values() for it in group]
     E, backend = embed_with_backend([it.text for it in flat])
     cfg = cfg.for_embedder(backend)
-    now = datetime.now(timezone.utc)
+    now = now or datetime.now(timezone.utc)
 
     findings: list[Finding] = []
     start = 0
@@ -64,6 +75,25 @@ def detect(
         findings.extend(_detect_topic(topic, group, E[start : start + len(group)], now, cfg))
         start += len(group)
     return findings
+
+
+def drop_expired_synthetic(items: list[Item], now: datetime, ttl_sec: float) -> list[Item]:
+    """Items without the synthetic campaigns whose newest post is older than now - ttl_sec.
+
+    The age is that of the campaign's newest post, not of the inject click: make_campaign backdates
+    the posts into [click - 15 min, click] and the newest one lands ~4-6 min before the click. So
+    the whole campaign counts until newest post + ttl_sec (900 s -> ~9-11 min after the click), then
+    leaves at once. A synthetic item without campaign_id is its own campaign.
+    """
+    def key(it: Item) -> str:
+        return it.campaign_id or it.id
+
+    newest: dict[str, datetime] = {}
+    for it in items:
+        if it.synthetic:
+            newest[key(it)] = max(newest.get(key(it), it.published_at), it.published_at)
+    cutoff = now - timedelta(seconds=ttl_sec)
+    return [it for it in items if not it.synthetic or newest[key(it)] >= cutoff]
 
 
 def _detect_topic(topic: str, items: list[Item], E: np.ndarray, now: datetime, cfg: AnalyzerConfig) -> list[Finding]:
@@ -101,7 +131,9 @@ def _detect_topic(topic: str, items: list[Item], E: np.ndarray, now: datetime, c
         mu0, sigma = sprt.background(echo_all[~censored], cfg)
         x = sprt.echo(sig, members, cfg)[posts]
         res = sprt.run(x, mu0, sigma, alpha=cfg.alpha, beta=cfg.beta, cfg=cfg)
-        note = news_echo_note(sig, is_news, texts, posts, cfg, has_social=has_social)
+        note = news_reprint_note(is_news, texts, posts, cfg) or news_echo_note(
+            sig, is_news, texts, posts, cfg, has_social=has_social
+        )
         verdict, decided = res.verdict, res.decided_at
         if note is not None and verdict == "coordinated":
             verdict, decided = "watching", None
