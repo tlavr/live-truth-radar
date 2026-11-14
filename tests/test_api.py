@@ -32,6 +32,9 @@ class FakeStore:
     def load_findings(self, conn, topic=None):
         return [f for f in self.findings if topic is None or f.topic == topic]
 
+    def load_findings_alpha(self, conn, alpha, topic=None):
+        return [f for f in self.findings[:1] if alpha == 0.05 and (topic is None or f.topic == topic)]
+
     def synthetic_authors(self, conn, ids):
         return {self.items[i].author for i in ids if i in self.items and self.items[i].synthetic}
 
@@ -58,7 +61,7 @@ class FakeStore:
 @pytest.fixture
 def client(monkeypatch):
     fake = FakeStore()
-    for name in ("connect", "load_findings", "synthetic_authors", "get_last_poll", "get_items",
+    for name in ("connect", "load_findings", "load_findings_alpha", "synthetic_authors", "get_last_poll", "get_items",
                  "has_pending_inject", "upsert_items", "add_inject_request"):
         monkeypatch.setattr(main.store, name, getattr(fake, name))
     return TestClient(main.app), fake
@@ -139,3 +142,22 @@ def test_export_sample_pseudonymizes_and_drops_synthetic():
     assert not any(handle in dumped for handle in real)
     with pytest.raises(ValueError):
         pseudonymize(items, "")
+
+
+def test_alerts_per_slider_alpha_and_operating_points(client, monkeypatch, tmp_path):
+    from detect.operating import OperatingPoint, OperatingPoints, write_points
+
+    c, fake = client
+    default = c.get("/api/alerts").json()["findings"]
+    assert c.get("/api/alerts?alpha=0.02").json()["findings"] == default  # design alpha = the findings table
+    assert len(c.get("/api/alerts?alpha=0.05").json()["findings"]) == 1  # findings_alpha
+    assert c.get("/api/alerts?alpha=0.01").json()["findings"] == []  # no stored point
+    assert c.get("/api/alerts?alpha=0").status_code == 422 and c.get("/api/alerts?alpha=1.5").status_code == 422
+
+    monkeypatch.setattr(main, "POINTS_PATH", tmp_path / "op.json")
+    assert c.get("/api/operating_points").json() is None  # before make eval
+    pts = OperatingPoints(generated_at=datetime(2026, 11, 14, tzinfo=timezone.utc), embedder="gemini", cfar_k=3.0,
+                          points=[OperatingPoint(alpha=0.02, pfa=0.0, pfa_upper95=0.003, pd=0.98, pd_small=0.8,
+                                                 n_background=1000)])
+    write_points(pts, tmp_path / "op.json")
+    assert OperatingPoints.model_validate(c.get("/api/operating_points").json()) == pts

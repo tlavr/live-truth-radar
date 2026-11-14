@@ -61,7 +61,7 @@
 | T11 | Объяснение Gemini (structured output) + AI Router как запасной | P1 | Сб 16:00 |
 | T12 | Дашборд (одна страница) + `/metrics` + кнопка инжекции | P1 | Сб 19:00 |
 | T12b | Подстраница «Как мы пришли к выводу» (пошагово: луч → корреляция → CFAR → SPRT → эхо новости) | P1 + P2 | после главной страницы |
-| T12c | Ползунок вероятности ложной тревоги (Pfa → k по ROC / alpha) | P1 + P2 | после главной страницы |
+| T12c | Выбор вероятности ложной тревоги (alpha SPRT 1/2/5%, измеренные Pfa/Pd) | P1 + P2 | код 14.11, VPS после деплоя |
 | T13 | Eval: ROC, доля найденных, время до решения на инжектированных → `MetricsReport` | P2 | Сб 19:00 |
 | T14 | Разметка ~50 живых аккаунтов (рубрика 15 мин; ~25 из алертов + ~25 случайных, без синтетики) до 20:00 → 20:00–20:30 `make eval` + `make deploy` → live FPR / precision | оба | Сб 20:30 |
 | S1 | SHOULD: Source Trust через Context.dev brand/company — только если весь MUST, кроме T14, готов к Сб 20:00 | P1 | Вс 01:00 |
@@ -81,6 +81,7 @@
 - `fixtures/items_live_sample.json` — живой сэмпл из БД для офлайн-работы P2 (`ingest/export_sample.py`, P1; авторы псевдонимизированы); обновляется на каждом синке.
 - `GET /api/items?ids=…` (P1, T8) → `list[Item]`: тексты постов для карточки вердикта. С I1 worker работает только на `detect.pipeline.detect` (mock и загрузка `fixtures/items.json` в БД убраны; `LTR_DETECTOR` больше не используется).
 - `detect(items, *, alpha, beta, cfg, now=None)` (P2): worker передаёт `now=datetime.now(timezone.utc)` (`ingest/worker.py::load_detector`, одна строка; файл P1 изменён с согласия Тимура 14.11, Никите на просмотр). С `now` инжект истекает через 900 с после последнего поста кампании (~10 мин после клика). `now` должен быть с таймзоной, иначе `ValueError`.
+- `GET /api/alerts?alpha=0.01|0.02|0.05` и `GET /api/operating_points` (T12c): находки при выбранной `alpha` SPRT (таблица `findings_alpha`, worker считает точки из `ALPHA_POINTS`; без `alpha` — как раньше) и измеренные Pfa/Pd по точкам из `eval/operating_points.json` (`make eval`; `null`, пока файла нет).
 - `GET /api/topics` (P1, T12) → `list[str]`: темы из `TOPICS` (тот же разбор, что в worker), для переключателя тем на дашборде. Дашборд: `web/` раздаёт FastAPI (`/` и `/metrics`).
 - Хэндлы реальных (не синтетических) аккаунтов маскирует **API** (`/api/alerts`, `/api/items` отдают `ab***`, дашборд дописывает `@`; у постов `context_social` убирается `url`, в нём хэндл): API публичный, маскировка только на фронте не защищает (решение сб 14.11, T8). Полные хэндлы видны только в БД, локально для разметки T14. `ingest/label_sample.py` пишет соответствие `псевдоним,хэндл` в `cache/label_handles.csv` (git-ignored).
 - Метрики считаются тем же эмбеддером, что работает вживую: `make eval` идёт с `LTR_EMBEDDER=gemini` и кэшем `cache/embeddings/`; `MetricsReport.embedder` фиксирует, каким; `eval.run` отказывается писать отчёт на `hash` без `--dev`.

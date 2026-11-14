@@ -138,3 +138,69 @@ def test_real_detector_alerts_on_each_of_two_injects(monkeypatch):
         alerts = [f for f in stored[topic] if f.verdict == "coordinated" and f.synthetic]
         assert len(alerts) == 1  # the earlier inject (20 min ago) has expired
         assert set(alerts[0].accounts) == {it.author for it in campaign}
+
+
+def test_detect_topic_stores_each_slider_alpha(monkeypatch):
+    from datetime import datetime, timezone
+
+    from synth.campaign import make_campaign
+
+    topic = "helsinki-tram-fares"
+    window = make_campaign(topic, datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc), n_accounts=3, seed=5)
+    main, extra, alphas_seen = {}, {}, []
+    monkeypatch.setattr(worker.store, "window_items", lambda conn, t, h: list(window))
+    monkeypatch.setattr(worker.store, "replace_findings", lambda conn, t, fs: main.__setitem__(t, fs))
+    monkeypatch.setattr(worker.store, "replace_findings_alpha", lambda conn, t, a, fs: extra.__setitem__((t, a), fs))
+    monkeypatch.setattr(worker.store, "ensure_schema", lambda conn: None)
+    monkeypatch.setattr(worker, "_with_explanation", lambda f, posts: f)
+    monkeypatch.setattr(worker.store, "get_items", lambda conn, ids: [], raising=False)
+    from detect.pipeline import detect
+
+    def detector(items, *, alpha=0.02):
+        alphas_seen.append(alpha)
+        return detect(items, alpha=alpha)
+
+    worker.detect_topic(FakeConn(), topic, detector, 6, alphas=(0.005, 0.05))
+    assert alphas_seen == [0.02, 0.005, 0.05]
+    assert set(extra) == {(topic, 0.005), (topic, 0.05)}
+    # the design point and the loose point catch this 3-account swarm, the strict point does not
+    verdicts = {a: [f.verdict for f in fs] for (_, a), fs in extra.items()}
+    assert "coordinated" in [f.verdict for f in main[topic]] and "coordinated" in verdicts[0.05]
+    assert "coordinated" not in verdicts[0.005]
+
+    # the production wrapper passes alpha through (a slider whose points all equal 2% must fail here)
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 11, 14, 12, 1, tzinfo=timezone.utc)  # 1 min after the click: not expired
+
+    monkeypatch.setattr(worker, "datetime", Frozen)
+    real = worker.load_detector()
+    assert "coordinated" in [f.verdict for f in real(window, alpha=0.05)]
+    assert "coordinated" not in [f.verdict for f in real(window, alpha=0.005)]
+
+
+def test_alpha_points_from_env(monkeypatch):
+    monkeypatch.delenv("ALPHA_POINTS", raising=False)
+    assert worker.alpha_points() == (0.01, 0.05)  # slider stops without the design alpha (findings table)
+    monkeypatch.setenv("ALPHA_POINTS", "0.05, 0.02,bad,1.5,0,0.1")
+    assert worker.alpha_points() == (0.05, 0.1)
+    monkeypatch.setenv("ALPHA_POINTS", "")
+    assert worker.alpha_points() == ()
+
+
+def test_failing_extra_alpha_never_loses_the_main_findings(monkeypatch):
+    stored, attempts = {}, []
+    monkeypatch.setattr(worker.store, "window_items", lambda conn, t, h: [])
+    monkeypatch.setattr(worker.store, "replace_findings", lambda conn, t, fs: stored.__setitem__(t, fs))
+
+    def broken(conn, t, a, fs):
+        attempts.append(a)
+        raise RuntimeError("findings_alpha missing")
+
+    monkeypatch.setattr(worker.store, "replace_findings_alpha", broken)
+    monkeypatch.setattr(worker.store, "ensure_schema", lambda conn: None)
+    conn = FakeConn()
+    worker.detect_topic(conn, "t", lambda items, alpha=0.02: [], 6, alphas=(0.01, 0.05))
+    assert "t" in stored and attempts == [0.01, 0.05]  # each point tried, the error swallowed
+    assert conn.commits >= 1  # the main findings are committed before the extra points run

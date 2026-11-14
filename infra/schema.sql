@@ -58,6 +58,19 @@ CREATE TABLE IF NOT EXISTS findings (
 );
 CREATE INDEX IF NOT EXISTS findings_topic_idx ON findings (topic);
 
+-- T12c: findings at the extra SPRT alphas of the false-alarm slider (the design alpha stays in
+-- findings). One Finding JSON per row; the worker replaces (topic, alpha) atomically.
+-- Also created by ingest.store.ensure_schema on worker start (this file runs only on a fresh volume).
+CREATE TABLE IF NOT EXISTS findings_alpha (
+    alpha      double precision NOT NULL,
+    topic      text NOT NULL,
+    id         text NOT NULL,
+    created_at timestamptz NOT NULL,
+    finding    jsonb NOT NULL,
+    PRIMARY KEY (alpha, id)
+);
+CREATE INDEX IF NOT EXISTS findings_alpha_topic_idx ON findings_alpha (alpha, topic);
+
 -- Manual labelling (T14); mirrors eval/labels.csv. account = contracts.pseudonym(...).
 CREATE TABLE IF NOT EXISTS labels (
     account     text NOT NULL,

@@ -142,6 +142,51 @@ def replace_findings(conn: psycopg.Connection, topic: str, findings: list[Findin
             )
 
 
+FINDINGS_ALPHA_DDL = (
+    "CREATE TABLE IF NOT EXISTS findings_alpha (alpha double precision NOT NULL, topic text NOT NULL, "
+    "id text NOT NULL, created_at timestamptz NOT NULL, finding jsonb NOT NULL, PRIMARY KEY (alpha, id))",
+    "CREATE INDEX IF NOT EXISTS findings_alpha_topic_idx ON findings_alpha (alpha, topic)",
+)
+
+
+def ensure_schema(conn: psycopg.Connection) -> None:
+    """Tables added after the first deploy (infra/schema.sql runs only on a fresh DB volume)."""
+    with conn.transaction():
+        for ddl in FINDINGS_ALPHA_DDL:
+            conn.execute(ddl)
+
+
+def replace_findings_alpha(conn: psycopg.Connection, topic: str, alpha: float, findings: list[Finding]) -> None:
+    """T12c: replace the findings of one topic at one extra SPRT alpha, in one transaction."""
+    if any(f.topic != topic for f in findings):
+        raise ValueError(f"findings of another topic passed to replace_findings_alpha({topic!r})")
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute("DELETE FROM findings_alpha WHERE topic = %s AND alpha = %s", (topic, alpha))
+        if findings:
+            cur.executemany(
+                "INSERT INTO findings_alpha (alpha, topic, id, created_at, finding) VALUES (%s, %s, %s, %s, %s) "
+                "ON CONFLICT (alpha, id) DO UPDATE SET topic = EXCLUDED.topic, created_at = EXCLUDED.created_at, "
+                "finding = EXCLUDED.finding",
+                [(alpha, f.topic, f.id, f.created_at, Jsonb(f.model_dump(mode="json"))) for f in findings],
+            )
+
+
+def load_findings_alpha(conn: psycopg.Connection, alpha: float, topic: str | None = None) -> list[Finding]:
+    """Findings at one extra SPRT alpha, newest first; [] if the table does not exist yet."""
+    sql = "SELECT finding FROM findings_alpha WHERE alpha = %s"
+    params: tuple = (alpha,)
+    if topic is not None:
+        sql += " AND topic = %s"
+        params += (topic,)
+    try:
+        with conn.transaction():  # a savepoint: a missing table must not abort the caller's transaction
+            rows = conn.execute(sql + " ORDER BY created_at DESC, id", params).fetchall()
+    except psycopg.errors.UndefinedTable:
+        return []
+    return [Finding.model_validate(json.loads(r["finding"]) if isinstance(r["finding"], str) else r["finding"])
+            for r in rows]
+
+
 def load_findings(conn: psycopg.Connection, topic: str | None = None) -> list[Finding]:
     """Stored findings, newest first; optionally one topic."""
     cols = FINDING_SCALARS + FINDING_JSON

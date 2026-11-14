@@ -28,6 +28,7 @@ import httpx
 import psycopg
 
 from contracts.models import Finding, Item
+from detect.operating import DEFAULT_ALPHA, SLIDER_ALPHAS
 from ingest import store
 from ingest.contextdev import (
     ContextDevClient,
@@ -43,7 +44,7 @@ log = logging.getLogger("ltr.worker")
 INJECT_CHECK_SEC = 10
 NEWS_OVERLAP = timedelta(minutes=15)
 
-Detector = Callable[[list[Item]], list[Finding]]
+Detector = Callable[..., list[Finding]]  # detector(items) at the design alpha, detector(items, alpha=a)
 
 
 def _positive(name: str, default: float) -> float:
@@ -69,7 +70,29 @@ def load_detector() -> Detector:
     from detect.pipeline import detect
 
     # live run: pass the wall clock so injected campaigns expire (synthetic_ttl_sec, ~10 min after the click)
-    return lambda items: detect(items, now=datetime.now(timezone.utc))
+    def run(items: list[Item], *, alpha: float = DEFAULT_ALPHA) -> list[Finding]:
+        return detect(items, alpha=alpha, now=datetime.now(timezone.utc))
+
+    return run
+
+
+def alpha_points() -> tuple[float, ...]:
+    """T12c: extra SPRT alphas computed besides the design one (ALPHA_POINTS, default the slider stops).
+
+    Findings at the design alpha go to the findings table as before; each extra alpha to findings_alpha.
+    Bad values are skipped; ALPHA_POINTS="" (set but empty) turns the extra points off.
+    """
+    raw = os.environ.get("ALPHA_POINTS")
+    values = list(SLIDER_ALPHAS) if raw is None else []
+    if raw is not None:
+        for part in raw.split(","):
+            try:
+                a = float(part)
+            except ValueError:
+                continue
+            if 0 < a < 1:
+                values.append(a)
+    return tuple(sorted({round(a, 6) for a in values} - {DEFAULT_ALPHA}))
 
 
 def _needs_explanation(f: Finding) -> bool:
@@ -84,14 +107,22 @@ def _with_explanation(f: Finding, posts: list[Item]) -> Finding:
     return f if exp is None else f.model_copy(update={"explanation": exp})
 
 
-def detect_topic(conn, topic: str, detector: Detector, window_hours: float) -> int:
-    """Run the detector on the topic window and replace its findings; returns the number of findings."""
-    items = store.window_items(conn, topic, window_hours)
-    findings = detector(items)  # detect.pipeline.detect([]) == []
+def _explained(conn, findings: list[Finding]) -> list[Finding]:
     posts = {f.id: store.get_items(conn, f.item_ids) for f in findings if _needs_explanation(f)}
     if posts:
         conn.commit()  # end the read-only transaction: no idle-in-transaction during slow LLM calls
         findings = [_with_explanation(f, posts[f.id]) if f.id in posts else f for f in findings]
+    return findings
+
+
+def detect_topic(conn, topic: str, detector: Detector, window_hours: float, alphas: tuple[float, ...] = ()) -> int:
+    """Run the detector on the topic window and replace its findings; returns the number of findings.
+
+    alphas: extra SPRT alphas for the T12c slider, each stored in findings_alpha (explanations are
+    cached by finding id, so a group found at several alphas costs one LLM call).
+    """
+    items = store.window_items(conn, topic, window_hours)
+    findings = _explained(conn, detector(items))  # detect.pipeline.detect([]) == []
     # a detector may return findings of other topics: store each under its own topic
     by_topic: dict[str, list[Finding]] = defaultdict(list)
     for f in findings:
@@ -99,7 +130,22 @@ def detect_topic(conn, topic: str, detector: Detector, window_hours: float) -> i
     store.replace_findings(conn, topic, by_topic.pop(topic, []))
     for other, group in by_topic.items():
         store.replace_findings(conn, other, group)
+    conn.commit()  # the main findings never depend on the extra points below
+    for alpha in alphas:  # each point is its own unit: a failure (e.g. no findings_alpha table) is logged only
+        _guarded(conn, f"detect on {topic} at alpha={alpha}", _store_alpha, conn, topic, items, detector, alpha)
     return len(findings)
+
+
+_schema_ready = False
+
+
+def _store_alpha(conn, topic: str, items: list[Item], detector: Detector, alpha: float) -> None:
+    global _schema_ready
+    if not _schema_ready:  # creates findings_alpha on a DB volume that predates T12c; retried until it works
+        store.ensure_schema(conn)
+        _schema_ready = True
+    extra = [f for f in _explained(conn, detector(items, alpha=alpha)) if f.topic == topic]
+    store.replace_findings_alpha(conn, topic, alpha, extra)
 
 
 def _guarded(conn, what: str, fn: Callable, *args) -> bool:
@@ -114,7 +160,7 @@ def _guarded(conn, what: str, fn: Callable, *args) -> bool:
         return False
 
 
-def process_injects(conn, detector: Detector, window_hours: float) -> int:
+def process_injects(conn, detector: Detector, window_hours: float, alphas: tuple[float, ...] = ()) -> int:
     """Handle pending inject requests: one detect() per topic, then mark them processed.
 
     A failed topic is marked processed too (and logged): otherwise /api/inject answers 429 forever.
@@ -123,7 +169,8 @@ def process_injects(conn, detector: Detector, window_hours: float) -> int:
     if not pending:
         return 0
     for topic in dict.fromkeys(r["topic"] for r in pending):
-        if not _guarded(conn, f"inject detect on {topic}", detect_topic, conn, topic, detector, window_hours):
+        if not _guarded(conn, f"inject detect on {topic}", detect_topic, conn, topic, detector, window_hours,
+                        alphas):
             log.error("inject on %s: detect failed; requests marked processed", topic)
     store.mark_injects_processed(conn, [r["id"] for r in pending])
     conn.commit()
@@ -217,6 +264,7 @@ class LoopState:
     interval: float
     window_hours: float
     next_poll: float = 0.0
+    alphas: tuple[float, ...] = ()  # T12c extra SPRT alphas (main() sets alpha_points())
 
 
 def tick(conn, st: LoopState, now: float) -> None:
@@ -225,18 +273,19 @@ def tick(conn, st: LoopState, now: float) -> None:
         st.next_poll = now + st.interval  # set first: a failing cycle must not rerun (and burn quota) every tick
         _guarded(conn, "ingest cycle", ingest_cycle, conn)
         for topic in topics():
-            _guarded(conn, f"detect on {topic}", detect_topic, conn, topic, st.detector, st.window_hours)
-    _guarded(conn, "inject processing", process_injects, conn, st.detector, st.window_hours)
+            _guarded(conn, f"detect on {topic}", detect_topic, conn, topic, st.detector, st.window_hours, st.alphas)
+    _guarded(conn, "inject processing", process_injects, conn, st.detector, st.window_hours, st.alphas)
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
-    st = LoopState(load_detector(), _positive("POLL_INTERVAL_SEC", 300), _positive("DETECT_WINDOW_HOURS", 6))
+    st = LoopState(load_detector(), _positive("POLL_INTERVAL_SEC", 300), _positive("DETECT_WINDOW_HOURS", 6),
+                   alphas=alpha_points())
     stop = threading.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: stop.set())
-    log.info("worker started: detector=real interval=%ss window=%sh topics=%s",
-             st.interval, st.window_hours, topics() or "(none)")
+    log.info("worker started: detector=real interval=%ss window=%sh topics=%s extra alphas=%s",
+             st.interval, st.window_hours, topics() or "(none)", st.alphas)
 
     while not stop.is_set():
         try:
