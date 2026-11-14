@@ -28,7 +28,7 @@ import numpy as np
 from contracts.models import AmbiguityMap, Finding, Item, finding_id
 from detect import cfar, sprt
 from detect.config import DEFAULT, AnalyzerConfig
-from detect.correlation import TopicSignal, pair_correlation, topic_signal
+from detect.correlation import TopicSignal, n_lag_steps, pair_correlation, topic_signal
 from detect.embed import embed
 from detect.news_echo import news_echo_note
 
@@ -78,7 +78,7 @@ def _detect_topic(topic: str, items: list[Item], E: np.ndarray, now: datetime, c
     if not groups:
         return []
 
-    mu0, sigma = sprt.background(sprt.echo(sig, None, cfg), cfg)
+    echo_all = sprt.echo(sig, None, cfg)
     is_news = np.array([it.source == "context_news" for it in items])
     texts = [it.text for it in items]
     pair_bins = _pair_bins(sig, cfg)
@@ -87,7 +87,9 @@ def _detect_topic(topic: str, items: list[Item], E: np.ndarray, now: datetime, c
     for group in groups:
         members = np.zeros(len(sig.accounts), dtype=bool)
         members[group] = True
-        posts = np.flatnonzero(members[sig.acct])  # time order
+        in_group = members[sig.acct]
+        posts = np.flatnonzero(in_group)  # time order
+        mu0, sigma = sprt.background(echo_all[~in_group], cfg)
         x = sprt.echo(sig, members, cfg)[posts]
         res = sprt.run(x, mu0, sigma, alpha=cfg.alpha, beta=cfg.beta, cfg=cfg)
         note = news_echo_note(sig, is_news, texts, posts, cfg)
@@ -144,8 +146,11 @@ def _pair_bins(sig: TopicSignal, cfg: AnalyzerConfig) -> tuple[np.ndarray, np.nd
 def _ambiguity(pair_bins, members: np.ndarray, cfg: AnalyzerConfig) -> AmbiguityMap:
     """Lag x semantic-mismatch histogram: pairs inside the group vs all other pairs (docs 3.9)."""
     ap, aq, dt, mismatch = pair_bins
-    n_lag = round(cfg.tau_max_sec / cfg.lag_step_sec)
-    lag_edges = [float(k * cfg.lag_step_sec) for k in range(n_lag + 1)]
+    lag_edges = [float(k * cfg.lag_step_sec) for k in range(n_lag_steps(cfg) + 1)]
+    if lag_edges[-1] < cfg.tau_max_sec:  # tau_max not a multiple of the step: shorter last bin
+        lag_edges.append(float(cfg.tau_max_sec))
+    if len(lag_edges) < 2:  # degenerate tau_max <= 0: keep a valid one-bin grid
+        lag_edges.append(float(cfg.lag_step_sec))
     inside = members[ap] & members[aq]
 
     def hist(mask: np.ndarray) -> list[list[int]]:

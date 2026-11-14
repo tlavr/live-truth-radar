@@ -1,7 +1,9 @@
 """CFAR over account pairs and swarm assembly: docs/signal-processing.md 3.5, 3.6.
 
 Reference cells = all account pairs of the topic window (order-statistic CFAR):
-z_ij = (R_ij - median) / max(1.4826 * MAD, sigma_floor). A pair "lights up" when
+z_ij = (R_ij - median) / max(1.4826 * MAD, sigma_floor). A quiet topic with fewer than
+cfar_min_ref_cells pairs is padded with R = 0 cells (two unrelated accounts), so an injected
+swarm that is most of the topic does not set its own background. A pair "lights up" when
 z_ij > k; a swarm is a connected group of >= min_swarm_accounts accounts in that
 graph. Coherent integration over all M pairs of the group: Z = sum z / sqrt(M).
 """
@@ -34,8 +36,10 @@ def pair_z(R: np.ndarray, cfg: AnalyzerConfig = DEFAULT) -> np.ndarray:
     z = np.zeros_like(R, dtype=np.float64)
     if n < 2:
         return z
-    iu = np.triu_indices(n, k=1)
-    med, sigma = robust_scale(R[iu], cfg.cfar_sigma_floor)
+    ref = R[np.triu_indices(n, k=1)]
+    if ref.size < cfg.cfar_min_ref_cells:
+        ref = np.concatenate([ref, np.zeros(cfg.cfar_min_ref_cells - ref.size)])
+    med, sigma = robust_scale(ref, cfg.cfar_sigma_floor)
     z = (R - med) / sigma
     np.fill_diagonal(z, 0.0)
     return z
