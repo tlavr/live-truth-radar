@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Truth Radar · Metrics</title>
+<link rel="icon" href="data:,">
+<style>
+:root{
+  --bg:#0C100E;--surface:#161D19;--ink:#F2F6F3;--muted:rgba(218,232,222,.64);--tertiary:rgba(218,232,222,.38);
+  --hairline:rgba(218,240,224,.12);--cool:#63CF97;--salat:#8EE87B;--warm:#B7F063;--peak:#FFE066;
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",system-ui,sans-serif;--gutter:clamp(16px,3vw,36px);
+}
+*{box-sizing:border-box}
+html{background:var(--bg);color:var(--ink);font-family:var(--font);line-height:1.45;-webkit-font-smoothing:antialiased}
+body{margin:0;padding:24px var(--gutter) 72px}
+a{color:var(--salat);text-decoration:none}
+a:hover{text-decoration:underline}
+header{display:flex;justify-content:space-between;align-items:baseline;max-width:1080px;margin:0 auto 28px}
+header b{font-weight:600;letter-spacing:-.015em}
+header span{color:var(--muted);font-size:13px}
+main{max-width:1080px;margin:0 auto;display:grid;gap:28px}
+h1{margin:0;font-size:clamp(30px,4vw,46px);letter-spacing:-.035em;line-height:1.05}
+h2{margin:0 0 4px;font-size:15px;font-weight:600}
+.sub{margin:6px 0 0;color:var(--muted);max-width:70ch}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px}
+.tile{padding:16px;border-radius:14px;background:var(--surface);border:1px solid var(--hairline)}
+.tile .v{display:block;font-size:30px;font-weight:600;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.tile .l{display:block;color:var(--muted);font-size:13px}
+.tile .h{display:block;color:var(--tertiary);font-size:12px;margin-top:4px}
+.charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.card{padding:18px;border-radius:14px;background:var(--surface);border:1px solid var(--hairline)}
+.card p{margin:0 0 12px;color:var(--muted);font-size:13.5px}
+.plot{position:relative;height:280px}
+details{margin-top:10px;font-size:13px;color:var(--muted)}
+table{border-collapse:collapse;margin-top:6px;font-variant-numeric:tabular-nums}
+td,th{padding:3px 12px 3px 0;text-align:left;font-weight:400}
+th{color:var(--tertiary)}
+.fails{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.fails li{padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid var(--hairline);font-size:14px}
+.fails b{font-weight:600;margin-right:8px}
+.empty{color:var(--tertiary)}
+@media (max-width:760px){.charts{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header><a href="/"><b>Live Truth Radar</b></a><span id="gen">loading…</span></header>
+<main>
+  <section>
+    <h1>How well does it work?</h1>
+    <p class="sub">Measured by the evaluator (<code>make eval</code>): synthetic swarms injected into real topic windows for detection, empty windows for false alarms, and hand-labelled live accounts for precision.</p>
+  </section>
+  <section class="tiles" id="tiles" aria-label="Key numbers"></section>
+  <section class="charts">
+    <div class="card">
+      <h2>ROC: detection vs false alarms</h2>
+      <p>Each point is one detector threshold (CFAR k). The marked point is the operating threshold.</p>
+      <div class="plot"><canvas id="roc" role="img" aria-label="ROC curve"></canvas></div>
+      <details><summary>Table</summary><table id="rocTable"></table></details>
+    </div>
+    <div class="card">
+      <h2>Detection by swarm size</h2>
+      <p>Share of injected swarms found, by number of accounts, at the operating threshold.</p>
+      <div class="plot"><canvas id="size" role="img" aria-label="Detection rate by swarm size"></canvas></div>
+      <details><summary>Table</summary><table id="sizeTable"></table></details>
+    </div>
+  </section>
+  <section class="card">
+    <h2>Known mistakes</h2>
+    <p>Real false positives and misses, so the numbers above are not taken on faith.</p>
+    <ul class="fails" id="fails"></ul>
+  </section>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+const pct = x => x == null ? '—' : `${+(x * 100).toFixed(1)}%`;
+const C = {cool: '#63CF97', warm: '#B7F063', peak: '#FFE066', ink: '#F2F6F3', muted: 'rgba(218,232,222,.64)', grid: 'rgba(218,240,224,.08)'};
+Chart.defaults.color = C.muted;
+Chart.defaults.font.family = getComputedStyle(document.documentElement).getPropertyValue('--font');
+Chart.defaults.borderColor = C.grid;
+
+const tile = (v, l, h = '') => `<div class="tile"><span class="v">${v}</span><span class="l">${l}</span>${h ? `<span class="h">${h}</span>` : ''}</div>`;
+const axis = title => ({min: 0, max: 1, title: {display: true, text: title}, ticks: {callback: v => `${Math.round(v * 100)}%`}});
+const tooltip = {backgroundColor: '#161D19', borderColor: 'rgba(218,240,224,.2)', borderWidth: 1, titleColor: C.ink, bodyColor: C.ink, padding: 10, displayColors: false};
+
+fetch('/api/metrics').then(r => r.json()).then(m => {
+  $('gen').textContent = `report ${m.generated_at.slice(0, 16).replace('T', ' ')} UTC${m.embedder ? ' · embedder ' + m.embedder : ''}`;
+  const ci = m.live_precision_ci ? `95% CI ${pct(m.live_precision_ci[0])}–${pct(m.live_precision_ci[1])}` : '';
+  $('tiles').innerHTML = [
+    tile(pct(m.detection_rate), 'Detection rate (Pd)', 'at the operating threshold'),
+    tile(pct(m.operating_pfa), 'False alarm rate (Pfa)', 'windows with no swarm'),
+    tile(m.mean_posts_to_decision?.toFixed(1) ?? '—', 'Posts to decision', m.mean_seconds_to_decision != null ? `≈ ${Math.round(m.mean_seconds_to_decision)} s after the first post` : ''),
+    tile(pct(m.swarm_purity), 'Swarm purity', 'injected accounts among those flagged'),
+    tile(pct(m.live_precision), 'Live precision', ci || 'needs labelled live accounts'),
+    tile(pct(m.live_fpr), 'Live false positive rate', `${m.n_labelled} accounts labelled`),
+  ].join('');
+
+  const roc = [...m.roc].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const op = roc.find(([f, d]) => f === m.operating_pfa && d === m.detection_rate);
+  $('rocTable').innerHTML = '<tr><th>Pfa</th><th>Pd</th></tr>' + roc.map(([f, d]) => `<tr><td>${pct(f)}</td><td>${pct(d)}</td></tr>`).join('');
+  if (roc.length && roc.every(([f]) => f === 0)) $('roc').closest('.card').querySelector('p').textContent += ' Every tested threshold gave 0 false alarms, so all points sit on the left edge.';
+  if (roc.length) new Chart($('roc'), {
+    type: 'scatter',
+    data: {datasets: [
+      {label: 'ROC', data: roc.map(([x, y]) => ({x, y})), showLine: true, borderColor: C.cool, backgroundColor: C.cool, borderWidth: 2, pointRadius: 4, pointHoverRadius: 7},
+      ...(op ? [{label: 'Operating point', data: [{x: op[0], y: op[1]}], backgroundColor: C.peak, borderColor: '#161D19', borderWidth: 2, pointRadius: 8, pointHoverRadius: 10}] : []),
+      {label: 'Chance', data: [{x: 0, y: 0}, {x: 1, y: 1}], showLine: true, borderColor: 'rgba(218,232,222,.25)', borderDash: [4, 5], borderWidth: 1, pointRadius: 0, pointHitRadius: 0},
+    ]},
+    options: {maintainAspectRatio: false, scales: {x: axis('False alarm rate'), y: axis('Detection rate')},
+      plugins: {legend: {labels: {boxWidth: 10, usePointStyle: true}}, tooltip: {...tooltip, callbacks: {label: c => `Pfa ${pct(c.parsed.x)}, Pd ${pct(c.parsed.y)}`}}}},
+  });
+  else $('roc').parentElement.innerHTML = '<p class="empty">No ROC yet: run make eval.</p>';
+
+  const size = m.pd_by_size ?? [];
+  $('sizeTable').innerHTML = '<tr><th>Accounts</th><th>Pd</th></tr>' + size.map(([n, d]) => `<tr><td>${n}</td><td>${pct(d)}</td></tr>`).join('');
+  if (size.length) new Chart($('size'), {
+    type: 'bar',
+    data: {labels: size.map(([n]) => `${n}`), datasets: [{label: 'Detection rate', data: size.map(([, d]) => d), backgroundColor: C.cool, borderRadius: 4, borderSkipped: 'start', maxBarThickness: 44}]},
+    options: {maintainAspectRatio: false, scales: {x: {title: {display: true, text: 'Accounts in the swarm'}, grid: {display: false}}, y: axis('Detection rate')},
+      plugins: {legend: {display: false}, tooltip: {...tooltip, callbacks: {title: c => `${c[0].label} accounts`, label: c => `Pd ${pct(c.parsed.y)}`}}}},
+  });
+  else $('size').parentElement.innerHTML = '<p class="empty">No data yet.</p>';
+
+  $('fails').innerHTML = m.failure_examples?.length
+    ? m.failure_examples.map(e => `<li><b>${e.kind === 'false_positive' ? 'False alarm' : 'Missed'}</b>${esc(e.note)}${e.account ? ` <span class="empty">(${esc(e.account)})</span>` : ''}</li>`).join('')
+    : '<li class="empty">None recorded yet.</li>';
+}).catch(e => { $('gen').textContent = `could not load metrics (${e.message})`; });
+</script>
+</body>
+</html>

@@ -78,6 +78,7 @@
 - `eval/labels.csv` (`account,topic,alerted,verdict,label,note`; `verdict` = `coordinated`/`watching`/пусто) и `eval/labels_meta.json` (`{topic: {n_accounts, n_alerted}}`, размеры слоёв для перевзвешивания live FPR) — общая разметка T14; `account` — псевдоним `contracts.pseudonym(author, LTR_HASH_SALT)`, реальные хэндлы в публичный репо **не попадают**. Скелет файла делает `ingest/label_sample.py` (P1).
 - `fixtures/items_live_sample.json` — живой сэмпл из БД для офлайн-работы P2 (`ingest/export_sample.py`, P1; авторы псевдонимизированы); обновляется на каждом синке.
 - `GET /api/items?ids=…` (P1, T8) → `list[Item]`: тексты постов для карточки вердикта. Пока работает mock, T8 загружает `fixtures/items.json` в БД, чтобы id из `fixtures/findings.json` находились.
+- `GET /api/topics` (P1, T12) → `list[str]`: темы из `TOPICS` (тот же разбор, что в worker), для переключателя тем на дашборде. Дашборд: `web/` раздаёт FastAPI (`/` и `/metrics`).
 - Хэндлы реальных (не синтетических) аккаунтов маскирует **API** (`/api/alerts`, `/api/items` отдают `ab***`, дашборд дописывает `@`; у постов `context_social` убирается `url`, в нём хэндл): API публичный, маскировка только на фронте не защищает (решение сб 14.11, T8). Полные хэндлы видны только в БД, локально для разметки T14. `ingest/label_sample.py` пишет соответствие `псевдоним,хэндл` в `cache/label_handles.csv` (git-ignored).
 - Метрики считаются тем же эмбеддером, что работает вживую: `make eval` идёт с `LTR_EMBEDDER=gemini` и кэшем `cache/embeddings/`; `MetricsReport.embedder` фиксирует, каким; `eval.run` отказывается писать отчёт на `hash` без `--dev`.
 - `GET /api/source/{domain}` (S1) — Source Trust отдельным эндпоинтом, контракт `Finding` не меняем.
@@ -99,7 +100,7 @@
 ## 6. Открытые вопросы
 *Заполняем на T0 и T2.*
 - Роли: P1 «Труба» = Никита (`makarovns`), включая T4 и референс фронтенда; P2 «Мозг» = Тимур (`tlavr`).
-- Темы для поллинга (решено 14.11, 6 шт., `TOPICS` в `.env` локально и на VPS): `jensen-huang-resignation`, `france-riots`, `us-midterms-ai-fakes`, `europe-bomb-threat-hoaxes`, `microsoft-global-outage`, `ukraine-peace-talks`. Slug → поисковый запрос Context.dev решаем в T6.
+- Темы для поллинга (решено 14.11, 6 шт., `TOPICS` в `.env` локально и на VPS): `jensen-huang`, `france-riots`, `us-midterms-ai-fakes`, `europe-bomb-threat-hoaxes`, `microsoft-global-outage`, `ukraine-peace-talks`. Slug → поисковый запрос Context.dev решаем в T6.
 - Codex: пока нет (код пишем с Claude). Подключаем ли позже — решить не позже Сб 11:00; иначе в сабмит не идёт.
 - Результат T2: что реально отдают news search и social scrape Context.dev (автор? время?): ?
 
