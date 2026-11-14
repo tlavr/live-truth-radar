@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="en" data-stage="home">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Truth Radar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300..700&family=Instrument+Sans:wght@400..600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --abyss:#0B0820; --indigo:#1A1344; --ice:#B4C0FF; --mist:#8F93BD; --paper:#F1EEFF;
+  --rose:#FF5C8A; --apricot:#FFC46B;
+  --display:"Bricolage Grotesque",system-ui,sans-serif;
+  --body:"Instrument Sans",system-ui,sans-serif;
+  --ease:cubic-bezier(.22,1,.36,1);
+  --gutter:clamp(16px,2.6vw,36px);
+}
+*{box-sizing:border-box}
+html{background:var(--abyss);color:var(--paper);font-family:var(--body);font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased}
+body{margin:0;overflow-x:hidden}
+html:not([data-stage=result]) body{overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+:focus-visible{outline:2px solid var(--apricot);outline-offset:4px;border-radius:4px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+
+/* ---------- stage ---------- */
+.stage{position:relative;min-height:100svh;overflow:hidden}
+#scene{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:pan-y}
+[data-stage=result] #scene{cursor:grab}
+[data-stage=result] #scene.dragging{cursor:grabbing}
+.veil{position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(110% 85% at 62% 58%,transparent 35%,rgba(11,8,32,.78) 100%)}
+.brand{position:absolute;z-index:3;top:22px;left:var(--gutter);font-family:var(--display);font-weight:500;font-size:17px;letter-spacing:-.01em;color:var(--ice)}
+
+/* ---------- search ---------- */
+.search{position:absolute;z-index:3;left:50%;top:46%;transform:translate(-50%,-50%);
+  width:min(760px,calc(100vw - 2*var(--gutter)));
+  transition:left .8s var(--ease),top .8s var(--ease),transform .8s var(--ease),width .8s var(--ease)}
+.field{position:relative;display:flex;align-items:center}
+.field input{flex:1;min-width:0;background:none;border:0;outline:0;color:var(--paper);caret-color:var(--rose);
+  font-family:var(--display);font-weight:500;font-size:clamp(30px,5.2vw,62px);letter-spacing:-.03em;line-height:1.15;
+  padding:.18em 0;transition:font-size .8s var(--ease)}
+.field input::placeholder{color:rgba(180,192,255,.42)}
+.field::before,.field::after{content:"";position:absolute;left:0;right:0;bottom:0;height:1px;background:rgba(180,192,255,.28)}
+.field::after{background:linear-gradient(90deg,var(--rose),var(--apricot));transform:scaleX(0);transform-origin:left;transition:transform .6s var(--ease)}
+.field:focus-within::after{transform:scaleX(1)}
+.hint{margin:16px 0 0;color:var(--mist);font-size:15px;transition:opacity .3s}
+.clear{display:none;margin-left:12px;width:32px;height:32px;border-radius:50%;color:var(--mist);font-size:20px;line-height:1}
+.clear:hover{color:var(--paper);background:rgba(180,192,255,.12)}
+html:not([data-stage=home]) .search{left:var(--gutter);top:66px;transform:none;width:min(400px,calc(100vw - 2*var(--gutter)))}
+html:not([data-stage=home]) .field input{font-size:22px}
+html:not([data-stage=home]) .hint{opacity:0;pointer-events:none}
+html:not([data-stage=home]) .clear{display:block}
+
+/* ---------- pipeline ---------- */
+.pipe{position:absolute;z-index:2;left:50%;top:38%;transform:translate(-50%,-50%);
+  width:min(640px,calc(100vw - 2*var(--gutter)));visibility:hidden;opacity:0}
+.pipe-now{margin:0 0 34px;min-height:5.2em}
+.pipe-title{display:block;font-family:var(--display);font-weight:500;font-size:clamp(28px,4vw,44px);letter-spacing:-.025em;line-height:1.1}
+.pipe-fact{display:block;margin-top:10px;color:var(--ice);font-size:17px;font-variant-numeric:tabular-nums}
+.pipe-track{position:relative;list-style:none;margin:0;padding:0;display:flex;justify-content:space-between}
+.pipe-track::before,.pipe-bar{content:"";position:absolute;left:6px;right:6px;top:6px;height:1px;background:rgba(180,192,255,.22)}
+.pipe-bar{background:linear-gradient(90deg,var(--ice),var(--rose));transform:scaleX(0);transform-origin:left}
+.pipe-track li{position:relative;width:13px;color:var(--mist);font-size:13px;white-space:nowrap}
+.pipe-track .dot{display:block;width:13px;height:13px;border-radius:50%;background:var(--abyss);border:1px solid rgba(180,192,255,.45);
+  transition:background .3s,border-color .3s,box-shadow .5s}
+.pipe-track .lbl{position:absolute;top:24px;left:50%;transform:translateX(-50%);transition:color .3s}
+.pipe-track li:first-child .lbl{left:0;transform:none}
+.pipe-track li:last-child .lbl{left:auto;right:0;transform:none}
+.pipe-track li.done .dot{background:var(--ice);border-color:var(--ice)}
+.pipe-track li.on .dot{background:var(--rose);border-color:var(--rose);box-shadow:0 0 0 7px rgba(255,92,138,.16),0 0 24px rgba(255,92,138,.7)}
+.pipe-track li.on .lbl{color:var(--paper)}
+@media (max-width:560px){.pipe-track li:not(.on) .lbl{opacity:0}}
+
+/* ---------- result ---------- */
+.result{position:relative;z-index:2;display:none;min-height:100svh;padding:150px var(--gutter) 30px;
+  grid-template-columns:minmax(0,430px) 1fr minmax(0,330px);pointer-events:none}
+[data-stage=result] .result{display:grid}
+.result>*{pointer-events:auto}
+.verdict{grid-column:1;align-self:start}
+.verdict h1{margin:0;width:max-content;padding-right:.06em;font-family:var(--display);font-weight:600;font-size:clamp(46px,5.8vw,86px);letter-spacing:-.04em;line-height:.95}
+.verdict h1[data-v=coordinated]{background:linear-gradient(95deg,var(--rose) 10%,var(--apricot));-webkit-background-clip:text;background-clip:text;color:transparent}
+.verdict p{margin:20px 0 0;max-width:38ch;font-size:18px;color:var(--paper)}
+.groups{display:flex;flex-wrap:wrap;gap:8px;margin-top:28px}
+.groups button{padding:8px 14px;border-radius:999px;border:1px solid rgba(180,192,255,.3);color:var(--ice);font-size:14px;transition:background .25s,color .25s,border-color .25s}
+.groups button:hover{border-color:var(--ice)}
+.groups button[aria-pressed=true]{background:var(--paper);border-color:var(--paper);color:var(--abyss)}
+.legend{grid-column:3;align-self:start;display:grid;gap:4px;padding:20px 22px 14px;border-radius:18px;
+  background:rgba(13,10,38,.66);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(180,192,255,.12)}
+.legend h2{margin:0 0 8px;font-family:var(--display);font-weight:500;font-size:20px;letter-spacing:-.01em}
+.legend button{display:grid;grid-template-columns:16px 1fr;gap:12px;text-align:left;padding:10px 12px;margin:0 -12px;border-radius:10px;transition:background .25s}
+.legend button:hover,.legend button:focus-visible,.legend button[aria-pressed=true]{background:rgba(180,192,255,.09)}
+.legend b{display:block;font-weight:600;font-size:15px}
+.legend span{display:block;color:var(--mist);font-size:14px;line-height:1.45}
+.legend i{width:16px;height:16px;margin-top:3px;border-radius:50%}
+.sw-spike{background:linear-gradient(180deg,var(--apricot),var(--rose))}
+.sw-carpet{background:var(--ice);opacity:.8}
+.sw-floor{border:1px solid var(--ice);border-radius:3px!important}
+.axes{position:absolute;inset:0;z-index:1;pointer-events:none;overflow:hidden;opacity:0}
+.axes span{position:absolute;left:0;top:0;white-space:nowrap;font-size:12.5px;color:var(--mist);will-change:transform}
+.axes span.t{color:var(--ice)}
+.tip{position:absolute;z-index:4;left:0;top:0;pointer-events:none;max-width:250px;padding:10px 12px;border-radius:10px;
+  background:rgba(26,19,68,.92);border:1px solid rgba(180,192,255,.22);font-size:13.5px;line-height:1.4;opacity:0;transition:opacity .15s;
+  font-variant-numeric:tabular-nums}
+.tip b{display:block;font-weight:600}
+.tip span{color:var(--ice)}
+
+/* ---------- evidence ---------- */
+.evidence{display:none;position:relative;z-index:2;padding:72px var(--gutter) 96px;background:var(--abyss);border-top:1px solid rgba(180,192,255,.12)}
+[data-stage=result] .evidence{display:block}
+.evidence-in{max-width:1080px;margin:0 auto;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:56px 64px}
+.evidence h2{grid-column:1/-1;margin:0;font-family:var(--display);font-weight:500;font-size:clamp(28px,3.4vw,40px);letter-spacing:-.025em}
+.evidence h3{margin:0 0 14px;font-size:15px;font-weight:600;color:var(--ice)}
+.evidence p{margin:0;color:var(--mist);font-size:15px;max-width:52ch}
+.evidence blockquote{margin:0 0 14px;font-family:var(--display);font-weight:400;font-size:clamp(22px,2.4vw,30px);line-height:1.2;letter-spacing:-.02em;color:var(--paper)}
+.evidence svg{display:block;width:100%;height:auto;margin-bottom:14px;overflow:visible}
+.bars{display:grid;gap:10px;margin-bottom:14px;font-size:14px;font-variant-numeric:tabular-nums}
+.bars div{display:grid;grid-template-columns:130px 1fr 64px;gap:12px;align-items:center}
+.bars i{height:8px;border-radius:4px;background:var(--ice);transform-origin:left}
+.bars div:last-child i{background:linear-gradient(90deg,var(--rose),var(--apricot))}
+.who{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px;padding:0;list-style:none}
+.who li{padding:5px 11px;border-radius:999px;background:rgba(180,192,255,.1);font-size:14px}
+
+@media (max-width:860px){
+  .result{grid-template-columns:1fr;padding-top:132px;row-gap:0}
+  .verdict,.legend{grid-column:1}
+  .legend{margin-top:46svh}
+  .evidence-in{grid-template-columns:1fr;gap:44px}
+  .axes span:not(.t){display:none}
+}
+@media (prefers-reduced-motion:reduce){
+  .search,.field input,.field::after{transition:none}
+}
+</style>
+</head>
+<body>
+
+<main>
+  <div class="stage" id="stage">
+    <canvas id="scene" aria-hidden="true"></canvas>
+    <div class="veil"></div>
+    <div class="brand">Live Truth Radar</div>
+
+    <form class="search" id="search" role="search" autocomplete="off">
+      <div class="field">
+        <label class="sr" for="q">Topic</label>
+        <input id="q" name="q" type="text" enterkeyhint="search" placeholder="Search a topic" spellcheck="false" autofocus>
+        <button class="clear" type="button" id="clear" aria-label="New search">&times;</button>
+      </div>
+      <p class="hint">Press Enter to check whether the conversation is being steered.</p>
+    </form>
+
+    <section class="pipe" id="pipe" aria-live="polite">
+      <p class="pipe-now" id="pipeNow"><span class="pipe-title" id="pipeTitle"></span><span class="pipe-fact" id="pipeFact"></span></p>
+      <ol class="pipe-track" id="pipeTrack">
+        <span class="pipe-bar" id="pipeBar"></span>
+        <li><span class="dot"></span><span class="lbl">Collect</span></li>
+        <li><span class="dot"></span><span class="lbl">Read meaning</span></li>
+        <li><span class="dot"></span><span class="lbl">Compare timing</span></li>
+        <li><span class="dot"></span><span class="lbl">Measure noise</span></li>
+        <li><span class="dot"></span><span class="lbl">Decide</span></li>
+      </ol>
+    </section>
+
+    <div class="axes" id="axes"></div>
+    <div class="tip" id="tip"></div>
+
+    <div class="result" id="result">
+      <div class="verdict">
+        <h1 id="vTitle"></h1>
+        <p id="vText"></p>
+        <div class="groups" id="groups" role="group" aria-label="Groups found in this topic"></div>
+      </div>
+      <div class="legend" id="legend">
+        <h2>Reading the picture</h2>
+        <button type="button" data-cam="peak"><i class="sw-spike"></i><div><b>The spike</b><span id="lgSpike"></span></div></button>
+        <button type="button" data-cam="carpet"><i class="sw-carpet"></i><div><b>The carpet</b><span id="lgCarpet"></span></div></button>
+        <button type="button" data-cam="top"><i class="sw-floor"></i><div><b>The floor</b><span>Left to right: time between two posts. Front to back: how differently they are worded. Height: how many pairs of posts land there.</span></div></button>
+      </div>
+    </div>
+  </div>
+
+  <section class="evidence" id="evidence" aria-label="Evidence">
+    <div class="evidence-in">
+      <h2>What the verdict rests on</h2>
+      <div id="evSay"></div>
+      <div id="evDecision"></div>
+      <div id="evSignal"></div>
+      <div id="evWho"></div>
+    </div>
+  </section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script type="importmap">
+{"imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import {EffectComposer} from 'three/addons/postprocessing/EffectComposer.js';
+import {RenderPass} from 'three/addons/postprocessing/RenderPass.js';
+import {UnrealBloomPass} from 'three/addons/postprocessing/UnrealBloomPass.js';
+import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
+
+/* ------------------------------------------------------------------ data
+   Mock: two findings of one topic, copied from fixtures/findings.json
+   (same shape as contracts.models.Finding). Replace with GET /api/alerts. */
+const FINDINGS = [{"id":"f-f5346bc66cab","topic":"helsinki-tram-fares","verdict":"coordinated","accounts":["truthfinland_01","realvoice_fi","citizen_watch22","nordic_patriot7","fair_fares_now","helsinki_truth9"],"item_ids":["fx-905b90687c","fx-233c5c78cb","fx-e5e264e9be","fx-38338e0b60","fx-88aff5f1f0","fx-420c1e84fa","fx-1a58d254fc","fx-6b633ae40c","fx-32c943873f","fx-402c775637","fx-3af9123386","fx-2c51c30b38","fx-fc4bd6ef38","fx-e5c1d58e3a","fx-7ad9a66722","fx-c5c71fc83a","fx-fda3ee658d","fx-29286fbcbf","fx-26d90b68c5","fx-1fe0066c29","fx-871862949c","fx-7d13eeab3f","fx-d4b636fb22","fx-f3d36a1059"],"llr":4.0,"snr_db":23.8,"snr_db_single":12.0,"sprt_trace":[0.4,0.9,1.2,1.8,2.3,2.7,3.4,4.0],"sprt_upper":3.8067,"sprt_lower":-2.2824,"decided_at_item":7,"first_seen":"2026-11-13T18:30:47Z","last_seen":"2026-11-13T20:32:02Z","explanation":{"technique":"Fear appeal + call to action","quote":"This fare increase is a scam to pay for politicians' pet projects","confidence":0.82,"summary":"Six new accounts post reworded versions of the same claims within two minutes of each other, four times in a row, urging people to share before deletion."},"synthetic":true,"ambiguity":{"lag_edges_sec":[0.0,30.0,60.0,90.0,120.0,150.0,180.0,210.0,240.0,270.0,300.0,330.0,360.0,390.0,420.0,450.0,480.0,510.0,540.0,570.0,600.0],"mismatch_edges":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0],"counts":[[11,11,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[12,15,6,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]],"background":[[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[2,4,3,2,3,1,4,2,5,1,2,4,3,2,1,1,5,1,4,8],[4,0,2,2,6,3,5,5,3,3,4,3,4,0,2,2,3,5,3,8],[0,1,0,3,5,1,3,8,2,3,1,5,3,3,2,4,0,2,7,2],[3,2,3,3,4,1,3,4,5,6,4,2,4,4,1,4,1,3,1,4],[0,0,5,0,3,6,2,5,5,2,2,2,2,3,3,4,1,3,2,2]]}},{"id":"f-d1f81cfa2e74","topic":"helsinki-tram-fares","verdict":"watching","accounts":["aino_k","mikko.v","helsinki_rider"],"item_ids":["fx-e50db8af9b","fx-cb93a95986","fx-78462bb39d","fx-52405f29d5","fx-911e3fe96a","fx-8cb54ddc58","fx-ae2902bde0","fx-8931ae87c4","fx-bb552eb440","fx-105becce8e","fx-4e58328773","fx-d4ec837d0c","fx-11522701af","fx-29e31bc1b8","fx-671fcad3c9","fx-86e2c9c8ae","fx-8c28e1e5b5"],"llr":-0.7,"snr_db":15.7,"snr_db_single":10.9,"sprt_trace":[-0.3,-0.1,-0.5,-0.2,-0.1,-0.4,-0.1,-0.4,-0.2,-0.6,-0.3,-0.2,-0.5,-0.2,-0.5,-0.3,-0.7],"sprt_upper":3.8067,"sprt_lower":-2.2824,"decided_at_item":null,"first_seen":"2026-11-13T18:02:18Z","last_seen":"2026-11-13T20:58:19Z","explanation":null,"synthetic":false,"ambiguity":{"lag_edges_sec":[0.0,30.0,60.0,90.0,120.0,150.0,180.0,210.0,240.0,270.0,300.0,330.0,360.0,390.0,420.0,450.0,480.0,510.0,540.0,570.0,600.0],"mismatch_edges":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0],"counts":[[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[1,0,0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,0,0,0],[0,0,0,0,1,0,0,0,0,0,0,0,0,1,0,0,0,2,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[1,1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0]],"background":[[13,13,7,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[10,13,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,1,1,3,4,3,6,4,4,1,2,5,4,1,2,3,1,1,5,2],[0,1,3,1,3,2,2,7,5,4,3,3,4,2,3,4,1,5,1,2],[2,1,4,2,5,3,1,2,3,3,2,3,2,2,2,3,4,2,2,5],[2,3,2,3,3,2,5,6,3,4,3,1,3,4,2,3,1,1,7,7],[3,0,3,1,4,2,3,4,5,3,3,4,2,2,0,2,3,2,2,8]]}}];
+const TOPIC = {posts: 80, accounts: 18, windowHours: 3, alpha: 0.02};
+
+const $ = id => document.getElementById(id);
+const root = document.documentElement;
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const A = FINDINGS[0], B = FINDINGS[1];
+const amb = A.ambiguity;
+const L = amb.counts[0].length, M = amb.counts.length;      // lag bins, mismatch bins
+const sum = g => g.flat().reduce((a, b) => a + b, 0);
+const total = amb.counts.map((r, m) => r.map((c, l) => c + amb.background[m][l]));
+const carpetGrid = amb.background;                           // everything except the spike
+const pairsTotal = sum(total);
+
+/* ------------------------------------------------------------------ scene */
+const W = 10, D = 6, PEAK = 3.1, NX = 190, NZ = 56;
+// the floor is a little larger than the data so the spike is shown whole, not sliced at lag 0
+const U0 = -1.3, U1 = L + .5, V0 = -1.3, V1 = M + .4;
+const X = u => -W / 2 + (u - U0) / (U1 - U0) * W, Z = v => D / 2 - (v - V0) / (V1 - V0) * D;
+const binU = x => (x + W / 2) / W * (U1 - U0) + U0, binV = z => (D / 2 - z) / D * (V1 - V0) + V0;
+const canvas = $('scene'), stage = $('stage');
+let renderer, composer, bloom, camera, scene, U, axisMat, ok = true;
+const field = {};                                            // smoothed height fields, scene units
+
+function smooth(grid) {
+  const out = new Float32Array(NX * NZ), su = .62, sv = .55;
+  for (let j = 0; j < NZ; j++) {
+    const v = V0 + j / (NZ - 1) * (V1 - V0);
+    for (let i = 0; i < NX; i++) {
+      const u = U0 + i / (NX - 1) * (U1 - U0);
+      let s = 0, w = 0;
+      for (let m = Math.floor(v - 3); m <= Math.ceil(v + 3); m++)
+        for (let l = Math.floor(u - 3); l <= Math.ceil(u + 3); l++) {
+          const du = u - (l + .5), dv = v - (m + .5);
+          const k = Math.exp(-du * du / (2 * su * su) - dv * dv / (2 * sv * sv));
+          s += k * (grid[m]?.[l] ?? 0); w += k;
+        }
+      out[j * NX + i] = s / w;
+    }
+  }
+  return out;
+}
+
+function buildScene() {
+  renderer = new THREE.WebGLRenderer({canvas, antialias: true, powerPreference: 'high-performance'});
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color('#0B0820');
+  camera = new THREE.PerspectiveCamera(34, 1, .1, 100);
+
+  field.P = smooth(amb.counts); field.C = smooth(carpetGrid); field.B = smooth(B.ambiguity.counts);
+  const k = PEAK / Math.max(...field.P);
+  for (const f of Object.values(field)) for (let i = 0; i < f.length; i++) f[i] *= k;
+
+  const pos = new Float32Array(NX * NZ * 3);
+  for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) {
+    const o = (j * NX + i) * 3;
+    pos[o] = -W / 2 + i / (NX - 1) * W; pos[o + 1] = 0; pos[o + 2] = D / 2 - j / (NZ - 1) * D;
+  }
+  const attrs = g => {
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('aC', new THREE.BufferAttribute(field.C, 1));
+    g.setAttribute('aP', new THREE.BufferAttribute(field.P, 1));
+    g.setAttribute('aB', new THREE.BufferAttribute(field.B, 1));
+    g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 1, 0), 9);
+    return g;
+  };
+  const lineIdx = [], triIdx = [];
+  for (let j = 0; j < NZ; j++) for (let i = 0; i < NX - 1; i++) {
+    const a = j * NX + i; lineIdx.push(a, a + 1);
+    if (j < NZ - 1) triIdx.push(a, a + NX, a + 1, a + 1, a + NX, a + NX + 1);
+  }
+  const lines = attrs(new THREE.BufferGeometry()); lines.setIndex(lineIdx);
+  const sheet = attrs(new THREE.BufferGeometry()); sheet.setIndex(triIdx);
+
+  U = {
+    uTime: {value: 0}, uCarpet: {value: 0}, uPeak: {value: 0}, uSel: {value: 0},
+    uNoise: {value: 1}, uGlow: {value: .3}, uSweep: {value: -9}, uSweepOn: {value: 0},
+    uHover: {value: new THREE.Vector4(9, 9, 9, 9)},
+    uIce: {value: new THREE.Color('#B4C0FF')}, uRose: {value: new THREE.Color('#FF5C8A')},
+    uApricot: {value: new THREE.Color('#FFC46B')}, uBg: {value: new THREE.Color('#0B0820')},
+  };
+  const vert = `
+    attribute float aC; attribute float aP; attribute float aB;
+    uniform float uTime, uCarpet, uPeak, uSel, uNoise;
+    varying float vHeat; varying vec3 vP;
+    void main(){
+      vec3 p = position;
+      float n = sin(p.x*1.3+uTime*.55)*sin(p.z*1.9-uTime*.4) + .5*sin(p.x*3.1-uTime*.75+p.z*2.2);
+      float hP = aP*uPeak;
+      p.y = aC*uCarpet + hP + n*uNoise*.075;
+      float heatA = smoothstep(0.02, 1., hP/${PEAK.toFixed(2)});
+      float heatB = clamp(aB*uCarpet*3.2, 0., .62);
+      vHeat = mix(heatA, heatB, uSel);
+      vP = p;
+      gl_Position = projectionMatrix*modelViewMatrix*vec4(p,1.);
+    }`;
+  const ramp = `
+    vec3 ramp(float h){ vec3 c = mix(uIce, uRose, smoothstep(0.,.5,h)); return mix(c, uApricot, smoothstep(.5,1.,h)); }`;
+  const lineMat = new THREE.ShaderMaterial({
+    uniforms: U, vertexShader: vert, transparent: true, depthWrite: false,
+    fragmentShader: `
+      uniform vec3 uIce, uRose, uApricot; uniform float uGlow, uSweep, uSweepOn; uniform vec4 uHover;
+      varying float vHeat; varying vec3 vP; ${ramp}
+      void main(){
+        float sweep = exp(-pow((vP.x-uSweep)/.32,2.))*uSweepOn;
+        float hov = step(uHover.x,vP.x)*step(vP.x,uHover.y)*step(uHover.z,vP.z)*step(vP.z,uHover.w);
+        float far = mix(.45,1., smoothstep(-${(D / 2).toFixed(1)}, ${(D / 2).toFixed(1)}, vP.z));
+        float a = uGlow*(.5+.9*vHeat)*far + sweep*.3 + hov*.6;
+        gl_FragColor = vec4(ramp(vHeat)*(1.+vHeat*1.5+sweep*.25+hov), clamp(a,0.,1.));
+      }`,
+  });
+  const sheetMat = new THREE.ShaderMaterial({
+    uniforms: U, vertexShader: vert, side: THREE.DoubleSide,
+    polygonOffset: true, polygonOffsetFactor: 1.5, polygonOffsetUnits: 2,
+    fragmentShader: `
+      uniform vec3 uBg, uIce, uRose, uApricot; varying float vHeat; varying vec3 vP; ${ramp}
+      void main(){ gl_FragColor = vec4(uBg*1.25 + ramp(vHeat)*vHeat*.13 + uIce*vP.y*.006, 1.); }`,
+  });
+  scene.add(new THREE.Mesh(sheet, sheetMat), new THREE.LineSegments(lines, lineMat));
+
+  // floor axes: front edge = time between posts, right edge = wording difference
+  const ax = [], x0 = X(0), x1 = X(L), z0 = Z(0) + .2, zb = Z(M), xl = x0 - .2;
+  ax.push(x0, 0, z0, x1, 0, z0, xl, 0, Z(0), xl, 0, zb);
+  for (let i = 0; i <= 10; i++) { const x = X(i / 10 * L); ax.push(x, 0, z0, x, 0, z0 + (i % 5 ? .1 : .22)); }
+  for (let i = 0; i <= 5; i++) { const z = Z(i / 5 * M); ax.push(xl, 0, z, xl - (i % 5 ? .1 : .22), 0, z); }
+  const axGeo = new THREE.BufferGeometry(); axGeo.setAttribute('position', new THREE.Float32BufferAttribute(ax, 3));
+  axisMat = new THREE.LineBasicMaterial({color: '#B4C0FF', transparent: true, opacity: 0});
+  scene.add(new THREE.LineSegments(axGeo, axisMat));
+
+  composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), .55, .7, .12);
+  composer.addPass(bloom);
+  composer.addPass(new OutputPass());
+}
+
+/* camera: spherical around a target; named states double as the annotation plan */
+const CAMS = {
+  home:   {az: -.34, pol: 1.38, r: 10.5, tx: 0,    ty: 1.7, tz: 0,   off: 0},
+  scan:   {az: -.46, pol: 1.24, r: 13.5, tx: 0,    ty: 3.1, tz: 0,   off: 0},
+  over:   {az: -.5,  pol: 1.06, r: 18,   tx: 0,    ty: .5,  tz: 0,   off: 1},
+  peak:   {az: -.95, pol: 1.2,  r: 9.5,  tx: -3.2, ty: 1.3, tz: 1.6, off: 1},
+  carpet: {az: -.12, pol: .98,  r: 16.5, tx: .6,   ty: .2,  tz: -.6, off: 1},
+  top:    {az: -.2,  pol: .42,  r: 16,   tx: 0,    ty: 0,   tz: 0,   off: 1},
+};
+const cam = {...CAMS.home};
+const camTo = (name, duration = 1.4, ease = 'power3.inOut') =>
+  gsap.to(cam, {...CAMS[name], duration: reduced ? 0 : duration, ease, overwrite: true});
+let dragging = false;
+
+function resize() {
+  if (!ok) return;
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setSize(w, h, false); composer.setSize(w, h);
+  camera.aspect = w / h;
+}
+function frame(t) {
+  requestAnimationFrame(frame);
+  const w = stage.clientWidth, h = stage.clientHeight, wide = w > 860;
+  U.uTime.value = reduced ? 0 : t / 1000;
+  const sway = reduced || dragging ? 0 : Math.sin(t / 5200) * .05;
+  const az = cam.az + sway, sp = Math.sin(cam.pol);
+  // on narrow screens pull back so the whole floor fits between verdict and legend
+  const r = cam.r * (wide ? 1 : Math.min(2.1, 1.05 * 1.5 / camera.aspect));
+  camera.position.set(cam.tx + r * sp * Math.sin(az), cam.ty + r * Math.cos(cam.pol), cam.tz + r * sp * Math.cos(az));
+  camera.lookAt(cam.tx, cam.ty, cam.tz);
+  // result view leaves the left third to the verdict (desktop) or the top to it (mobile)
+  if (wide) camera.setViewOffset(w, h, -w * .02 * cam.off, -h * .1 * cam.off, w, h);
+  else camera.setViewOffset(w, h, 0, -h * .02 * cam.off, w, h);
+  camera.updateProjectionMatrix(); camera.updateMatrixWorld();
+  composer.render();
+  placeAxes(w, h);
+}
+
+/* axis labels live in the DOM, projected from the floor */
+const AXES = [
+  {t: 'same moment', p: [X(0), 0, Z(0) + .7], a: 'c'},
+  {t: 'Time between two posts', p: [X(L / 2), 0, Z(0) + 1.05], a: 'c', title: 1},
+  {t: '10 minutes', p: [X(L), 0, Z(0) + .7], a: 'c'},
+  {t: 'same words', p: [X(0) - .75, 0, Z(0)], a: 'r'},
+  {t: 'Difference in wording', p: [X(0) - 1, 0, Z(M / 2)], a: 'r', title: 1},
+  {t: 'unrelated', p: [X(0) - .75, 0, Z(M)], a: 'r'},
+].map(d => { const el = document.createElement('span'); el.textContent = d.t; if (d.title) el.className = 't'; $('axes').append(el); return {...d, el, v: new THREE.Vector3()}; });
+function placeAxes(w, h) {
+  for (const d of AXES) {
+    d.v.set(...d.p).project(camera);
+    const x = (d.v.x * .5 + .5) * w, y = (-d.v.y * .5 + .5) * h;
+    d.el.style.transform = `translate(${x.toFixed(1)}px,${y.toFixed(1)}px) translate(${d.a === 'c' ? '-50%' : d.a === 'r' ? '-100%' : '0'},-50%)`;
+  }
+}
+
+/* hover: march the pointer ray against the CPU copy of the height field */
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), tip = $('tip');
+const heightAt = (x, z) => {
+  const i = Math.round((x + W / 2) / W * (NX - 1)), j = Math.round((D / 2 - z) / D * (NZ - 1));
+  if (i < 0 || j < 0 || i >= NX || j >= NZ) return -1;
+  return field.C[j * NX + i] * U.uCarpet.value + field.P[j * NX + i] * U.uPeak.value;
+};
+const fmtLag = s => s < 60 ? `${s} s` : `${s / 60} min`.replace('.5', '½');
+let sel = 0;
+function hover(e) {
+  if (root.dataset.stage !== 'result' || dragging) return hideTip();
+  const b = canvas.getBoundingClientRect();
+  ndc.set((e.clientX - b.left) / b.width * 2 - 1, -((e.clientY - b.top) / b.height) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const o = ray.ray.origin, d = ray.ray.direction; let hit = null;
+  for (let s = 2; s < 40; s += .06) {
+    const x = o.x + d.x * s, y = o.y + d.y * s, z = o.z + d.z * s, h = heightAt(x, z);
+    if (h >= 0 && y <= h + .02) { hit = [x, z]; break; }
+    if (y < -.2) break;
+  }
+  if (!hit) return hideTip();
+  const l = Math.floor(binU(hit[0])), m = Math.floor(binV(hit[1]));
+  if (l < 0 || m < 0 || l >= L || m >= M) return hideTip();
+  const mine = FINDINGS[sel].ambiguity.counts[m][l], others = total[m][l] - mine;
+  U.uHover.value.set(X(l), X(l + 1), Z(m + 1), Z(m));
+  tip.innerHTML = `<b>Posted ${fmtLag(amb.lag_edges_sec[l])} to ${fmtLag(amb.lag_edges_sec[l + 1])} apart, ${m * 10}–${(m + 1) * 10}% different wording</b>
+    <span>${mine} ${mine === 1 ? 'pair' : 'pairs'} from this group, ${others} from everyone else</span>`;
+  const x = e.clientX - b.left, y = e.clientY - b.top;
+  tip.style.transform = `translate(${Math.min(x + 16, b.width - 266)}px,${Math.max(8, y - 74)}px)`;
+  tip.style.opacity = 1;
+}
+function hideTip() { tip.style.opacity = 0; if (U) U.uHover.value.set(9, 9, 9, 9); }
+
+canvas.addEventListener('pointermove', e => {
+  if (dragging) {
+    cam.az -= e.movementX * .005;
+    cam.pol = Math.min(1.45, Math.max(.3, cam.pol - e.movementY * .004));
+  } else if (e.pointerType === 'mouse') hover(e);
+});
+canvas.addEventListener('pointerdown', e => {
+  if (root.dataset.stage !== 'result') return;
+  if (e.pointerType !== 'mouse') hover(e);
+  gsap.killTweensOf(cam); dragging = true; canvas.classList.add('dragging'); canvas.setPointerCapture(e.pointerId);
+  setLegend(null);
+});
+const endDrag = () => { dragging = false; canvas.classList.remove('dragging'); };
+canvas.addEventListener('pointerup', endDrag); canvas.addEventListener('pointercancel', endDrag);
+canvas.addEventListener('pointerleave', hideTip);
+
+/* ------------------------------------------------------------------ pipeline */
+const PHASES = [
+  {title: 'Collecting posts', fact: n => `${Math.round(n * TOPIC.posts)} posts from ${Math.round(n * TOPIC.accounts)} accounts, last ${TOPIC.windowHours} hours`, dur: 1.5},
+  {title: 'Reading what each post means', fact: () => `${TOPIC.posts} posts compared by meaning, not by keywords`, dur: 1.2},
+  {title: 'Comparing who posts when', fact: n => `${Math.round(n * pairsTotal)} pairs of posts lined up by timing and wording`, dur: 1.5},
+  {title: 'Measuring the background noise', fact: () => `False alarms held to ${TOPIC.alpha * 100} in 100`, dur: 1.2},
+  {title: 'Deciding', fact: () => `Verdict reached after ${A.decided_at_item + 1} posts`, dur: 1.5},
+];
+const dots = [...document.querySelectorAll('#pipeTrack li')];
+let tl = null;
+
+function setPhase(i) {
+  $('pipeTitle').textContent = PHASES[i].title;
+  $('pipeFact').textContent = PHASES[i].fact(i === 0 || i === 2 ? 0 : 1);
+  dots.forEach((d, k) => { d.classList.toggle('done', k < i); d.classList.toggle('on', k === i); });
+}
+function run(query, instant) {
+  tl?.kill(); gsap.killTweensOf([U.uCarpet, U.uPeak, U.uNoise, U.uGlow, U.uSweep, U.uSweepOn, U.uSel, axisMat, cam]);
+  sel = 0; U.uSel.value = 0; U.uCarpet.value = 0; U.uPeak.value = 0; axisMat.opacity = 0;
+  root.dataset.stage = 'scan'; scrollTo(0, 0); hideTip();
+  $('q').value = query; $('q').blur();
+  gsap.set('#pipe', {autoAlpha: 0}); gsap.set('#pipeBar', {scaleX: 0}); gsap.set('#axes', {opacity: 0});
+  const now = $('pipeNow');
+  tl = gsap.timeline({defaults: {ease: 'power3.out'}, onComplete: () => showResult(instant)});
+  tl.to('#pipe', {autoAlpha: 1, duration: .5}, .35);
+  tl.add(camTo('scan', 2.2), 0).to(U.uGlow, {value: .55, duration: 1}, 0);
+  let at = .45;
+  PHASES.forEach((p, i) => {
+    const lab = 'p' + i; tl.addLabel(lab, at);
+    if (i) tl.to(now, {autoAlpha: 0, y: -8, duration: .16, ease: 'power2.in'}, lab + '-=.16');
+    tl.call(setPhase, [i], lab)
+      .fromTo(now, {autoAlpha: 0, y: 10}, {autoAlpha: 1, y: 0, duration: .45}, lab)
+      .to('#pipeBar', {scaleX: i / (PHASES.length - 1), duration: .5, ease: 'power2.inOut'}, lab + '-=.3');
+    if (i === 0 || i === 2) {
+      const n = {v: 0};
+      tl.to(n, {v: 1, duration: p.dur * .75, ease: 'power2.out', onUpdate: () => { $('pipeFact').textContent = p.fact(n.v); }}, lab);
+    }
+    at += p.dur;
+  });
+  // what the floor does while each phase runs
+  tl.set(U.uSweepOn, {value: 1}, 'p0')
+    .fromTo(U.uSweep, {value: -W / 2 - 1.5}, {value: W / 2 + 1.5, duration: 1.4, ease: 'power1.inOut'}, 'p0')       // collect: one pass over the floor
+    .fromTo(U.uSweep, {value: W / 2 + 1.5}, {value: -W / 2 - 1.5, duration: 1.1, ease: 'power1.inOut'}, 'p1')       // read: second pass
+    .set(U.uSweepOn, {value: 0}, 'p2')
+    .to(U.uCarpet, {value: 1, duration: 1.4, ease: 'power2.out'}, 'p2')                                              // compare: everyone's pairs settle
+    .to(U.uNoise, {value: .12, duration: 1.1, ease: 'power2.inOut'}, 'p3')                                           // noise floor: the ripple calms
+    .to(U.uGlow, {value: .85, duration: 1.1}, 'p3')
+    .add(camTo('over', 2, 'power2.inOut'), 'p4-=.3')
+    .to(U.uPeak, {value: 1, duration: 1.25, ease: 'expo.out'}, 'p4+=.3')                                              // decide: the spike
+    .fromTo(bloom, {strength: 1.5}, {strength: .55, duration: 1.4, ease: 'power2.out'}, 'p4+=.3')
+    .call(() => dots.forEach(d => { d.classList.add('done'); d.classList.remove('on'); }), [], '>-0.35');
+  if (instant || reduced) tl.progress(1);
+}
+function showResult(instant) {
+  render(0);
+  root.dataset.stage = 'result';
+  resize();
+  const d = reduced || instant ? 0 : 1;
+  gsap.to('#pipe', {autoAlpha: 0, duration: .3 * d});
+  gsap.fromTo('#vTitle', {autoAlpha: 0, y: 18}, {autoAlpha: 1, y: 0, duration: .7 * d, ease: 'power3.out'});
+  gsap.fromTo('#vText', {autoAlpha: 0, y: 10}, {autoAlpha: 1, y: 0, duration: .6 * d, delay: .09 * d, ease: 'power3.out'});
+  gsap.fromTo('#groups', {autoAlpha: 0, y: 6}, {autoAlpha: 1, y: 0, duration: .6 * d, delay: .16 * d, ease: 'power3.out'});
+  gsap.fromTo('#legend', {autoAlpha: 0}, {autoAlpha: 1, duration: .8 * d, delay: .3 * d});
+  gsap.to('#axes', {opacity: 1, duration: .8 * d, delay: .3 * d});
+  gsap.to(axisMat, {opacity: .4, duration: .8 * d, delay: .3 * d});
+}
+function goHome() {
+  tl?.kill(); gsap.killTweensOf('#pipe,#pipeNow');
+  const d = reduced ? 0 : 1;
+  gsap.to('#pipe', {autoAlpha: 0, duration: .25 * d});
+  gsap.to([U.uCarpet, U.uPeak, U.uSel], {value: 0, duration: .9 * d, ease: 'power3.inOut', overwrite: true});
+  gsap.to(U.uNoise, {value: 1, duration: .9 * d, overwrite: true});
+  gsap.to(U.uGlow, {value: .3, duration: .9 * d, overwrite: true});
+  gsap.to(axisMat, {opacity: 0, duration: .3 * d, overwrite: true});
+  gsap.set(U.uSweepOn, {value: 0}); bloom.strength = .55;
+  camTo('home', 1.2); setLegend(null); hideTip();
+  root.dataset.stage = 'home'; scrollTo(0, 0); resize();
+  $('q').value = ''; $('q').focus();
+}
+
+/* ------------------------------------------------------------------ result copy */
+const NUM = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+const num = n => NUM[n] ?? String(n), Cap = s => s[0].toUpperCase() + s.slice(1);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+
+function render(i) {
+  const f = FINDINGS[i], hit = f.verdict === 'coordinated', n = f.accounts.length, pairs = sum(f.ambiguity.counts);
+  const vt = $('vTitle'); vt.dataset.v = f.verdict;
+  vt.textContent = hit ? 'Coordinated' : f.verdict === 'organic' ? 'Organic' : 'Still watching';
+  $('vText').textContent = hit ? f.explanation.summary
+    : `${Cap(num(n))} accounts on the same topic, each in their own words and at their own pace. Not enough evidence either way after ${f.sprt_trace.length} posts.`;
+  $('groups').innerHTML = FINDINGS.map((g, k) =>
+    `<button type="button" aria-pressed="${k === i}" data-g="${k}">${g.accounts.length} accounts, ${g.verdict === 'watching' ? 'still watching' : g.verdict}</button>`).join('');
+  $('lgSpike').textContent = hit
+    ? `${pairs} pairs of posts from these ${num(n)} accounts landed within 90 seconds of each other, in nearly the same words. People talking freely don't do that.`
+    : `Not theirs. This group's ${pairs} pairs sit scattered in the carpet, tinted pink.`;
+  $('lgCarpet').textContent = `Everyone else: ${sum(carpetGrid)} pairs spread across ten minutes, each in their own words.`;
+
+  $('evSay').innerHTML = hit
+    ? `<h3>What they are saying</h3><blockquote>“${esc(f.explanation.quote)}”</blockquote><p>The same claim, reworded. Technique: ${esc(f.explanation.technique.toLowerCase())}. Confidence in this reading: ${Math.round(f.explanation.confidence * 100)}%.</p>`
+    : `<h3>What they are saying</h3><p>Nothing in common worth quoting. These accounts post minutes apart and each in their own words.</p>`;
+  $('evDecision').innerHTML = `<h3>How the decision was made</h3>${trace(f)}<p>${hit
+    ? `Every new post adds or removes evidence. The line crossed the upper threshold at post ${f.decided_at_item + 1}, and the verdict was fixed there.`
+    : `Every new post adds or removes evidence. After ${f.sprt_trace.length} posts the line is still between the two thresholds, so there is no verdict yet.`}</p>`;
+  const mx = Math.max(A.snr_db, B.snr_db);
+  $('evSignal').innerHTML = `<h3>How far above the noise</h3><div class="bars">
+      <div><span>Two accounts</span><i style="width:${f.snr_db_single / mx * 100}%"></i><span>${f.snr_db_single} dB</span></div>
+      <div><span>All ${num(n)} together</span><i style="width:${f.snr_db / mx * 100}%"></i><span>${f.snr_db} dB</span></div></div>
+    <p>One pair of similar posts proves little. Adding up every pair in the group is what lifts the pattern clear of ordinary chatter.</p>`;
+  $('evWho').innerHTML = `<h3>The accounts</h3><ul class="who">${f.accounts.map(a => `<li>${esc(a)}</li>`).join('')}</ul>
+    <p>${f.synthetic ? 'This is a test campaign injected for the demo. ' : ''}${f.item_ids.length} posts between ${hm(f.first_seen)} and ${hm(f.last_seen)} UTC.</p>`;
+}
+const hm = iso => iso.slice(11, 16);
+function trace(f) {
+  const w = 480, h = 170, pl = 6, pr = 96, lo = f.sprt_lower - .6, hi = f.sprt_upper + .9, t = f.sprt_trace;
+  const x = k => pl + k / Math.max(1, t.length - 1) * (w - pl - pr), y = v => h - (v - lo) / (hi - lo) * h;
+  const pts = t.map((v, k) => `${x(k).toFixed(1)},${y(v).toFixed(1)}`).join(' '), hit = f.verdict === 'coordinated';
+  const rule = (v, label) => `<line x1="0" x2="${w - pr + 8}" y1="${y(v)}" y2="${y(v)}" stroke="#B4C0FF" stroke-opacity=".35" stroke-dasharray="3 5"/>
+    <text x="${w - pr + 14}" y="${y(v) + 4}" fill="#8F93BD" font-size="12.5">${label}</text>`;
+  return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Evidence over time, post by post">
+    ${rule(f.sprt_upper, 'coordinated')}${rule(f.sprt_lower, 'organic')}
+    <polyline points="${pts}" fill="none" stroke="${hit ? '#FF5C8A' : '#B4C0FF'}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${x(t.length - 1)}" cy="${y(t.at(-1))}" r="5" fill="${hit ? '#FFC46B' : '#B4C0FF'}"/></svg>`;
+}
+function select(i, instant) {
+  if (i === sel) return; sel = i; hideTip();
+  const d = reduced || instant ? 0 : 1;
+  gsap.to(U.uSel, {value: i, duration: .8 * d, ease: 'power2.inOut', overwrite: true});
+  gsap.timeline().to('#vTitle,#vText', {autoAlpha: 0, duration: .15 * d})
+    .call(render, [i]).to('#vTitle,#vText', {autoAlpha: 1, duration: .35 * d});
+  setLegend(null); camTo('over', 1.5 * d);
+}
+function setLegend(btn) {
+  document.querySelectorAll('#legend button').forEach(b => b.setAttribute('aria-pressed', b === btn));
+}
+
+/* ------------------------------------------------------------------ wiring */
+$('search').addEventListener('submit', e => {
+  e.preventDefault();
+  const q = $('q').value.trim(); if (q && ok) run(q);
+});
+$('clear').addEventListener('click', goHome);
+addEventListener('keydown', e => { if (e.key === 'Escape' && root.dataset.stage !== 'home') goHome(); });
+$('groups').addEventListener('click', e => { const b = e.target.closest('button'); if (b) select(+b.dataset.g); });
+$('legend').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  const on = b.getAttribute('aria-pressed') === 'true';
+  setLegend(on ? null : b); camTo(on ? 'over' : b.dataset.cam);
+});
+
+try { buildScene(); } catch (err) { ok = false; console.error(err); $('search').querySelector('.hint').textContent = 'This browser cannot draw the 3D view (WebGL is off).'; }
+if (ok) {
+  new ResizeObserver(resize).observe(stage); resize(); requestAnimationFrame(frame);
+  const qs = new URLSearchParams(location.search);       // ?q=topic&skip=1&g=1 opens a state directly
+  if (qs.get('q')) { run(qs.get('q'), qs.has('skip')); if (qs.get('g') === '1') select(1, qs.has('skip')); if (qs.get('cam')) camTo(qs.get('cam'), 0); if (qs.get('t')) { tl.pause(); tl.time(+qs.get('t'), false); }
+    if (location.hash) document.querySelector(location.hash)?.scrollIntoView(); }
+}
+</script>
+</body>
+</html>
