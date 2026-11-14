@@ -72,3 +72,5 @@ def test_eval_operating_points_on_fixtures(monkeypatch):
     strict, loose = pts.points
     assert strict.pd_small <= loose.pd_small  # holds on these fixed windows (not a theorem: B moves too)
     assert all(0 <= p.pfa <= p.pfa_upper95 <= 1 for p in pts.points)
+    for p in pts.points:  # the fixture timelines give a few real (independent) windows
+        assert p.n_independent > 0 and 0 <= p.pfa_independent <= p.pfa_independent_upper95 <= 1

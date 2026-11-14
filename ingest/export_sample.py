@@ -2,7 +2,7 @@
 
 Authors are replaced by contracts.pseudonym(author, LTR_HASH_SALT): real handles never reach git.
 Social post URLs contain the handle and are dropped; article URLs (news) are kept.
-Synthetic (injected) items are left out.
+E-mail addresses in the text are masked. Synthetic (injected) items are left out.
 
 On the VPS (writes fixtures/items_live_sample.json locally):
     ssh $VPS 'cd live-truth-radar && docker compose -f infra/docker-compose.yml exec -T api \
@@ -14,10 +14,20 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 
 from contracts.models import Item, pseudonym
 from ingest.contextdev import mask_handles
+
+
+_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+
+
+def mask_emails(text: str) -> str:
+    """Replace e-mail addresses (e.g. reporters' bylines in news text) with "[email]": personal data
+    never goes into git. Runs before mask_handles, which leaves e-mails alone."""
+    return _EMAIL_RE.sub("[email]", text)
 
 
 def pseudonymize(items: list[Item], salt: str) -> list[Item]:
@@ -28,7 +38,7 @@ def pseudonymize(items: list[Item], salt: str) -> list[Item]:
         if it.synthetic:
             continue
         url = None if it.source == "context_social" else it.url
-        out.append(it.model_copy(update={"author": pseudonym(it.author, salt), "url": url, "text": mask_handles(it.text)}))
+        out.append(it.model_copy(update={"author": pseudonym(it.author, salt), "url": url, "text": mask_handles(mask_emails(it.text))}))
     return out
 
 
