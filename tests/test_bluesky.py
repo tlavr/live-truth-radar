@@ -284,3 +284,31 @@ def test_non_string_timestamps_drop_only_that_post():
     good = post(rkey="good")
     assert [it.url.rsplit("/", 1)[-1] for it in posts_to_items({"posts": [bad, good]}, TOPIC, now=NOW)] == ["good"]
     assert bluesky._oldest([bad]) is None and bluesky._oldest([bad, good]) is not None
+
+
+def test_news_echo_check_picks_the_attack_group_and_counts_real_coordinated_only():
+    from contracts.models import Finding
+    from ingest.check_news_echo import attack_group, real_coordinated
+
+    real = Finding.model_construct(item_ids=["r1", "r2", "r3"], verdict="coordinated")
+    mixed = Finding.model_construct(item_ids=["a1", "r4"], verdict="watching")
+    watching = Finding.model_construct(item_ids=["r5"], verdict="watching")
+    attack = Finding.model_construct(item_ids=["a2", "a3", "a4"], verdict="coordinated")
+    ids = {"a1", "a2", "a3", "a4"}
+    assert attack_group([real, mixed, attack], ids) is attack
+    assert attack_group([real], ids) is None
+    assert real_coordinated([real, mixed, watching, attack], ids) == 1
+
+
+def test_news_echo_check_is_not_checked_without_a_social_post_in_the_window():
+    from ingest.check_news_echo import exit_code, topic_status
+
+    news = [Item.model_construct(id="n1", source="context_news")]
+    social = news + [Item.model_construct(id="b1", source="context_social")]
+    # bluesky fetch failed / nothing on topic: news_echo stays off, so a fast attack proves nothing
+    assert topic_status(news, 30) == "NOT CHECKED"
+    assert topic_status(social, 30) == "OK"
+    assert topic_status(social, 180) == "FAIL" and topic_status(social, None) == "FAIL"
+    assert exit_code(["OK", "OK"]) == 0
+    assert exit_code(["OK", "NOT CHECKED"]) == 2
+    assert exit_code(["NOT CHECKED", "FAIL"]) == 1
