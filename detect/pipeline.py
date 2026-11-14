@@ -30,6 +30,7 @@ from detect import cfar, sprt
 from detect.config import DEFAULT, AnalyzerConfig
 from detect.correlation import TopicSignal, n_lag_steps, pair_correlation, require_window, topic_signal
 from detect.embed import embed_with_backend
+from detect.radar import RadarFrame, best_candidate
 from detect.news_echo import news_echo_note, news_reprint_note
 
 MISMATCH_EDGES = [round(0.1 * k, 1) for k in range(11)]
@@ -48,12 +49,66 @@ def detect(
     alpha: target false-alarm probability (SPRT upper threshold A = (1-beta)/alpha).
     beta: target miss probability (SPRT lower threshold B = beta/(1-alpha)).
     cfg: analyzer parameters (eval sweeps cfar_k through it); its alpha/beta are overridden.
-    now: live run time (worker). When given, an injected campaign whose newest post is older than
+    now: live run time (worker). When given, posts published after now are not seen yet (T12d
+        "future" injects) and an injected campaign whose newest visible post is older than
         cfg.synthetic_ttl_sec drops out; None (tests, eval) keeps every item.
     """
+    return _run(items, alpha=alpha, beta=beta, cfg=cfg, now=now, stats=None)
+
+
+def scan(
+    items: list[Item],
+    *,
+    topics: list[str],
+    now: datetime,
+    alpha: float = 0.02,
+    beta: float = 0.1,
+    cfg: AnalyzerConfig = DEFAULT,
+) -> tuple[list[Finding], list[RadarFrame]]:
+    """T12d radar scan: the findings of detect(items, alpha=, beta=, cfg=, now=now) plus one RadarFrame
+    per topic in `topics` (also for a topic without posts in the window), from the same single run."""
+    stats: dict[str, dict] = {}
+    findings = _run(items, alpha=alpha, beta=beta, cfg=cfg, now=now, stats=stats)
+    upper, lower = sprt.thresholds(alpha, beta)
+    frames = []
+    for topic in topics:
+        st = stats.get(topic, {"n_items": 0, "n_accounts": 0, "n_lit_pairs": 0, "max_pair_z": None, "posts": {}})
+        own = [f for f in findings if f.topic == topic]
+        top = best_candidate(own)
+        trace: list[tuple[datetime, float]] = []
+        campaigns: list[str] = []
+        if top is not None:
+            posts = [st["posts"][i] for i in top.item_ids]  # time order, as the trace
+            trace = [(it.published_at, llr) for it, llr in zip(posts, top.sprt_trace)]
+            campaigns = sorted({it.campaign_id for it in posts if it.synthetic and it.campaign_id})
+        frames.append(RadarFrame(
+            topic=topic, at=now, n_items=st["n_items"], n_accounts=st["n_accounts"],
+            n_lit_pairs=st["n_lit_pairs"], max_pair_z=st["max_pair_z"],
+            n_watching=sum(f.verdict == "watching" for f in own),
+            top_verdict=None if top is None else top.verdict,
+            top_n_accounts=None if top is None else len(top.accounts),
+            top_llr=None if top is None else top.llr,
+            top_trace=trace,
+            top_capped=top is not None and top.verdict != "coordinated" and bool(top.sprt_trace)
+            and max(top.sprt_trace) >= upper - 1e-6,  # the trace is rounded to 1e-6, the decision is not
+            sprt_upper=upper, sprt_lower=lower, top_campaign_ids=campaigns,
+        ))
+    return findings, frames
+
+
+def _run(
+    items: list[Item],
+    *,
+    alpha: float,
+    beta: float,
+    cfg: AnalyzerConfig,
+    now: datetime | None,
+    stats: dict[str, dict] | None,
+) -> list[Finding]:
     if now is not None and (now.tzinfo is None or now.utcoffset() is None):
         raise ValueError("now must be timezone-aware")
     if now is not None:
+        items = [it for it in items if it.published_at <= now]  # not published yet: not seen yet
         items = drop_expired_synthetic(items, now, cfg.synthetic_ttl_sec)
     if not items:
         return []
@@ -72,7 +127,11 @@ def detect(
     findings: list[Finding] = []
     start = 0
     for topic, group in ordered.items():
-        findings.extend(_detect_topic(topic, group, E[start : start + len(group)], now, cfg))
+        st = None
+        if stats is not None:
+            st = stats[topic] = {"n_items": len(group), "n_accounts": len({it.author for it in group}),
+                                 "n_lit_pairs": 0, "max_pair_z": None, "posts": {it.id: it for it in group}}
+        findings.extend(_detect_topic(topic, group, E[start : start + len(group)], now, cfg, st))
         start += len(group)
     return findings
 
@@ -96,7 +155,9 @@ def drop_expired_synthetic(items: list[Item], now: datetime, ttl_sec: float) -> 
     return [it for it in items if not it.synthetic or newest[key(it)] >= cutoff]
 
 
-def _detect_topic(topic: str, items: list[Item], E: np.ndarray, now: datetime, cfg: AnalyzerConfig) -> list[Finding]:
+def _detect_topic(
+    topic: str, items: list[Item], E: np.ndarray, now: datetime, cfg: AnalyzerConfig, stats: dict | None = None
+) -> list[Finding]:
     authors = [it.author for it in items]
     if len(set(authors)) < cfg.min_swarm_accounts:
         return []
@@ -105,6 +166,10 @@ def _detect_topic(topic: str, items: list[Item], E: np.ndarray, now: datetime, c
     sig = topic_signal(E, t, authors, cfg)
     R, lag = pair_correlation(sig, cfg)
     z = cfar.pair_z(R, cfg)
+    if stats is not None and len(sig.accounts) >= 2:  # radar background: lit pairs and the loudest pair
+        upper = z[np.triu_indices(len(sig.accounts), k=1)]
+        stats["n_lit_pairs"] = int((upper > cfg.cfar_k).sum())
+        stats["max_pair_z"] = round(float(upper.max()), 3)
     groups = cfar.swarm_groups(z, cfg)
     if not groups:
         return []
