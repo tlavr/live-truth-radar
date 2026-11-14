@@ -1,55 +1,55 @@
 {
- "generated_at": "2026-11-14T14:13:32Z",
+ "generated_at": "2026-11-14T15:38:08Z",
  "roc": [
   [
    0.0,
-   0.76
+   0.8025
   ],
   [
    0.0,
-   0.9
+   0.945
   ],
   [
    0.0,
-   0.9475
+   0.965
   ],
   [
    0.0,
-   0.955
+   0.9738
   ],
   [
    0.0,
-   0.9675
+   0.9838
   ],
   [
    0.0,
-   0.975
+   0.9888
   ],
   [
    0.0,
-   0.975
+   0.99
   ],
   [
    0.0,
-   0.975
+   0.99
   ],
   [
    0.0,
-   0.9775
+   0.99
   ],
   [
    0.0,
-   0.9775
+   0.99
   ],
   [
    0.0,
-   0.9775
+   0.99
   ]
  ],
- "detection_rate": 0.9775,
+ "detection_rate": 0.99,
  "operating_pfa": 0.0,
- "mean_posts_to_decision": 4.29,
- "mean_seconds_to_decision": 93.6,
+ "mean_posts_to_decision": 4.11,
+ "mean_seconds_to_decision": 70.0,
  "live_fpr": 0.0,
  "live_precision": null,
  "n_labelled": 42,
@@ -58,42 +58,42 @@
    "kind": "false_negative",
    "finding_id": null,
    "account": null,
-   "note": "injected swarm of 4 accounts (jensen-huang-resignation) missed: SPRT undecided (watching, LLR 2.12) on a group with 4/4 injected accounts"
+   "note": "injected swarm of 4 accounts (microsoft-global-outage) missed: SPRT stopped at organic (LLR -3.00) on a group with 4/4 injected accounts"
   },
   {
    "kind": "false_negative",
    "finding_id": null,
    "account": null,
-   "note": "injected swarm of 4 accounts (jensen-huang-resignation) missed: SPRT undecided (watching, LLR 3.73) on a group with 4/4 injected accounts"
+   "note": "injected swarm of 4 accounts (jensen-huang-resignation) missed: CFAR assembled no group with the injected accounts"
   },
   {
    "kind": "false_negative",
    "finding_id": null,
    "account": null,
-   "note": "injected swarm of 4 accounts (jensen-huang-resignation) missed: SPRT undecided (watching, LLR 2.98) on a group with 4/4 injected accounts"
+   "note": "injected swarm of 4 accounts (jensen-huang-resignation) missed: SPRT undecided (watching, LLR 1.89) on a group with 4/4 injected accounts"
   },
   {
    "kind": "false_negative",
    "finding_id": null,
    "account": null,
-   "note": "injected swarm of 4 accounts (jensen-huang-resignation) missed: SPRT undecided (watching, LLR 0.44) on a group with 4/4 injected accounts"
+   "note": "injected swarm of 4 accounts (jensen-huang-resignation) missed: SPRT undecided (watching, LLR 3.59) on a group with 4/4 injected accounts"
   },
   {
    "kind": "false_negative",
    "finding_id": null,
    "account": null,
-   "note": "injected swarm of 4 accounts (jensen-huang-resignation) missed: SPRT undecided (watching, LLR 3.29) on a group with 4/4 injected accounts"
+   "note": "injected swarm of 4 accounts (jensen-huang-resignation) missed: SPRT undecided (watching, LLR 3.36) on a group with 4/4 injected accounts"
   }
  ],
  "embedder": "gemini",
  "pd_by_size": [
   [
    3,
-   0.78
+   0.92
   ],
   [
    4,
-   0.98
+   0.9925
   ],
   [
    6,
@@ -101,13 +101,13 @@
   ],
   [
    8,
-   1.0
+   0.995
   ],
   [
    12,
-   1.0
+   0.995
   ]
  ],
- "swarm_purity": 1.0,
+ "swarm_purity": 0.9991,
  "live_precision_ci": null
 }
