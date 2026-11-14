@@ -76,7 +76,7 @@
 
 ### T6 · P1 · сб 04:30
 **Цель:** живой поток данных в БД.
-**Вход/выход:** `ingest/contextdev.py` (news search + social scrape, кэш ответов), `ingest/worker.py`: каждые 2–5 мин по 3–5 темам из `.env` → нормализация в `Item` → upsert в `items`/`actors` (дедуп по `id`) → запоминает `last_poll_at`. Детектор (пока mock) вызывается на окне `DETECT_WINDOW_HOURS` по теме, findings темы заменяются атомарно.
+**Вход/выход:** `ingest/contextdev.py` (news search + social scrape, кэш ответов), `ingest/worker.py`: каждые 2–5 мин по темам из `TOPICS` в `.env` (сейчас 6, см. HANDOFF §6) → нормализация в `Item` → upsert в `items`/`actors` (дедуп по `id`) → запоминает `last_poll_at`. Детектор (пока mock) вызывается на окне `DETECT_WINDOW_HOURS` по теме, findings темы заменяются атомарно.
 **Готово, когда:** на VPS worker крутится ≥ 2 циклов, в `items` растёт число строк по всем темам, повторный цикл не дублирует; кэш не дёргает API на одинаковый запрос.
 **Тесты:** нет (сеть). Нормализация проверяется парсингом в `Item`.
 **Зависит от:** T2, T5

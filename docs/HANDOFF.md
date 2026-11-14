@@ -99,7 +99,7 @@
 ## 6. Открытые вопросы
 *Заполняем на T0 и T2.*
 - Роли: P1 «Труба» = Никита (`makarovns`), включая T4 и референс фронтенда; P2 «Мозг» = Тимур (`tlavr`).
-- Темы для поллинга (3–5): ?
+- Темы для поллинга (решено 14.11, 6 шт., `TOPICS` в `.env` локально и на VPS): `jensen-huang-resignation`, `france-riots`, `us-midterms-ai-fakes`, `europe-bomb-threat-hoaxes`, `microsoft-global-outage`, `ukraine-peace-talks`. Slug → поисковый запрос Context.dev решаем в T6.
 - Codex: пока нет (код пишем с Claude). Подключаем ли позже — решить не позже Сб 11:00; иначе в сабмит не идёт.
 - Результат T2: что реально отдают news search и social scrape Context.dev (автор? время?): ?
 
