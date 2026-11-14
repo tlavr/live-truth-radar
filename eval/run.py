@@ -403,7 +403,8 @@ def build_report(
     log.info("background topics: %s; inject topics: %s", sorted(background), inject_topics)
 
     rng = np.random.default_rng(seed)
-    bg_windows = make_windows(background, sorted(background), n_windows, rng) + real_windows(background, sorted(background))
+    bg_windows = make_windows(background, sorted(background), n_windows, rng) + real_windows(
+        background, sorted(background), cfg.min_swarm_accounts)
     inj_windows = make_windows(background, inject_topics, n_windows, rng, n_accounts=ROC_SWARM_ACCOUNTS)
     size_windows = {n: make_windows(background, inject_topics, n_size_windows, rng, n_accounts=n) for n in sizes}
     _prefetch_embeddings(bg_windows + inj_windows + [w for ws in size_windows.values() for w in ws])
@@ -493,7 +494,8 @@ def build_operating_points(
     if not background or not inject_topics:
         raise SystemExit(f"no background / inject topics in {fixtures_dir}")
     rng = np.random.default_rng(seed + 1)  # its own windows: the report's random stream is unchanged
-    bg_windows = make_windows(background, sorted(background), n_windows, rng) + real_windows(background, sorted(background))
+    bg_windows = make_windows(background, sorted(background), n_windows, rng) + real_windows(
+        background, sorted(background), cfg.min_swarm_accounts)
     inj_windows = make_windows(background, inject_topics, n_windows, rng, n_accounts=ROC_SWARM_ACCOUNTS)
     small_windows = make_windows(background, inject_topics, n_windows, rng, n_accounts=min(SIZES))
     _prefetch_embeddings(bg_windows + inj_windows + small_windows)
