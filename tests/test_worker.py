@@ -67,3 +67,31 @@ def test_failing_topic_does_not_stall_other_topics_injects_or_poll_interval(monk
 
     worker.tick(conn, st, now=180.0)  # next interval: polled again
     assert calls["ingest"] == 2
+
+
+def test_detect_topic_ends_the_read_transaction_before_the_llm_call(monkeypatch):
+    from pathlib import Path
+
+    from pydantic import TypeAdapter
+
+    import ingest.explain as ex
+
+    findings = TypeAdapter(list[Finding]).validate_json(
+        (Path(__file__).resolve().parent.parent / "fixtures" / "findings.json").read_text())
+    f = next(f for f in findings if f.verdict == "coordinated").model_copy(update={"explanation": None})
+    conn = FakeConn()
+    seen = {}
+    monkeypatch.setattr(worker.store, "window_items", lambda conn, topic, hours: [])
+    monkeypatch.setattr(worker.store, "get_items", lambda conn, ids: [])
+    monkeypatch.setattr(worker.store, "replace_findings",
+                        lambda conn, topic, fs: seen.setdefault("stored", fs))
+
+    def explain_safe(finding, items):
+        seen["commits"] = conn.commits
+        return None
+
+    monkeypatch.setattr(ex, "explain_safe", explain_safe)
+
+    assert worker.detect_topic(conn, f.topic, lambda items: [f], 6) == 1
+    assert seen["commits"] == 1  # no DB transaction is held open during the slow provider call
+    assert [x.id for x in seen["stored"]] == [f.id]  # the write still happens, in the unit's own transaction
