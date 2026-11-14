@@ -1,17 +1,48 @@
-"""FastAPI app (P1). T4: /health; T5: empty /api/alerts stub for smoke; T8 reads the DB.
+"""FastAPI app (P1): /health (T4) and /api/* (T8).
 
 Run: uvicorn api.main:app --host 0.0.0.0 --port 8000
+
+Handles of real (non-synthetic) accounts are masked here, in the API, not only on the
+dashboard: the API is public, so an unmasked JSON would leak them. Full handles stay in the DB
+(local labelling, T14). Synthetic account names are fake and are returned as is.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import logging
+from datetime import datetime, timezone
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Query
+from pydantic import BaseModel, Field, ValidationError
 
-from contracts.models import AlertsResponse
+from contracts.models import AlertsResponse, Finding, Item, MetricsReport
+from ingest import store
+
+log = logging.getLogger("ltr.api")
+
+REPORT_PATH = Path(__file__).resolve().parent.parent / "eval" / "report.json"
+MAX_ITEM_IDS = 200
 
 app = FastAPI(title="Live Truth Radar")
+
+
+def mask_handle(author: str) -> str:
+    """'helsinki_rider' -> 'he***' (the dashboard prefixes '@')."""
+    return author[:2] + "***"
+
+
+def public_item(it: Item) -> Item:
+    if it.synthetic:
+        return it
+    # a social post URL contains the handle; article URLs (news) are public and kept
+    url = None if it.source == "context_social" else it.url
+    return it.model_copy(update={"author": mask_handle(it.author), "url": url})
+
+
+def public_finding(f: Finding, fake: set[str]) -> Finding:
+    """Mask every account of the finding that is not a synthetic author (`fake`)."""
+    return f.model_copy(update={"accounts": [a if a in fake else mask_handle(a) for a in f.accounts]})
 
 
 @app.get("/health")
@@ -21,6 +52,61 @@ def health() -> dict[str, str]:
 
 
 @app.get("/api/alerts", response_model=AlertsResponse)
-def alerts() -> AlertsResponse:
-    """T5 stub: valid empty payload until T8 serves findings from the DB."""
-    return AlertsResponse(generated_at=datetime.now(UTC), findings=[])
+def alerts(topic: str | None = None) -> AlertsResponse:
+    """Latest detector run per topic (all topics, or one with ?topic=), newest first."""
+    with store.connect() as conn:
+        findings = store.load_findings(conn, topic)
+        fake = store.synthetic_authors(conn, [i for f in findings for i in f.item_ids])
+        last_poll = store.get_last_poll(conn)
+    return AlertsResponse(
+        generated_at=datetime.now(timezone.utc),
+        last_poll_at=last_poll,
+        findings=[public_finding(f, fake) for f in findings],
+    )
+
+
+@app.get("/api/metrics", response_model=MetricsReport)
+def metrics() -> MetricsReport:
+    """eval/report.json (committed by `make eval`); an empty report until it exists or if it is invalid."""
+    if REPORT_PATH.exists():
+        try:
+            return MetricsReport.model_validate_json(REPORT_PATH.read_text(encoding="utf-8"))
+        except (ValidationError, OSError) as exc:
+            log.warning("eval/report.json unusable (%s); serving an empty report", exc)
+    return MetricsReport(generated_at=datetime.now(timezone.utc), roc=[])
+
+
+@app.get("/api/items", response_model=list[Item])
+def items(ids: str = Query(..., description="comma-separated item ids")) -> list[Item]:
+    wanted = list(dict.fromkeys(i.strip() for i in ids.split(",") if i.strip()))
+    if len(wanted) > MAX_ITEM_IDS:
+        raise HTTPException(status_code=400, detail=f"at most {MAX_ITEM_IDS} ids per request")
+    with store.connect() as conn:
+        return [public_item(it) for it in store.get_items(conn, wanted)]
+
+
+class InjectRequest(BaseModel):
+    topic: str = Field(min_length=1, max_length=64)
+
+
+class InjectResponse(BaseModel):
+    campaign_id: str
+    n_items: int
+
+
+@app.post("/api/inject", response_model=InjectResponse)
+def inject(req: InjectRequest) -> InjectResponse:
+    """Add a synthetic swarm (synth.campaign.make_campaign) to the topic; the worker runs detect() within ~10 s."""
+    from synth.campaign import make_campaign  # heavy import (numpy) only when used
+
+    with store.connect() as conn:
+        if store.has_pending_inject(conn, req.topic):
+            raise HTTPException(status_code=429, detail="an inject for this topic is still being processed")
+        try:
+            campaign = make_campaign(req.topic, datetime.now(timezone.utc))
+        except ValueError as exc:  # no variations for the topic, bad slug
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if store.upsert_items(conn, campaign) == 0:  # same-second campaign: every id already exists
+            raise HTTPException(status_code=409, detail="inject collided with the previous one, retry")
+        store.add_inject_request(conn, req.topic, campaign[0].campaign_id)
+    return InjectResponse(campaign_id=campaign[0].campaign_id, n_items=len(campaign))
