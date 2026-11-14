@@ -133,3 +133,30 @@ def test_written_files_feed_eval_and_labels_are_never_overwritten(world, tmp_pat
     assert json.loads((tmp_path / "labels_meta.json").read_text()) == s.meta
     with handles.open(newline="") as fh:
         assert {r["pseudonym"]: r["handle"] for r in csv.DictReader(fh)} == {**old.handles, **s.handles}  # merged
+
+
+def test_review_sheet_lists_every_row_with_its_real_posts(world, tmp_path, monkeypatch):
+    items, findings, a, bots = world
+    items = items + [Item(id="a-real0-1", source="context_news", author="real0", published_at=T, topic="a",
+                          text="Same\n  claim   again", url="https://example.org/x"),
+                     _item("b", "real0", 2)]  # same handle, other topic: not this row's post
+    s = build_sample(items, findings, SALT, n_alerted=5, n_quiet=6)
+    syn = Item(id="a-real0-syn", source="synthetic", author="real0", published_at=T, topic="a", text="injected",
+               synthetic=True)  # render_review must drop synthetic posts on its own
+    text = label_sample.render_review(s.rows, s.handles, items + [syn])
+    for n, r in enumerate(s.rows, start=1):
+        assert f"### {n}. {r['account']} · {s.handles[r['account']]} ·" in text
+    assert "Same claim again · <https://example.org/x>" in text
+    assert "real0 · coordinated · 2 posts" in text
+    assert not any(f" · {b} ·" in text for b in bots[1:])  # synthetic authors never appear (bot0 is also real in b)
+    assert "injected" not in text  # synthetic posts of a real handle stay out
+
+    monkeypatch.setattr(label_sample, "CACHE", tmp_path / "cache")
+    assert label_sample.write_review(text, tmp_path / "cache" / "labels").read_text(encoding="utf-8") == text
+    planted = tmp_path / "cache" / "labels" / "review.md"
+    planted.unlink()
+    planted.symlink_to(tmp_path / "leak.md")
+    label_sample.write_review(text, tmp_path / "cache" / "labels")
+    assert not (tmp_path / "leak.md").exists() and not planted.is_symlink()
+    with pytest.raises(ValueError, match="real handles"):
+        label_sample.write_review(text, tmp_path / "eval")
