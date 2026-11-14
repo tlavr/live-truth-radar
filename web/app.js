@@ -822,11 +822,11 @@ function render() {
 }
 
 /* the big verdict over the group picker, in the verdict's colour: Quiet, a possible group (yellow), or a
-   coordinated one in the accent, named by its attack type once the explanation names it. Why says why */
+   coordinated one in the accent ("Swarm Detected"); its attack type heads the Why panel, not the title */
 function renderTitle() {
   const f = shown(), c = verdictCopy(f), vt = $('vTitle');
   vt.dataset.v = f ? f.verdict : 'quiet';
-  vt.textContent = f?.verdict === 'coordinated' && f.explanation?.technique ? f.explanation.technique : c.title;
+  vt.textContent = c.title;   // always the verdict; the attack type heads the Why panel (whyHTML)
 }
 /* the header: one tab per group (the letter it carries everywhere), or one dropdown when there are more than
    MAX_TABS; under it the shown group's line. The tabs stay even for one group: they carry its verdict mark.
@@ -866,10 +866,29 @@ function setHTML(el, html) {
   const n = t.content.childNodes;
   if (n.length !== el.childNodes.length || ![...n].every((c, i) => c.isEqualNode(el.childNodes[i]))) el.replaceChildren(t.content);
 }
-// "Why": the verdict of the shown group in a sentence, then what made it stand out, one phrase per detector step
+// the attack types the explanation may name (ingest/explain.py TECHNIQUES), each with what it means in one line
+const TECHNIQUE_INFO = {
+  'fear appeal': 'Scares readers so they react before they think: danger, threat, "it could be you next".',
+  'call to action': 'Tells readers what to do right now: share, sign, boycott, show up, demand.',
+  'conspiracy / hidden truth': 'Claims a secret plot or a truth "they" hide, which only this message reveals.',
+  'loaded language': 'Emotional, charged words that push a judgement instead of stating facts.',
+  'bandwagon': '"Everyone already agrees": pressure to join the side that looks like the majority.',
+  'discrediting': 'Attacks the people or institutions involved instead of their arguments.',
+  'exaggeration': 'Blows the facts up: bigger numbers, worse outcomes, "the worst ever".',
+  'whataboutism': 'Deflects criticism by pointing at someone else\'s wrongdoing.',
+};
+// the Why panel's heading for a coordinated group: its attack type(s) with a short meaning; "other" and unknown labels are left out
+function attackHTML(f) {
+  const t = f?.verdict === 'coordinated' ? f.explanation?.technique : null;
+  if (!t) return '';
+  const known = [...new Set(t.toLowerCase().split(' + ').map(s => s.trim()))].filter(s => TECHNIQUE_INFO[s]);
+  return known.map(s => `<div class="atk"><b><span>Attack type</span>${esc(s[0].toUpperCase() + s.slice(1))}</b><p>${esc(TECHNIQUE_INFO[s])}</p></div>`).join('');
+}
+// "Why": the attack type (coordinated, once explained), the verdict of the shown group in a sentence,
+// then what made it stand out, one phrase per detector step
 function whyHTML(f) {
   const c = verdictCopy(f);
-  return `<p>${esc(c.text)}</p>` +
+  return attackHTML(f) + `<p>${esc(c.text)}</p>` +
     (f ? `<ul>${reasons(f).map(r => `<li>${esc(r)}</li>`).join('')}</ul>${f.note ? `<p class="note">${esc(f.note)}</p>` : ''}`
       : `<p class="risk">${c.risk}</p>`);
 }
@@ -922,7 +941,7 @@ async function showSays(k) {
   if (!f) return;
   const x = f.explanation, n = f.accounts.length;
   const head = `<header><span class="tag">${LETTER(k)}</span><h2>What they say<small>${n} accounts</small></h2><button type="button" class="done" data-close>Done</button></header>` +
-    (x ? `<p class="lead">${esc(x.summary)}</p><blockquote>“${esc(x.quote)}”</blockquote>${f.verdict === 'coordinated' ? `<p class="foot">Attack type: ${esc(x.technique)}, ${Math.round(x.confidence * 100)}% confidence</p>` : ''}` : '');
+    (x ? `<p class="lead">${esc(x.summary)}</p><blockquote>“${esc(x.quote)}”</blockquote>${f.verdict === 'coordinated' && x.technique.toLowerCase() !== 'other' ? `<p class="foot">Attack type: ${esc(x.technique)}, ${Math.round(x.confidence * 100)}% confidence</p>` : ''}` : '');
   dlg.innerHTML = head + '<p class="foot">Loading posts…</p>';
   if (!dlg.open) dlg.showModal();
   let its;
