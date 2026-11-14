@@ -17,6 +17,7 @@ import os
 import sys
 
 from contracts.models import Item, pseudonym
+from ingest.contextdev import mask_handles
 
 
 def pseudonymize(items: list[Item], salt: str) -> list[Item]:
@@ -27,7 +28,7 @@ def pseudonymize(items: list[Item], salt: str) -> list[Item]:
         if it.synthetic:
             continue
         url = None if it.source == "context_social" else it.url
-        out.append(it.model_copy(update={"author": pseudonym(it.author, salt), "url": url}))
+        out.append(it.model_copy(update={"author": pseudonym(it.author, salt), "url": url, "text": mask_handles(it.text)}))
     return out
 
 
