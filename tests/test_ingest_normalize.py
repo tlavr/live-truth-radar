@@ -209,3 +209,10 @@ def test_export_sample_masks_handles_in_text():
               text="Reported by (@newsdesk)", url="https://ex.com/1", topic="t")
     (out,) = pseudonymize([it], "salt")
     assert out.text == "Reported by (@***)" and out.author.startswith("acct-")
+
+
+def test_export_sample_masks_emails_in_text():
+    from ingest.export_sample import mask_emails
+
+    text = "Outage hits Azure. By Kim (jane.doe@yna.co.kr), reporter@news-site.com; follow @MSFT"
+    assert mask_emails(text) == "Outage hits Azure. By Kim ([email]), [email]; follow @MSFT"

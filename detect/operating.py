@@ -32,6 +32,10 @@ class OperatingPoint(BaseModel):
     pd_small: float = Field(ge=0, le=1)  # measured on the smallest swarm (3 accounts)
     posts_to_decision: float | None = None  # mean posts from the group's first post to "coordinated"
     n_background: int = Field(ge=1)
+    # "real" windows only: non-overlapping 6 h pieces of the live timeline, the independent experiments
+    n_independent: int = Field(default=0, ge=0)
+    pfa_independent: float | None = Field(default=None, ge=0, le=1)
+    pfa_independent_upper95: float | None = Field(default=None, ge=0, le=1)
 
 
 class OperatingPoints(BaseModel):

@@ -8,12 +8,17 @@ One trial = one 6-hour window of one topic (docs/signal-processing.md section 3.
       - "subset": original timing kept, a random 80% of the authors, a random 6 h slice of the
         timeline (keeps real organic co-bursts such as reactions to news, the main source of false alarms).
     Pfa = share of background windows with any `coordinated` finding.
+    Plus "real" windows: the topic's live timeline cut into consecutive, non-overlapping 6 h pieces with
+    the original timing (no resampling; pieces too small to ever alarm are skipped). Only these are
+    independent experiments, so the operating points also give Pfa and its 95% bound on them alone
+    (n_independent). The pooled Pfa and its bound mix them with resampled windows of the same items,
+    which are correlated, so the pooled bound is optimistic.
   * Inject windows: a background window plus `make_campaign` (held-out phrases), ROC_SWARM_ACCOUNTS
     accounts for the ROC, time to decision and purity.
     Pd = share of inject windows with a `coordinated` finding whose accounts are >= half injected
     AND which covers >= half of the injected accounts.
   * ROC: (Pfa, Pd) while sweeping the CFAR threshold k (alpha, beta fixed); the same windows are
-    reused for every k. Operating point: the smallest k with Pfa <= 2%.
+    reused for every k. Operating point: the k with the largest Pd among those with Pfa <= 2% (ties: larger k).
 
 Run: `make eval` (LTR_EMBEDDER=gemini with the cache in cache/embeddings/; network only for
 missing embeddings). The hashing embedder is refused unless --dev.
@@ -47,7 +52,8 @@ log = logging.getLogger("eval")
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURES_DIR = ROOT / "fixtures"
 EVAL_DIR = ROOT / "eval"
-BACKGROUND_FILES = ("items.json", "items_live_sample.json")
+# The first copy of an id wins: the e-mail-masked live background goes before the older live sample.
+BACKGROUND_FILES = ("items.json", "items_live_background.json", "items_live_sample.json")
 
 WINDOW = timedelta(hours=6)
 WINDOW_BASE = datetime(2026, 11, 14, 0, 0, tzinfo=timezone.utc)  # window clock; only relative times matter
@@ -71,7 +77,7 @@ MAX_FALSE_POSITIVES, MAX_EXAMPLES = 3, 5
 @dataclass(frozen=True)
 class Window:
     topic: str
-    mode: str  # "shift" | "subset"
+    mode: str  # "shift" | "subset" | "real"
     items: list[Item]
     injected: frozenset[str] = frozenset()  # injected account names (empty: background window)
     n_injected: int = 0
@@ -80,13 +86,15 @@ class Window:
 def load_background(fixtures_dir: Path = FIXTURES_DIR) -> dict[str, list[Item]]:
     """Organic (synthetic=False) items by topic from the fixtures and the live sample, if present."""
     by_topic: dict[str, list[Item]] = {}
+    seen: set[str] = set()  # the live background export overlaps the live sample: keep each item once
     adapter = TypeAdapter(list[Item])
     for name in BACKGROUND_FILES:
         path = fixtures_dir / name
         if not path.exists():
             continue
         for it in adapter.validate_json(path.read_text(encoding="utf-8")):
-            if not it.synthetic and it.campaign_id is None:
+            if not it.synthetic and it.campaign_id is None and it.id not in seen:
+                seen.add(it.id)
                 by_topic.setdefault(it.topic, []).append(it)
     return {t: sorted(v, key=lambda it: (it.published_at, it.id)) for t, v in by_topic.items() if v}
 
@@ -124,6 +132,30 @@ def background_window(items: list[Item], rng: np.random.Generator, mode: str) ->
     else:
         raise ValueError(f"unknown background mode {mode!r}")
     return [it.model_copy(update={"published_at": WINDOW_BASE + timedelta(seconds=when[it.id])}) for it in chosen]
+
+
+def real_windows(background: dict[str, list[Item]], topics: list[str], min_authors: int = DEFAULT.min_swarm_accounts
+                 ) -> list[Window]:
+    """Consecutive non-overlapping 6 h pieces of each topic's timeline, original timing (mode "real").
+
+    Pieces are [t0 + m*W, t0 + (m+1)*W) from the topic's first item. Pieces with fewer than min_authors
+    authors are skipped: they can never alarm, so counting them would only flatter the Pfa bound. Each piece is
+    moved to the window clock (WINDOW_BASE) by one common shift, so cross-author alignment is untouched."""
+    out: list[Window] = []
+    width = WINDOW.total_seconds()
+    for topic in topics:
+        items = background[topic]
+        t0 = min(it.published_at for it in items)
+        pieces: dict[int, list[Item]] = {}
+        for it in items:
+            pieces.setdefault(int((it.published_at - t0).total_seconds() // width), []).append(it)
+        for m in sorted(pieces):
+            if len({it.author for it in pieces[m]}) < min_authors:
+                continue
+            start = t0 + m * WINDOW
+            out.append(Window(topic, "real", [it.model_copy(update={"published_at": WINDOW_BASE + (it.published_at - start)})
+                                              for it in pieces[m]]))
+    return out
 
 
 def make_windows(
@@ -371,7 +403,8 @@ def build_report(
     log.info("background topics: %s; inject topics: %s", sorted(background), inject_topics)
 
     rng = np.random.default_rng(seed)
-    bg_windows = make_windows(background, sorted(background), n_windows, rng)
+    bg_windows = make_windows(background, sorted(background), n_windows, rng) + real_windows(
+        background, sorted(background), cfg.min_swarm_accounts)
     inj_windows = make_windows(background, inject_topics, n_windows, rng, n_accounts=ROC_SWARM_ACCOUNTS)
     size_windows = {n: make_windows(background, inject_topics, n_size_windows, rng, n_accounts=n) for n in sizes}
     _prefetch_embeddings(bg_windows + inj_windows + [w for ws in size_windows.values() for w in ws])
@@ -388,13 +421,12 @@ def build_report(
 
     ok = [k for k, (pfa, _) in zip(ks, points) if pfa <= TARGET_PFA]
     if ok:
-        k_op = min(ok)
-        if k_op == min(ks):
-            log.warning(
-                "operating point k=%.2f is the edge of the grid (Pfa there %.3f < %.0f%%): the 2%% constraint "
-                "does not bind, the true Neyman-Pearson k may be lower; extend the grid or use a harder background",
-                k_op, points[ks.index(k_op)][0], 100 * TARGET_PFA,
-            )
+        # Neyman-Pearson: the largest Pd among the admissible k; a tie goes to the larger (safer) k.
+        # Pd is not monotone in k here: a very low k merges the swarm with background accounts (purity fails).
+        k_op = max(ok, key=lambda k: (points[ks.index(k)][1], k))
+        if len(ok) == len(ks):
+            log.warning("every k on the grid has Pfa <= %.0f%%: the constraint does not bind on this background, "
+                        "k=%.2f is chosen by Pd alone", 100 * TARGET_PFA, k_op)
     else:
         k_op = max(ks)
         log.warning("no k reaches Pfa <= %.0f%%; operating point = largest k %.2f", 100 * TARGET_PFA, k_op)
@@ -462,7 +494,8 @@ def build_operating_points(
     if not background or not inject_topics:
         raise SystemExit(f"no background / inject topics in {fixtures_dir}")
     rng = np.random.default_rng(seed + 1)  # its own windows: the report's random stream is unchanged
-    bg_windows = make_windows(background, sorted(background), n_windows, rng)
+    bg_windows = make_windows(background, sorted(background), n_windows, rng) + real_windows(
+        background, sorted(background), cfg.min_swarm_accounts)
     inj_windows = make_windows(background, inject_topics, n_windows, rng, n_accounts=ROC_SWARM_ACCOUNTS)
     small_windows = make_windows(background, inject_topics, n_windows, rng, n_accounts=min(SIZES))
     _prefetch_embeddings(bg_windows + inj_windows + small_windows)
@@ -472,6 +505,8 @@ def build_operating_points(
         acfg = replace(cfg, alpha=alpha)
         bg, inj, small = (run_trials(w, acfg) for w in (bg_windows, inj_windows, small_windows))
         alarms = sum(t.alarm for t in bg)
+        real = [t for t in bg if t.window.mode == "real"]
+        real_alarms = sum(t.alarm for t in real)
         costs = []
         for t in inj:
             f = t.best_hit()
@@ -486,9 +521,13 @@ def build_operating_points(
             pd_small=round(rate([t.best_hit() is not None for t in small]), 4),
             posts_to_decision=round(float(np.mean(costs)), 2) if costs else None,
             n_background=len(bg),
+            n_independent=len(real),
+            pfa_independent=round(real_alarms / len(real), 4) if real else None,
+            pfa_independent_upper95=round(pfa_upper95(real_alarms, len(real)), 4) if real else None,
         )
-        log.info("alpha=%.3f  Pfa=%.3f (<= %.3f)  Pd=%.3f  Pd(%d acc)=%.3f  posts=%s", alpha, point.pfa,
-                 point.pfa_upper95, point.pd, min(SIZES), point.pd_small, point.posts_to_decision)
+        log.info("alpha=%.3f  Pfa=%.3f (<= %.3f)  Pd=%.3f  Pd(%d acc)=%.3f  posts=%s  real windows: %d alarms / %d",
+                 alpha, point.pfa, point.pfa_upper95, point.pd, min(SIZES), point.pd_small, point.posts_to_decision,
+                 real_alarms, len(real))
         points.append(point)
     return OperatingPoints(generated_at=datetime.now(timezone.utc).replace(microsecond=0), embedder=embedder,
                            cfar_k=cfg.cfar_k, points=points)

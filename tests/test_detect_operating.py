@@ -66,9 +66,12 @@ def test_eval_operating_points_on_fixtures(monkeypatch):
         return real_run_trials(windows, cfg)
 
     monkeypatch.setattr(run, "run_trials", spy)
+    monkeypatch.setattr(run, "BACKGROUND_FILES", ("items.json", "items_live_sample.json"))  # small, fast
     pts = build_operating_points(n_windows=3, alphas=(0.005, 0.05), dev=True)
     assert seen == [0.005] * 3 + [0.05] * 3  # background, ROC swarm, small swarm at each alpha
     assert [p.alpha for p in pts.points] == [0.005, 0.05]
     strict, loose = pts.points
     assert strict.pd_small <= loose.pd_small  # holds on these fixed windows (not a theorem: B moves too)
     assert all(0 <= p.pfa <= p.pfa_upper95 <= 1 for p in pts.points)
+    for p in pts.points:  # the fixture timelines give a few real (independent) windows
+        assert p.n_independent > 0 and 0 <= p.pfa_independent <= p.pfa_independent_upper95 <= 1
