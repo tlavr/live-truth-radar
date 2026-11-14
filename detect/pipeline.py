@@ -84,13 +84,20 @@ def _detect_topic(topic: str, items: list[Item], E: np.ndarray, now: datetime, c
     texts = [it.text for it in items]
     pair_bins = _pair_bins(sig, cfg)
 
+    # SPRT reference = posts of accounts in NO candidate group: another swarm in the topic (e.g. a
+    # second inject) would otherwise raise mu0 and mask this one (other targets censored from CFAR cells).
+    in_any = np.zeros(len(sig.accounts), dtype=bool)
+    for g in groups:
+        in_any[list(g)] = True
+    censored = in_any[sig.acct]
+
     out: list[Finding] = []
     for group in groups:
         members = np.zeros(len(sig.accounts), dtype=bool)
         members[group] = True
         in_group = members[sig.acct]
         posts = np.flatnonzero(in_group)  # time order
-        mu0, sigma = sprt.background(echo_all[~in_group], cfg)
+        mu0, sigma = sprt.background(echo_all[~censored], cfg)
         x = sprt.echo(sig, members, cfg)[posts]
         res = sprt.run(x, mu0, sigma, alpha=cfg.alpha, beta=cfg.beta, cfg=cfg)
         note = news_echo_note(sig, is_news, texts, posts, cfg)
