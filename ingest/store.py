@@ -142,6 +142,15 @@ def replace_findings(conn: psycopg.Connection, topic: str, findings: list[Findin
             )
 
 
+def delete_findings_except(conn: psycopg.Connection, topics: list[str]) -> int:
+    """Delete findings of every topic not in `topics` (e.g. removed from TOPICS); returns the count."""
+    if not topics:
+        raise ValueError("delete_findings_except needs at least one topic to keep")
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute("DELETE FROM findings WHERE NOT (topic = ANY(%s))", (list(topics),))
+        return cur.rowcount
+
+
 def load_findings(conn: psycopg.Connection, topic: str | None = None) -> list[Finding]:
     """Stored findings, newest first; optionally one topic."""
     cols = FINDING_SCALARS + FINDING_JSON

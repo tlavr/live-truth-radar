@@ -153,15 +153,20 @@ def news_since(now: datetime, window_h: float, latest: datetime | None) -> datet
     return since
 
 
+def reddit_enabled() -> bool:
+    """REDDIT_ENABLED=1/true/yes turns the reddit-search source on (default off)."""
+    return (os.environ.get("REDDIT_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def fetch_topic(client: ContextDevClient, topic: str, since: datetime) -> list[Item] | None:
     """All sources for one topic, on-topic items only; None if every source failed."""
     query = topic_query(topic)
     items: list[Item] = []
     ok = False
-    for name, call, norm in (
-        ("news", lambda: client.news_search(query, since=since), news_to_items),
-        ("reddit", lambda: client.reddit_search(query), reddit_to_items),
-    ):
+    sources = [("news", lambda: client.news_search(query, since=since), news_to_items)]
+    if reddit_enabled():  # off by default: reddit-search fails (WEBSITE_ACCESS_ERROR) and costs rate-limit units
+        sources.append(("reddit", lambda: client.reddit_search(query), reddit_to_items))
+    for name, call, norm in sources:
         try:
             got = norm(call(), topic)
         except (ContextDevError, httpx.HTTPError, ValueError, OSError) as e:  # API, network, bad JSON, cache I/O
@@ -223,6 +228,8 @@ def tick(conn, st: LoopState, now: float) -> None:
     """One worker iteration (~every INJECT_CHECK_SEC); each topic and the injects fail independently."""
     if now >= st.next_poll:
         st.next_poll = now + st.interval  # set first: a failing cycle must not rerun (and burn quota) every tick
+        if topics():  # findings of topics dropped from TOPICS are never recomputed: remove them
+            _guarded(conn, "stale findings cleanup", store.delete_findings_except, conn, topics())
         _guarded(conn, "ingest cycle", ingest_cycle, conn)
         for topic in topics():
             _guarded(conn, f"detect on {topic}", detect_topic, conn, topic, st.detector, st.window_hours)
