@@ -53,6 +53,7 @@
 | T4 | Docker Compose (caddy, api, worker, db) + FastAPI `/health` + схема БД | P1 | Сб 01:00 |
 | T5 | Деплой скелета на Hostinger, HTTPS-домен, smoke проходит | P1 | Сб 03:00 |
 | T6 | Ingest: поллинг Context.dev → БД (`items`), кэш ответов | P1 | Сб 04:30 |
+| T6b | Bluesky (`searchPosts`) как второй источник: соцсеть поверх новостей, `context_social` + `platform=bluesky`; eval на новом фоне | P1 + P2 | код Сб 22:00, eval Вс 01:00 |
 | T7 | Эмбеддинги Gemini + луч на тему (бимформинг) + отбеливание на fixtures | P2 | Сб 09:00 |
 | T8 | API `/api/alerts`, `/api/metrics`, `/api/inject` на БД + мок-детектор | P1 | Сб 11:00 |
 | T9 | Генератор синтетического роя (Gemini ~30 вариаций, фейковые аккаунты с лагами) + инжекция | P2 | Сб 11:00 |

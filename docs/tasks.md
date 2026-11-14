@@ -13,6 +13,7 @@
 | T4 | P1 | сб 01:00 | Compose-скелет + /health + схема БД |
 | T5 | P1 | сб 03:00 | Деплой на Hostinger + HTTPS |
 | T6 | P1 | сб 04:30 | Ingest-поллинг → БД |
+| T6b | P1 + P2 | вс 01:00 | Bluesky как второй источник (соцсеть поверх новостей) |
 | T7 | P2 | сб 09:00 | Эмбеддинги + луч на тему + отбеливание |
 | T8 | P1 | сб 11:00 | API на БД + mock-детектор |
 | T9 | P2 | сб 11:00 | Генератор синтетического роя |
@@ -212,6 +213,49 @@
 **Обновить вместе с кодом:** список API в `CLAUDE.md`, сценарий демо в `docs/architecture.md` (шаг 2 — атака из консоли), T16.
 
 **Зависит от:** T12, T12b, T12c, T15 (CD)
+
+### T6b · P1 + P2 · код сб 22:00, eval вс 01:00 (P1) · до F · MUST (решено 14.11)
+**Цель:** кроме новостей Context.dev читать живую соцсеть: посты Bluesky по тем же темам. Аккаунты становятся людьми, а не доменами изданий; правило «эхо новости» (`detect/news_echo.py`, сейчас выключено: поток только из новостей) начинает работать; демо и видео идут на фоне «новости + Bluesky».
+
+**Проба (14.11, 18:55, без логина):** `https://api.bsky.app/xrpc/app.bsky.feed.searchPosts` отвечает 200 (`public.api.bsky.app` — 403). Поля: `uri`, `author.did`/`handle`, `record.text`, `record.createdAt`, `indexedAt`, `embed`. Постов за 6 ч по короткому запросу (постов / авторов): Microsoft outage 100+ / 93, Ukraine peace talks 99+ / 73, France riots 13 / 12, Jensen Huang resign 7 / 7, bomb threat hoax 4 / 4, midterms deepfake 0, Helsinki tram 0.
+
+**Решено (14.11):**
+- Чтение — поллинг `searchPosts` в том же `ingest_cycle` (не Jetstream, без app password): `q`, `sort=latest`, `since` = как `news_since`, но по последнему посту темы с `platform='bluesky'` (не по всему `context_social`: при `REDDIT_ENABLED=1` посты Reddit сдвигали бы `since`; новый параметр `platform` у `store.latest_published` или отдельная функция); при первом опросе темы (Bluesky в БД ещё нет) — backfill с `now − 48 ч`, ≤ 10 страниц (п. «Фон для eval» ниже), `limit=100`, ≤ 3 страниц по `cursor` на тему за цикл.
+- Контракт не меняем: `source="context_social"`, `platform="bluesky"`. Маскировка хэндлов и `url` в API (`api/main.py`) и `news_echo` работают как есть.
+- Eval пересчитываем на фоне с Bluesky (P2). T14 не переразмечаем; в отчёте и слайдах пишем, что `live_precision`/`live_fpr` посчитаны до Bluesky.
+
+**Вход/выход:**
+- P1, `ingest/bluesky.py`: `BlueskyClient.search(q, since, max_pages=3)` (httpx, таймаут, сырые ответы в `cache/`); `posts_to_items(resp, topic, now=None) -> list[Item]`:
+  - `id` = `bsky-{topic}-{sha1(uri)[:16]}`; `author` = `handle` без `@`, как у новостей (`api/main.py` `mask_handle` оставляет 2 первых символа → на дашборде `@al***`; с `@` в начале осталась бы одна буква). Хэндл издания в Bluesky часто совпадает с его доменом (`nytimes.com`), и в `actors` это будет тот же аккаунт, что и автор его статей: это одна организация, так и оставляем; `url` = `https://bsky.app/profile/{handle}/post/{rkey}`;
+  - `published_at` = `createdAt`, но если он расходится с `indexedAt` больше чем на 5 мин — `indexedAt` (клиент может ставить любое время); посты из будущего отбрасываем (`_future`);
+  - `text` = только `record.text` (заголовок карточки ссылки не подмешиваем: иначе все, кто делится одной статьёй, выглядят как копипаста); посты без текста после удаления ссылок отбрасываем.
+- P1, запросы: `BSKY_QUERIES` в `ingest/bluesky.py` (короткие, как в пробе), для slug вне таблицы — `topic_query`; затем тот же `on_topic` по всему тексту поста.
+- P1, `ingest/worker.py`: источник `bluesky` в `fetch_topic` под флагом `BLUESKY_ENABLED` (по умолчанию **вкл**; `0` — быстрый откат на новости); сбой Bluesky не трогает новости и наоборот; `ingest_cycle` без `CONTEXT_DEV_API_KEY` всё равно читает Bluesky. Для этого переделать: `fetch_topic(client: ContextDevClient, topic, since)` (один клиент и один `since` на все источники) → свой клиент и свой `since` у каждого источника; ранний `return []` в `ingest_cycle` при пустом ключе → пропуск только источника news. Новые посты проходят `warm_embeddings` как сейчас.
+- **P1, хэндлы в тексте поста:** API сейчас скрывает автора и `url`, но `text` отдаёт как есть: упоминания `@bob.bsky.social` и ссылки `bsky.app/profile/<handle>` в тексте видны всем (воспроизведено на `public_item`, `api/main.py`). `public_item` прогоняет `text` через `mask_handles` (`ingest/contextdev.py`); `_HANDLE_RE` дополнить ссылками `bsky.app/profile/[\w.:-]+`, чтобы `ingest/export_sample.py` не унёс их в git. Тест на оба случая. Объяснения Gemini могут цитировать текст поста: в карточку они должны идти после той же маскировки (проверить `ingest/explain.py` и API).
+- P1: `.env.example` (`BLUESKY_ENABLED`), `make smoke` не меняется.
+- **Фон для eval (решено 14.11):** 48 ч Bluesky к F не наберётся (код в 22:00, F в 02:00 → ≤ 4 ч живого опроса). Фон = 48 ч новостей + весь Bluesky, что есть в БД (backfill первого опроса + живой опрос); число часов Bluesky по каждой теме пишем в HANDOFF и в описании отчёта.
+- **Кто и когда (решено 14.11):** P2 спит сб 20:30 – вс 00:30 (HANDOFF §3), поэтому выгрузку и `make eval` делает **P1 в вс ~01:00** (по T13 это можно: `make eval` читает только выгрузку, `labels.csv`, `labels_meta.json` и фикстуры); коммит `eval/report.json` до F. Офлайн-проверку `news_echo` ниже тоже может запустить P1 (только запуск, без правок `detect/`); если правило нужно менять — это делает P2 после 00:30.
+- **P2, до деплоя с Bluesky (офлайн, блокирует включение):** с постами `context_social` в окне включается `news_echo` (`detect/pipeline.py` `has_social`): группа, у которой за ≤ 1 ч до первого поста есть статья с cos > 0.8 к центроиду (`news_echo_cos`, `news_echo_max_age_sec`), опускается до `watching`. Посты атаки называют предмет темы, поэтому на теме с большим потоком новостей (Microsoft: 100+ статей) атака может перестать давать `coordinated`. Проверить: `scan` с атакой 25 (`schedule="future"`, вариации из `synth/variations/`) на живом окне «новости + Bluesky» по каждой теме атаки (helsinki, jensen, microsoft, europe) → `coordinated`, а не `watching` с `note` «news echo». Если режет — P2 решает, что менять в правиле (не флаг `synthetic`: детектор его не использует), и пишет решение в HANDOFF; до этого `BLUESKY_ENABLED=0`.
+- P2: прогнать `detect` на живом окне с Bluesky (что делает `news_echo`, сколько `watching`/`coordinated` на реальных людях); `ingest/export_sample.py` → новое окно фона (псевдонимы, `contracts.pseudonym()`) → `make eval` → `eval/report.json` + `eval/operating_points.json` в git; дефолты в HANDOFF, если сдвинулись. По желанию: `platform="bluesky"` у постов атаки в `synth/campaign.py` (сейчас `"x"`), чтобы атака выглядела как остальной фон.
+
+**Готово, когда (на VPS):**
+- В `items` есть `platform=bluesky` минимум по 4 темам из `TOPICS`; `/api/items` отдаёт хэндлы как `ab***` и без `url`.
+- 2 ч фона с Bluesky: новых `coordinated` на реальных аккаунтах нет, или каждый разобран и записан в HANDOFF §6 (что это и почему).
+- Attack (25) в `/redteam` по-прежнему даёт `coordinated` ≤ 2 мин на теме с Bluesky-фоном (и с большим потоком новостей), без `note` «news echo»; `make smoke` зелёный.
+- `eval/report.json` пересчитан на фоне с Bluesky, `/api/metrics` его отдаёт.
+
+**Тесты (офлайн, `make test`, P1):** `tests/test_bluesky.py`: ответ `searchPosts` (короткий JSON в самом тесте, выдуманные хэндлы) → `Item` (UTC, `source`, `platform`, стабильный `id`); правило `createdAt`/`indexedAt`; пост из будущего и пустой пост отброшены; `fetch_topic` на фейковых клиентах: падение Bluesky не убирает новости; `ingest_cycle` без ключа Context.dev читает Bluesky; `since` по `platform`; маскировка хэндлов и ссылок `bsky.app/profile/` в `text` (`public_item`, `mask_handles`). Без сети и `sleep`, только фейковые клиенты: `make test` уже 7,6 с при цели < 5 с, новые тесты добавляют ≤ 0,3 с.
+
+**Приватность:** реальные хэндлы только в БД; в git и фикстурах — `contracts.pseudonym()`; сырые ответы — `cache/`.
+
+**Если фон даёт ложные тревоги / не успеваем:**
+0. Атаку режет `news_echo` (проверка P2 выше) и правило быстро не поправить → `BLUESKY_ENABLED=0`, демо на новостях.
+1. Разобрать с P2: эхо новости без статьи в Context.dev (все делятся одной статьёй, которой нет в news) → кандидат в `watching`, а не алерт.
+2. `BLUESKY_ENABLED=0` на VPS, демо и eval остаются на новостях, Bluesky — в слайд «что дальше» с цифрами пробы.
+
+**Обновить вместе с кодом:** `docs/architecture.md` (схема, строка 26; MUST и строка Ingest, 40; риск «social не отдаёт автора», 108), HANDOFF :87 (маскировка: теперь и `text`), :106 (fallback news-only), §6 (итог T2 по social), `docs/signal-processing.md` (:18, :75, :232 — там написано, что живой поток только из новостей), `docs/tech-challenges.md` (строка Social, :39), `docs/submission-draft.md` (`[ALT]` news-only больше не про нас), README «Context.dev endpoints & why» из T17 (+ Bluesky), строка Stack в `CLAUDE.md`.
+
+**Зависит от:** T6, T15
 
 ### T13 · P2 · сб 19:00
 **Цель:** честные цифры для 40% оценки. Определения: [signal-processing.md §3.10](signal-processing.md#3-согласованный-дизайн-движка-v1-что-строить).
