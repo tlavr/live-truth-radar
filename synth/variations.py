@@ -84,12 +84,13 @@ def save_variations(vs: VariationSet) -> Path:
 def generate(topic: str, description: str, *, n_messages: int = 5, n_variations: int = 30,
              n_held_out: int = 2) -> VariationSet:
     """Ask Gemini for talking points and their rewordings (network; needs GEMINI_API_KEY)."""
+    check_slug(topic)  # fail before spending a request
+    if n_messages < 1 or not 0 <= n_held_out < n_messages:
+        raise ValueError(f"need n_messages >= 1 and 0 <= n_held_out < n_messages (got {n_messages}, {n_held_out}):"
+                         " keep at least one message for tuning")
     from google import genai
     from google.genai import types
 
-    check_slug(topic)
-    if not 0 <= n_held_out < n_messages:
-        raise ValueError(f"n_held_out must be in 0..{n_messages - 1} (got {n_held_out}): keep at least one message for tuning")
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is not set (see .env.example)")
@@ -114,6 +115,8 @@ def generate(topic: str, description: str, *, n_messages: int = 5, n_variations:
             raise ValueError(f"only {len(raw_messages)} messages, cannot hold out {n_held_out}")
         messages = []
         for k, raw in enumerate(raw_messages):
+            if not isinstance(raw["variations"], list):
+                raise ValueError(f"message {k}: 'variations' is not a list")
             texts = list(dict.fromkeys(t.strip() for t in raw["variations"] if t.strip()))
             if len(texts) < n_variations * 2 // 3:
                 warnings.warn(f"message {k} has only {len(texts)} distinct variations (asked for {n_variations})",
@@ -133,8 +136,11 @@ def main() -> None:
     ap.add_argument("--variations", type=int, default=30)
     ap.add_argument("--held-out", type=int, default=2)
     args = ap.parse_args()
-    vs = generate(args.topic, args.description, n_messages=args.messages, n_variations=args.variations,
-                  n_held_out=args.held_out)
+    try:
+        vs = generate(args.topic, args.description, n_messages=args.messages, n_variations=args.variations,
+                      n_held_out=args.held_out)
+    except (ValueError, RuntimeError) as e:
+        raise SystemExit(f"error: {e}") from e
     path = save_variations(vs)
     sizes = ", ".join(str(len(m.variations)) for m in vs.messages)
     print(f"wrote {path} ({len(vs.messages)} messages; variations: {sizes}). Read it before committing.")

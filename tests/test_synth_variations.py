@@ -2,6 +2,7 @@
 
 import json
 import re
+import warnings
 from datetime import datetime, timezone
 
 import pytest
@@ -77,13 +78,50 @@ def test_generate_fails_clearly_without_key(fake_gemini, monkeypatch):
         sv.generate("some-topic", "desc")
 
 
-@pytest.mark.parametrize("reply", ["not json", "{}", '{"messages": []}', '{"messages": "x"}',
-                                   '{"messages": [{"claim": "c"}]}', '{"messages": [{"claim": "c", "variations": ["only one"]}'
-                                   ', {"claim": "d", "variations": ["a", "b"]}, {"claim": "e", "variations": ["a", "b"]}]}'])
+def _msgs(*entries) -> str:
+    return json.dumps({"messages": list(entries)})
+
+
+_OK = {"claim": "c", "variations": ["a", "b"]}
+UNUSABLE = [
+    "not json", "{}", '{"messages": []}', '{"messages": "x"}',
+    _msgs(_OK, _OK, {"claim": "c"}),                         # KeyError: no variations
+    _msgs(_OK, _OK, {"variations": ["a", "b"]}),             # KeyError: no claim
+    _msgs(_OK, _OK, "just a string"),                        # TypeError: message is not an object
+    _msgs(_OK, _OK, {"claim": "c", "variations": ["a", 1]}),  # AttributeError: non-string variation
+    _msgs(_OK, _OK, {"claim": 5, "variations": ["a", "b"]}),  # AttributeError: non-string claim
+    _msgs(_OK, _OK, {"claim": "c", "variations": "abcdef"}),  # string instead of a list
+    _msgs(_OK, _OK, {"claim": "c", "variations": ["only one"]}),  # pydantic: < 2 variations
+]
+
+
+@pytest.mark.parametrize("reply", UNUSABLE)
 def test_unusable_replies_raise_one_clear_error(fake_gemini, reply):
     fake_gemini.reply = reply
     with pytest.raises(RuntimeError, match="unusable reply"):
         sv.generate("some-topic", "desc")
+
+
+def test_bad_arguments_fail_before_any_request(fake_gemini):
+    with pytest.raises(ValueError, match="slug"):
+        sv.generate("Bad Slug", "desc")
+    with pytest.raises(ValueError, match="n_messages"):
+        sv.generate("some-topic", "desc", n_messages=0, n_held_out=0)
+    assert not fake_gemini.instances  # no client was even created
+
+
+def test_cli_prints_a_clean_error(fake_gemini, monkeypatch):
+    monkeypatch.setattr("sys.argv", ["synth.variations", "some-topic", "desc", "--messages", "2", "--held-out", "2"])
+    with pytest.raises(SystemExit, match="error: .*n_held_out"):
+        sv.main()
+
+
+def test_full_sized_reply_does_not_warn(fake_gemini):
+    fake_gemini.reply = json.dumps({"messages": [
+        {"claim": f"c{k}", "variations": [f"text {k}-{j}" for j in range(30)]} for k in range(5)]})
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert len(sv.generate("some-topic", "desc").messages) == 5
 
 
 def test_cannot_hold_out_every_message(fake_gemini):
