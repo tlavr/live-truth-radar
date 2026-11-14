@@ -1,4 +1,4 @@
-"""FastAPI app (P1): /health (T4) and /api/* (T8).
+"""FastAPI app (P1): /health (T4), /api/* (T8), dashboard web/ at / and /metrics (T12).
 
 Run: uvicorn api.main:app --host 0.0.0.0 --port 8000
 
@@ -10,10 +10,13 @@ dashboard: the API is public, so an unmasked JSON would leak them. Full handles 
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 
 from contracts.models import AlertsResponse, Finding, Item, MetricsReport
@@ -22,6 +25,7 @@ from ingest import store
 log = logging.getLogger("ltr.api")
 
 REPORT_PATH = Path(__file__).resolve().parent.parent / "eval" / "report.json"
+WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 MAX_ITEM_IDS = 200
 
 app = FastAPI(title="Live Truth Radar")
@@ -110,3 +114,18 @@ def inject(req: InjectRequest) -> InjectResponse:
             raise HTTPException(status_code=409, detail="inject collided with the previous one, retry")
         store.add_inject_request(conn, req.topic, campaign[0].campaign_id)
     return InjectResponse(campaign_id=campaign[0].campaign_id, n_items=len(campaign))
+
+
+@app.get("/api/topics", response_model=list[str])
+def topics() -> list[str]:
+    """Monitored topics (TOPICS, comma-separated, same parsing as the worker), for the dashboard switcher."""
+    return [t.strip() for t in (os.environ.get("TOPICS") or "").split(",") if t.strip()]
+
+
+@app.get("/metrics", include_in_schema=False)
+def metrics_page() -> FileResponse:
+    return FileResponse(WEB_DIR / "metrics.html")
+
+
+# last: serves web/index.html at / and its assets; the routes above take precedence
+app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")

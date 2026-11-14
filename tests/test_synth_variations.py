@@ -187,8 +187,8 @@ def test_committed_variation_sets_are_clean(topic):
 
 def test_jensen_huang_swarm_builds_offline():
     now = datetime(2026, 11, 14, 12, 0, 0, tzinfo=timezone.utc)
-    vs = sv.load_variations("jensen-huang")
+    vs = sv.load_variations("jensen-huang-resignation")
     assert [len(m.variations) for m in vs.messages] == [30] * 5
     assert [m.held_out for m in vs.messages] == [False, False, False, True, True]
-    items = make_campaign("jensen-huang", now, seed=1)
+    items = make_campaign("jensen-huang-resignation", now, seed=1)
     assert len(items) == 24 and len({i.author for i in items}) == 12
