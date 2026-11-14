@@ -10,6 +10,7 @@ from pydantic import TypeAdapter
 
 from contracts.models import Finding, Item
 from eval.run import live_metrics
+from ingest import label_sample
 from ingest.label_sample import COLUMNS, build_sample, write_sample
 
 FIX = Path(__file__).resolve().parent.parent / "fixtures" / "findings.json"
@@ -30,15 +31,16 @@ def _finding(topic: str, verdict: str, accounts: list[str], llr: float = 0.0, sy
 
 @pytest.fixture
 def world():
-    """Topic a: 3 real alerted, 2 watching (llr 2.0 / 1.0), 15 quiet; 4 injected bots. Topic b: 10 quiet."""
+    """Topic a: 3 real alerted, 2 watching (llr 2.0 / 1.0), real5 alerted with an inject, 14 quiet; 4 bots.
+    Topic b: 10 quiet, one of them shares a handle with a bot of topic a."""
     a = [f"real{i}" for i in range(20)]
     bots = [f"bot{i}" for i in range(4)]
-    b = [f"user{i}" for i in range(10)]
+    b = [f"user{i}" for i in range(9)] + ["bot0"]
     items = [_item("a", x, 0) for x in a] + [_item("a", x, 0, synthetic=True) for x in bots] + [_item("b", x, 0) for x in b]
     findings = [
         _finding("a", "coordinated", a[:3]),
         _finding("a", "coordinated", bots, synthetic=True),
-        _finding("a", "coordinated", ["real5", "bot0"], synthetic=True),  # mixed with an inject: ignored
+        _finding("a", "coordinated", ["real5", "bot0"], synthetic=True),  # mixed with an inject: out of population
         _finding("a", "watching", ["real3"], llr=1.0),
         _finding("a", "watching", ["real4"], llr=2.0),
         _finding("a", "organic", ["real6"]),
@@ -60,8 +62,9 @@ def test_strata_meta_and_watching_fill(world):
     assert {s.handles[r["account"]] for r in by["watching"]} == {"real3", "real4"} - quiet
     one = build_sample(items, findings, SALT, n_alerted=4, n_quiet=0)  # one slot: the highest LLR wins
     assert [one.handles[r["account"]] for r in one.rows if r["verdict"] == "watching"] == ["real4"]
-    assert s.meta == {"a": {"n_accounts": 20, "n_alerted": 3}, "b": {"n_accounts": 10, "n_alerted": 0}}
-    assert not set(bots) & set(s.handles.values())
+    assert s.meta == {"a": {"n_accounts": 19, "n_alerted": 3}, "b": {"n_accounts": 10, "n_alerted": 0}}
+    assert not {h for acct, h in s.handles.items() if any(r["account"] == acct and r["topic"] == "a" for r in s.rows)} & (
+        set(bots) | {"real5"})
     assert all(r["account"].startswith("acct-") for r in s.rows)
     assert not {r["account"] for r in s.rows} & (set(a) | set(bots))  # no real handle in the rows
     assert len({(r["topic"], r["account"]) for r in s.rows}) == len(s.rows)
@@ -81,12 +84,24 @@ def test_refuses_without_salt(world):
         build_sample(items, findings, "")
 
 
-def test_written_files_feed_eval_and_are_never_overwritten(world, tmp_path):
+def test_alerted_sample_is_simple_random_over_topics():
+    """Precision pools topics: a big topic must not be cut to the share of a small one."""
+    items = [_item("big", f"x{i}", 0) for i in range(40)] + [_item("small", f"y{i}", 0) for i in range(5)]
+    findings = [_finding("big", "coordinated", [f"x{i}" for i in range(40)]),
+                _finding("small", "coordinated", [f"y{i}" for i in range(5)])]
+    picks = [r["topic"] for r in build_sample(items, findings, SALT, n_alerted=20, n_quiet=0).rows]
+    assert len(picks) == 20 and picks.count("big") > 12
+
+
+def test_written_files_feed_eval_and_labels_are_never_overwritten(world, tmp_path, monkeypatch):
     items, findings, *_ = world
+    handles = tmp_path / "cache" / "label_handles.csv"
+    monkeypatch.setattr(label_sample, "HANDLES", handles)
     s = build_sample(items, findings, SALT, n_alerted=5, n_quiet=6)
-    write_sample(s, tmp_path)
-    with pytest.raises(FileExistsError):
-        write_sample(s, tmp_path)
+    write_sample(s, tmp_path, handles=handles)
+    write_sample(s, tmp_path, handles=handles)  # an unlabelled skeleton may be regenerated
+    with pytest.raises(ValueError):
+        write_sample(s, tmp_path, handles=tmp_path / "eval" / "label_handles.csv")  # handles only under cache/
 
     with (tmp_path / "labels.csv").open(newline="") as fh:
         rows = list(csv.DictReader(fh))
@@ -97,9 +112,11 @@ def test_written_files_feed_eval_and_are_never_overwritten(world, tmp_path):
         w = csv.DictWriter(fh, fieldnames=COLUMNS)
         w.writeheader()
         w.writerows(rows)
+    with pytest.raises(FileExistsError):
+        write_sample(s, tmp_path, handles=handles)  # labels are there now
     m = live_metrics(tmp_path / "labels.csv", tmp_path / "labels_meta.json")
     assert m.precision == 1.0 and m.fpr == 0.0
     assert m.n_labelled == sum(r["verdict"] != "watching" for r in rows)
     assert json.loads((tmp_path / "labels_meta.json").read_text()) == s.meta
-    with (tmp_path / "label_handles.csv").open(newline="") as fh:
+    with handles.open(newline="") as fh:
         assert {r["pseudonym"]: r["handle"] for r in csv.DictReader(fh)} == s.handles
