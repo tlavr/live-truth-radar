@@ -53,6 +53,15 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Live Swarm Radar", lifespan=lifespan)
 
 
+@app.middleware("http")
+async def revalidate_dashboard(request, call_next):
+    """Dashboard pages and scripts: the browser must revalidate (ETag) on every load, so a deploy shows at once."""
+    response = await call_next(request)
+    if not request.url.path.startswith("/api/") and request.url.path != "/health":
+        response.headers.setdefault("Cache-Control", "no-cache")
+    return response
+
+
 def mask_handle(author: str) -> str:
     """'helsinki_rider' -> 'he***' (the dashboard prefixes '@')."""
     return author[:2] + "***"
