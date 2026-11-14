@@ -50,9 +50,14 @@ def topic_signal(E: np.ndarray, t: np.ndarray, authors: list[str], cfg: Analyzer
     return TopicSignal(t=t, acct=acct, accounts=accounts, gain=gain, code=code, close=close)
 
 
+def n_lag_steps(cfg: AnalyzerConfig = DEFAULT) -> int:
+    """Whole lag steps inside tau_max (the grid never goes past tau_max)."""
+    return int(np.floor(cfg.tau_max_sec / cfg.lag_step_sec + 1e-9))
+
+
 def lag_grid(cfg: AnalyzerConfig = DEFAULT) -> np.ndarray:
     """Lag cells tau = -tau_max .. +tau_max with step lag_step_sec."""
-    half = round(cfg.tau_max_sec / cfg.lag_step_sec)
+    half = n_lag_steps(cfg)
     return np.arange(-half, half + 1, dtype=np.float64) * cfg.lag_step_sec
 
 

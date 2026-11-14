@@ -31,6 +31,9 @@ class AnalyzerConfig:
     # CFAR over account pairs (3.5) and swarm assembly (3.6).
     cfar_k: float = 3.0  # threshold in MAD sigmas
     cfar_sigma_floor: float = 0.05
+    # Minimum reference cells: a sparse topic is padded with R = 0 pairs (the H0 value of
+    # two unrelated accounts), so a swarm that is most of a quiet topic cannot become its own background.
+    cfar_min_ref_cells: int = 200
     min_swarm_accounts: int = 3
 
     # SPRT (3.7).
@@ -39,6 +42,9 @@ class AnalyzerConfig:
     sprt_mu1: float = 0.5
     sprt_llr_clip: tuple[float, float] = (-1.0, 1.5)
     sprt_sigma_floor: float = 0.15
+    # H0 echo is measured on posts of accounts OUTSIDE the group under test (guard cells),
+    # padded with echo = 0 (an isolated post) up to this many posts in a quiet topic.
+    sprt_min_ref_posts: int = 30
 
     # News echo (3.8).
     news_echo_cos: float = 0.8

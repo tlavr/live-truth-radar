@@ -3,7 +3,9 @@
 Echo of post p: x_p = max over EARLIER posts q of other accounts (0 <= t_p - t_q <= tau_max)
 of c_pq * exp(-(t_p - t_q) / lag_kernel). It only looks back, so it works in real time.
 
-H0: x ~ N(mu0, sigma^2), mu0 and sigma measured robustly on the whole topic;
+H0: x ~ N(mu0, sigma^2), mu0 and sigma measured robustly on the posts of the topic's
+other accounts (the group under test is left out, like guard cells in CFAR; a quiet topic is
+padded with echo = 0 up to sprt_min_ref_posts);
 H1: x ~ N(mu1, sigma^2), mu1 = design "minimum target".
 dLLR = (mu1 - mu0) / sigma^2 * (x - (mu0 + mu1) / 2), clipped to sprt_llr_clip.
 """
@@ -46,9 +48,16 @@ def echo(sig: TopicSignal, members: np.ndarray | None = None, cfg: AnalyzerConfi
     return contrib.max(axis=1)
 
 
-def background(x_all: np.ndarray, cfg: AnalyzerConfig = DEFAULT) -> tuple[float, float]:
-    """(mu0, sigma) of the echo under H0: median and floored MAD over all posts of the topic."""
-    return robust_scale(x_all, cfg.sprt_sigma_floor)
+def background(x_ref: np.ndarray, cfg: AnalyzerConfig = DEFAULT) -> tuple[float, float]:
+    """(mu0, sigma) of the echo under H0: median and floored MAD over the reference posts.
+
+    x_ref: echo of the posts outside the group under test; padded with zeros (isolated
+    posts) up to cfg.sprt_min_ref_posts, so a swarm in a quiet topic is not its own background.
+    """
+    x_ref = np.asarray(x_ref, dtype=np.float64)
+    if x_ref.size < cfg.sprt_min_ref_posts:
+        x_ref = np.concatenate([x_ref, np.zeros(cfg.sprt_min_ref_posts - x_ref.size)])
+    return robust_scale(x_ref, cfg.sprt_sigma_floor)
 
 
 @dataclass(frozen=True)

@@ -172,3 +172,61 @@ def test_news_echo_rule_can_be_switched_off():
     cfg = replace(DEFAULT, news_echo_enabled=False)
     findings = [f for f in detect(_news_burst(with_article=True), cfg=cfg) if "reader_0" in f.accounts]
     assert findings and all(f.note is None for f in findings)
+
+
+def test_cfar_subtracts_the_background_median():
+    n = 25  # 300 pairs: enough reference cells, no padding
+    R = np.full((n, n), 0.2)
+    np.fill_diagonal(R, 1.0)
+    assert cfar.swarm_groups(cfar.pair_z(R)) == []  # uniformly busy topic: nothing stands out
+    for i in (1, 4, 8):
+        for j in (1, 4, 8):
+            if i != j:
+                R[i, j] = 0.5
+    assert cfar.swarm_groups(cfar.pair_z(R)) == [[1, 4, 8]]
+
+
+def test_injected_campaign_caught_in_quiet_topic():
+    organic = [it for it in _items("items.json") if not it.synthetic]
+    quiet = sorted({it.author for it in organic})[:2]
+    for n_org, n in ((0, 12), (2, 12), (2, 4)):
+        background = [it for it in organic if it.author in quiet[:n_org]]
+        injected = make_campaign(TOPIC, datetime(2026, 11, 13, 19, 30, tzinfo=timezone.utc), n_accounts=n, seed=3)
+        hits = [f for f in detect(background + injected) if f.verdict == "coordinated"]
+        assert len(hits) == 1 and set(hits[0].accounts) == {it.author for it in injected}, (n_org, n)
+
+
+def test_small_organic_topic_raises_no_alarm():
+    organic = [it for it in _items("items.json") if not it.synthetic]
+    accounts = sorted({it.author for it in organic})
+    for k in range(3, len(accounts) + 1, 2):
+        sub = set(accounts[:k])
+        assert not [f for f in detect([it for it in organic if it.author in sub]) if f.verdict == "coordinated"]
+
+
+@pytest.mark.parametrize("shift", [timedelta(minutes=-70), timedelta(minutes=20)])
+def test_news_echo_needs_article_shortly_before_burst(shift):
+    items = [
+        it.model_copy(update={"published_at": it.published_at + shift}) if it.id == "news-1" else it
+        for it in _news_burst(with_article=True)
+    ]  # article 80 min before the burst (too old) or 10 min after it (cannot be the cause)
+    hits = [f for f in detect(items) if f.verdict == "coordinated" and "reader_0" in f.accounts]
+    assert hits and hits[0].note is None
+
+
+def test_lag_grid_never_exceeds_tau_max():
+    from dataclasses import replace
+
+    from detect.correlation import lag_grid
+
+    cfg = replace(DEFAULT, tau_max_sec=615.0)
+    assert lag_grid(cfg).max() == 600.0 and lag_grid(replace(DEFAULT, tau_max_sec=50.0)).max() == 30.0
+    f = next(f for f in detect(_items("items.json"), cfg=cfg) if f.verdict == "coordinated")
+    assert f.ambiguity.lag_edges_sec[-1] == 615.0
+
+
+def test_beam_calibration_suggests_ordered_thresholds():
+    from detect.calibrate_beam import ROOT, corpus, suggest
+
+    c_lo, c_hi, lines = suggest(corpus([ROOT / "fixtures" / "items.json"]))
+    assert 0 <= c_lo < c_hi <= 1 and len(lines) >= 2
