@@ -98,15 +98,28 @@ def test_detect_topic_ends_the_read_transaction_before_the_llm_call(monkeypatch)
 
 
 def test_real_detector_alerts_on_each_of_two_injects(monkeypatch):
-    """I1 offline: inject -> process_injects -> coordinated synthetic finding; the second inject alerts too."""
+    """I1 offline: inject -> process_injects -> coordinated synthetic finding; the second inject alerts too.
+
+    The worker passes the wall clock to detect(), and an inject expires ~10 min after the click
+    (synthetic_ttl_sec), so the clock is frozen one minute after each click: 20 min later the first
+    campaign has expired and only the new one is alerted.
+    """
     from datetime import datetime, timedelta, timezone
 
     from synth.campaign import make_campaign
 
-    topic, now = "helsinki-tram-fares", datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc)
+    topic, click0 = "helsinki-tram-fares", datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc)
+    clock = {"now": click0}
+
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return clock["now"]
+
     window: list = []
     stored: dict[str, list[Finding]] = {}
     pending: list[dict] = []
+    monkeypatch.setattr(worker, "datetime", FrozenDatetime)
     monkeypatch.setattr(worker.store, "window_items", lambda conn, t, h: [it for it in window if it.topic == t])
     monkeypatch.setattr(worker.store, "replace_findings", lambda conn, t, fs: stored.__setitem__(t, fs))
     monkeypatch.setattr(worker.store, "pending_injects", lambda conn: list(pending))
@@ -116,8 +129,12 @@ def test_real_detector_alerts_on_each_of_two_injects(monkeypatch):
     detector = worker.load_detector()
 
     for k in range(2):
-        window += make_campaign(topic, now + timedelta(minutes=20 * k))
+        click = click0 + timedelta(minutes=20 * k)
+        campaign = make_campaign(topic, click)
+        window += campaign
+        clock["now"] = click + timedelta(minutes=1)
         pending.append({"id": k, "topic": topic})
         assert worker.process_injects(FakeConn(), detector, window_hours=6) == 1
         alerts = [f for f in stored[topic] if f.verdict == "coordinated" and f.synthetic]
-        assert len(alerts) == k + 1
+        assert len(alerts) == 1  # the earlier inject (20 min ago) has expired
+        assert set(alerts[0].accounts) == {it.author for it in campaign}

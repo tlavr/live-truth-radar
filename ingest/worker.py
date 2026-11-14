@@ -68,7 +68,8 @@ def load_detector() -> Detector:
         log.warning("LTR_DETECTOR=%r is no longer supported; using detect.pipeline", name)
     from detect.pipeline import detect
 
-    return detect
+    # live run: pass the wall clock so injected campaigns expire (synthetic_ttl_sec, ~10 min after the click)
+    return lambda items: detect(items, now=datetime.now(timezone.utc))
 
 
 def _needs_explanation(f: Finding) -> bool:
