@@ -115,23 +115,25 @@ def test_request_failures_become_one_clear_error(fake_gemini):
     import httpx
     from google.genai import errors
 
+    api_error = errors.ClientError(400, {"error": {"code": 400, "status": "INVALID_ARGUMENT", "message": "bad key"}})
     for exc, reason in [
-        (errors.ClientError(400, {"error": {"code": 400, "status": "INVALID_ARGUMENT", "message": "bad key"}}),
-         "400 INVALID_ARGUMENT: bad key"),
+        (api_error, f"{api_error.code} {api_error.status}: {api_error.message}"),
         (errors.UnknownApiResponseError("garbled"), "UnknownApiResponseError: garbled"),
+        (json.JSONDecodeError("Expecting value", "<html>", 0), "JSONDecodeError: Expecting value"),
         (httpx.ConnectError("no route"), "ConnectError: no route"),
     ]:
         fake_gemini.reply = exc
         with pytest.raises(RuntimeError, match="request to .* failed") as err:
             sv.generate("some-topic", "desc")
-        assert str(err.value).endswith(reason)
+        assert reason in str(err.value)
 
 
 def test_bad_arguments_fail_before_any_request(fake_gemini):
     with pytest.raises(ValueError, match="slug"):
         sv.generate("Bad Slug", "desc")
-    with pytest.raises(ValueError, match="n_messages"):
-        sv.generate("some-topic", "desc", n_messages=0, n_held_out=0)
+    for n_messages, n_held_out in [(0, 0), (2, 2), (5, 0), (5, -1), (5, 5)]:
+        with pytest.raises(ValueError, match="n_held_out"):
+            sv.generate("some-topic", "desc", n_messages=n_messages, n_held_out=n_held_out)
     for n in (1, 0, -3):
         with pytest.raises(ValueError, match="n_variations"):
             sv.generate("some-topic", "desc", n_variations=n)
@@ -161,9 +163,7 @@ def test_full_sized_reply_does_not_warn(fake_gemini):
         assert len(sv.generate("some-topic", "desc").messages) == 5
 
 
-def test_cannot_hold_out_every_message(fake_gemini):
-    with pytest.raises(ValueError, match="n_held_out"):
-        sv.generate("some-topic", "desc", n_messages=2, n_held_out=2)
+def test_cannot_hold_out_every_returned_message(fake_gemini):
     fake_gemini.reply = _reply(2)  # the model returned fewer messages than asked
     with pytest.raises(RuntimeError, match="cannot hold out"):
         sv.generate("some-topic", "desc", n_held_out=2)
@@ -171,8 +171,9 @@ def test_cannot_hold_out_every_message(fake_gemini):
 
 def test_warns_when_model_returns_few_variations(fake_gemini):
     fake_gemini.reply = _reply(5)  # 2 distinct variations each, 30 requested
-    with pytest.warns(UserWarning, match="distinct variations"):
+    with pytest.warns(UserWarning, match="distinct variations") as record:
         sv.generate("some-topic", "desc")
+    assert {w.filename for w in record} == {__file__}  # points at the caller of generate()
 
 
 @pytest.mark.parametrize("topic", sv.available_topics())

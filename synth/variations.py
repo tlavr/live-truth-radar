@@ -120,9 +120,10 @@ def generate(topic: str, description: str, *, n_messages: int = 5, n_variations:
     unusable reply raise RuntimeError with a one-line reason.
     """
     check_slug(topic)  # fail before spending a request
-    if n_messages < 1 or not 0 <= n_held_out < n_messages:
-        raise ValueError(f"need n_messages >= 1 and 0 <= n_held_out < n_messages (got {n_messages}, {n_held_out}):"
-                         " keep at least one message for tuning")
+    # At least one held-out message: the live inject draws only on those (HANDOFF §5), and at
+    # least one message left for tuning.
+    if not 1 <= n_held_out < n_messages:
+        raise ValueError(f"need 1 <= n_held_out < n_messages (got n_held_out={n_held_out}, n_messages={n_messages})")
     if n_variations < 2:
         raise ValueError(f"need n_variations >= 2 (got {n_variations}): a message needs at least two rewordings")
     import httpx
@@ -144,12 +145,15 @@ def generate(topic: str, description: str, *, n_messages: int = 5, n_variations:
             )
     except errors.APIError as e:  # auth, quota, unknown model
         raise RuntimeError(f"request to {model} failed: {e.code} {e.status}: {e.message}") from e
-    except (errors.UnknownApiResponseError, httpx.HTTPError) as e:  # garbled response, network
+    # garbled response (UnknownApiResponseError, or a bare JSONDecodeError/ValidationError from the
+    # SDK parsing a non-JSON body: all ValueErrors), network
+    except (ValueError, httpx.HTTPError) as e:
         raise RuntimeError(f"request to {model} failed: {type(e).__name__}: {e}") from e
-    if not resp.text:
+    text = resp.text  # the getter logs about non-text parts: read it once
+    if not text:
         raise RuntimeError(f"{model} returned no text (blocked or empty response)")
     try:
-        messages = _parse_reply(resp.text, n_held_out=n_held_out, n_variations=n_variations)
+        messages = _parse_reply(text, n_held_out=n_held_out, n_variations=n_variations)
     except ValueError as e:
         raise RuntimeError(f"{model} returned an unusable reply: {type(e).__name__}: {e}") from e
     return VariationSet(topic=topic, description=description, source=model, messages=messages)
@@ -161,7 +165,7 @@ def main() -> None:
     ap.add_argument("description", help="one sentence: what the topic is about")
     ap.add_argument("--messages", type=int, default=5)
     ap.add_argument("--variations", type=int, default=30)
-    ap.add_argument("--held-out", type=int, default=2)
+    ap.add_argument("--held-out", type=int, default=2, help="last N messages reserved for eval and inject (>= 1)")
     args = ap.parse_args()
     try:
         vs = generate(args.topic, args.description, n_messages=args.messages, n_variations=args.variations,
