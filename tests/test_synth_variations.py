@@ -9,6 +9,8 @@ import pytest
 import synth.variations as sv
 from synth.campaign import make_campaign
 
+pytestmark = pytest.mark.filterwarnings("ignore:message .* distinct variations")  # fake replies are tiny
+
 
 class FakeClient:
     """Stands in for google.genai.Client; fails if used after it was closed."""
@@ -37,6 +39,7 @@ def fake_gemini(monkeypatch):
     from google import genai
 
     FakeClient.instances = []
+    FakeClient.reply = ""
     monkeypatch.setattr(genai, "Client", FakeClient)
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     return FakeClient
@@ -63,12 +66,37 @@ def test_held_out_follows_actual_message_count(fake_gemini):
     assert [m.held_out for m in vs.messages] == [False, True, True]
 
 
-def test_generate_fails_clearly_without_key_or_text(fake_gemini, monkeypatch):
-    fake_gemini.reply = ""
+def test_generate_fails_clearly_without_text(fake_gemini):
     with pytest.raises(RuntimeError, match="no text"):
         sv.generate("some-topic", "desc")
+
+
+def test_generate_fails_clearly_without_key(fake_gemini, monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY")
     with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
+        sv.generate("some-topic", "desc")
+
+
+@pytest.mark.parametrize("reply", ["not json", "{}", '{"messages": []}', '{"messages": "x"}',
+                                   '{"messages": [{"claim": "c"}]}', '{"messages": [{"claim": "c", "variations": ["only one"]}'
+                                   ', {"claim": "d", "variations": ["a", "b"]}, {"claim": "e", "variations": ["a", "b"]}]}'])
+def test_unusable_replies_raise_one_clear_error(fake_gemini, reply):
+    fake_gemini.reply = reply
+    with pytest.raises(RuntimeError, match="unusable reply"):
+        sv.generate("some-topic", "desc")
+
+
+def test_cannot_hold_out_every_message(fake_gemini):
+    with pytest.raises(ValueError, match="n_held_out"):
+        sv.generate("some-topic", "desc", n_messages=2, n_held_out=2)
+    fake_gemini.reply = _reply(2)  # the model returned fewer messages than asked
+    with pytest.raises(RuntimeError, match="cannot hold out"):
+        sv.generate("some-topic", "desc", n_held_out=2)
+
+
+def test_warns_when_model_returns_few_variations(fake_gemini):
+    fake_gemini.reply = _reply(5)  # 2 distinct variations each, 30 requested
+    with pytest.warns(UserWarning, match="distinct variations"):
         sv.generate("some-topic", "desc")
 
 
