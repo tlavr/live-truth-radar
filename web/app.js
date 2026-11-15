@@ -164,7 +164,10 @@ let renderer, composer, bloom, camera, scene, U, axisMat, axGeo, geoms = [], ok 
 // half-float target plus the bloom chain at DPR 2 (3024x1800) is several hundred MB. There: DPR <= 1.25, 2x MSAA.
 const SAFARI = /^((?!chrome|chromium|crios|fxios|edg|android).)*safari/i.test(navigator.userAgent);
 const MAX_DPR = SAFARI ? 1.25 : 2, MSAA = SAFARI ? 2 : 4;
-const field = {P: new Float32Array(NX * NZ), O: new Float32Array(NX * NZ), C: new Float32Array(NX * NZ)};
+// P: the shown group, O: the other groups, C: all other pairs; K and Y: the swarm and the suspicious part of P + O
+// (by the verdict as shown, effVerdict), which colour the surface above the threshold
+const field = {P: new Float32Array(NX * NZ), O: new Float32Array(NX * NZ), C: new Float32Array(NX * NZ),
+  K: new Float32Array(NX * NZ), Y: new Float32Array(NX * NZ)};
 
 function smooth(grid, off = 0) {
   // su in time bins; off = column of the grid at the origin (fractional while the map scrolls)
@@ -202,10 +205,14 @@ function layersFull(f) {
   if (full.map === S.tmap && full.f === f && full.list === S.list) return full.val;
   const total = rev(S.tmap.total), zero = () => total.map(r => r.map(() => 0));
   const grid = id => S.tmap.groups?.[id] ? rev(S.tmap.groups[id]) : null;
-  const sel = (f && grid(f.id)) || zero(), others = zero();
-  for (const g of S.list) if (g !== f) grid(g.id)?.forEach((r, m) => r.forEach((v, l) => { others[m][l] += v; }));
+  const sel = (f && grid(f.id)) || zero(), others = zero(), swarm = zero(), susp = zero();
+  for (const g of S.list) {
+    const v = effVerdict(g), into = v === 'coordinated' ? swarm : v === 'watching' ? susp : null;
+    grid(g.id)?.forEach((r, m) => r.forEach((n, l) => { if (g !== f) others[m][l] += n; if (into) into[m][l] += n; }));
+  }
   const rest = total.map((r, m) => r.map((v, l) => Math.max(0, v - sel[m][l] - others[m][l])));
-  full = {map: S.tmap, f, list: S.list, val: {sel, others, rest}};
+  const some = g => g.some(r => r.some(v => v > 0)) ? g : null;   // an empty layer is not smoothed (smooth(null) = zeros)
+  full = {map: S.tmap, f, list: S.list, val: {sel, others, rest, swarm: some(swarm), susp: some(susp)}};
   return full.val;
 }
 // the L columns on screen, for the tooltip and the legend
@@ -219,17 +226,28 @@ function layers(f) {
 // (all layers, smoothed) total T stands 10*log10(T / mean) dB high, 0 at or below the mean. The layers split
 // that height in proportion: the selected group (accent colour) on top of the other groups (they keep their
 // colour), on top of the carpet of all other pairs. A click only moves the accent.
-const sample = f => { const y = layersFull(f); return [smooth(y?.sel, S.view), smooth(y?.others, S.view), smooth(y?.rest, S.view)]; };
-// Threshold: the CFAR rule of the detector (detect/config.py cfar_k = 3) applied to this surface, mean + 3
-// sigma of all points on screen, in dB above the mean. It is a guide on the map's own scale: the detector
-// itself thresholds pair correlations, not this density.
-const CFAR_K = 3;
+// verdicts: also the swarm and suspicious layers (setField colours by them; the height scale needs only the first three)
+const sample = (f, verdicts) => {
+  const y = layersFull(f), s = [smooth(y?.sel, S.view), smooth(y?.others, S.view), smooth(y?.rest, S.view)];
+  return verdicts ? [...s, smooth(y?.swarm, S.view), smooth(y?.susp, S.view)] : s;
+};
+// Threshold: the CFAR rule of the detector (detect/config.py cfar_k = 3) applied to this surface: mean + 3 sigma
+// of the points with similar meaning (gap < SIMILAR_GAP), in dB above the mean of all points. Pairs of unrelated
+// posts that only happen close in time (the far rows) are many and would set it above any swarm, so they do not
+// count; it is still one level over the whole map. It is a guide on the map's own scale: the detector itself
+// thresholds pair correlations, not this density.
+const CFAR_K = 3, SIMILAR_GAP = .6;
+const MIN_THR_DB = 1;   // a floor: anything that stands out at all is above it, while the flat floor stays below
 function dbField([P, O, C]) {
   const n = P.length, H = new Float32Array(n);
-  let mean = 0, sq = 0, top = 0;
-  for (let i = 0; i < n; i++) { const t = P[i] + O[i] + C[i]; mean += t; sq += t * t; }
-  mean /= n;
-  const sd = Math.sqrt(Math.max(0, sq / n - mean * mean)), thr = mean > 1e-9 ? 10 * Math.log10(1 + CFAR_K * sd / mean) : 0;
+  let mean = 0, top = 0, ms = 0, sq = 0, ns = 0;
+  for (let i = 0; i < n; i++) {
+    const t = P[i] + O[i] + C[i]; mean += t;
+    if (Math.floor(i / NX) / (NZ - 1) < SIMILAR_GAP) { ms += t; sq += t * t; ns++; }   // row j: meaning gap j / (NZ - 1)
+  }
+  mean /= n; ms /= ns;
+  const level = ms + CFAR_K * Math.sqrt(Math.max(0, sq / ns - ms * ms));
+  const thr = mean > 1e-9 && level > 1e-9 ? Math.max(MIN_THR_DB, 10 * Math.log10(level / mean)) : 0;
   if (mean > 1e-9) for (let i = 0; i < n; i++) {
     const t = P[i] + O[i] + C[i];
     H[i] = t > mean ? 10 * Math.log10(t / mean) : 0; top = Math.max(top, H[i]);
@@ -242,23 +260,23 @@ const dbStep = top => DB_STEPS.find(st => 5 * st >= top) ?? Math.ceil(top / 50) 
 const scaleOf = s => PEAK / (5 * dbStep(dbField(s).top));  // scene units per dB
 // k: scene units per dB; by default the one that fits the view, a scroll passes its own so heights glide
 function setField(f, k) {
-  const s = sample(f), [P, O, C] = s, {H, top, thr} = dbField(s);
+  const s = sample(f, true), [P, O, C, K, Y] = s, {H, top, thr} = dbField(s);
   k ??= PEAK / (5 * dbStep(top));
   let best = 0, at = -1;
   for (let i = 0; i < P.length; i++) {
     if (P[i] > best) { best = P[i]; at = i % NX; }
     const t = P[i] + O[i] + C[i], q = t > 0 ? H[i] * k / t : 0;
-    field.P[i] = P[i] * q; field.O[i] = O[i] * q; field.C[i] = C[i] * q;
+    field.P[i] = P[i] * q; field.O[i] = O[i] * q; field.C[i] = C[i] * q; field.K[i] = K[i] * q; field.Y[i] = Y[i] * q;
   }
-  for (const g of geoms) for (const a of ['aP', 'aO', 'aC']) g.attributes[a].needsUpdate = true;
+  for (const g of geoms) for (const a of ['aP', 'aO', 'aC', 'aK', 'aY']) g.attributes[a].needsUpdate = true;
   CAMS.peak.tx = at < 0 ? -3 : Math.max(-3.4, Math.min(3.4, -W / 2 + at / (NX - 1) * W)) * .8;  // look at the selected wave
   setHeightLabels(k);
   S.thrDb = thr; S.thrY = thr > 0 ? thr * k : null;
-  if (U) U.uThrY.value = S.thrY ?? 1e3;  // the surface turns red above it, with a dashed contour where it crosses
+  if (U) U.uThrY.value = S.thrY ?? 1e3;  // above it the groups take their verdict's colour; a dashed contour where it crosses
   if (axGeo && S.thrY !== axThrY) drawAxes();
   if (thrLabel) {                    // only the number on the axis, in the threshold's colour; the meaning on hover
     thrLabel.el.textContent = thr > 0 ? `${thr.toFixed(1)} dB` : '';
-    thrLabel.el.title = thr > 0 ? `Detection threshold: mean + ${CFAR_K}σ of the map, ${thr.toFixed(1)} dB. What rises above it stands out from the noise.` : '';
+    thrLabel.el.title = thr > 0 ? `Detection threshold: mean + ${CFAR_K}σ of the points with similar meaning (gap < ${SIMILAR_GAP}), ${thr.toFixed(1)} dB. What rises above it stands out from the noise.` : '';
   }
 }
 let thrLabel = null, axThrY = null;
@@ -319,6 +337,8 @@ function buildScene() {
     g.setAttribute('aC', new THREE.BufferAttribute(field.C, 1));
     g.setAttribute('aP', new THREE.BufferAttribute(field.P, 1));
     g.setAttribute('aO', new THREE.BufferAttribute(field.O, 1));
+    g.setAttribute('aK', new THREE.BufferAttribute(field.K, 1));
+    g.setAttribute('aY', new THREE.BufferAttribute(field.Y, 1));
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 1, 0), 9);
     geoms.push(g);
     return g;
@@ -342,15 +362,16 @@ function buildScene() {
     uPingO: {value: new THREE.Vector2(0, 0)},           // where the sonar starts: the antenna's corner (placeTick)
     uPingOn: {value: 0}, uPingT: {value: -99}, uPingC: {value: new THREE.Color(PING_IDLE)},   // sonar from the origin (result view): start (uTime)
     uCool: {value: new THREE.Color(PAL.cool)}, uWarm: {value: new THREE.Color(PAL.warm)},
-    uPeakC: {value: new THREE.Color(PAL.peak)}, uBg: {value: new THREE.Color(PAL.bg)}, uSelC: {value: new THREE.Color(PAL.sel)},
+    uBg: {value: new THREE.Color(PAL.bg)}, uSelC: {value: new THREE.Color(PAL.sel)},
+    uSwarmC: {value: new THREE.Color(PAL.sel)}, uSuspC: {value: new THREE.Color(PAL.peak)},   // above the threshold, by verdict
     uThrY: {value: 1e3},  // height of the detection threshold (setField); 1e3 = none
   };
   // sheet = the dark surface under the lines: the landing's peak lifts only the lines, so the sheet never hides
   // the lines around it (a dark ring)
   const vertOf = sheet => `
-    attribute float aC; attribute float aP; attribute float aO;
+    attribute float aC; attribute float aP; attribute float aO; attribute float aK; attribute float aY;
     uniform float uTime, uCarpet, uPeak, uNoise, uBeatOn, uRingRed; uniform vec4 uSpot;
-    varying float vHeat; varying float vSel; varying vec3 vP; varying float vBump;
+    varying float vHeat; varying float vSel; varying float vSw; varying float vSu; varying vec3 vP; varying float vBump;
     void main(){
       vec3 p = position;
       float n = sin(p.x*1.3+uTime*.55)*sin(p.z*1.9-uTime*.4) + .5*sin(p.x*3.1-uTime*.75+p.z*2.2);
@@ -367,25 +388,33 @@ function buildScene() {
       ${sheet ? 'p.y -= .02;' : `p.y += vBump * uSpot.z * ${SPOT_H.toFixed(2)};`}
       vHeat = smoothstep(0.02, 1., hP/${PEAK.toFixed(2)});
       vSel = aP/max(aP + aO, 1e-4) * smoothstep(0., .05, aP*uPeak/${PEAK.toFixed(2)});  // share of the selected group
+      vSw = aK/max(aP + aO, 1e-4) * smoothstep(0., .05, aK*uPeak/${PEAK.toFixed(2)});   // share of swarms
+      vSu = aY/max(aP + aO, 1e-4) * smoothstep(0., .05, aY*uPeak/${PEAK.toFixed(2)});   // share of suspicious groups
       vP = p;
       gl_Position = projectionMatrix*modelViewMatrix*vec4(p,1.);
     }`;
   const ramp = `
-    vec3 ramp(float h){ vec3 c = mix(uCool, uWarm, smoothstep(0.,.5,h)); return mix(c, uPeakC, smoothstep(.5,1.,h)); }
-    vec3 tint(float h, float sel){ return mix(ramp(h), uSelC, sel); }
-    // the selected group is red only above the threshold, with a soft edge of a few pixels
+    // height alone stays green (yellow and pink mean a verdict); above the threshold a point takes the colour of
+    // the groups there: a swarm's pink before a suspicious group's yellow; organic groups and background stay green
+    vec3 ramp(float h){ return mix(uCool, uWarm, smoothstep(0.,.8,h)); }
+    // flagged = sw + su (both are parts of the groups' height, so at most 1); a swarm's share of it over 30% = pink
+    vec3 tint(float h, float sw, float su){
+      float fl = min(1., sw + su);
+      return mix(ramp(h), mix(uSuspC, uSwarmC, smoothstep(0., .3, sw / max(fl, 1e-4))), fl);
+    }
+    // with a soft edge of a few pixels at the threshold
     // fwidth of a line primitive is unreliable on some GPUs (Metal: huge or infinite at places): clamped, or the
     // edge maths turns into NaN and the line goes black in dashed arcs
     float above(float y){ float w = clamp(fwidth(y), 1e-3, .05); return smoothstep(uThrY - w, uThrY + w, y); }`;
   const lineMat = new THREE.ShaderMaterial({
     uniforms: U, vertexShader: vertOf(false), transparent: true, depthWrite: false,
     fragmentShader: `
-      uniform vec3 uCool, uWarm, uPeakC, uSelC; uniform float uGlow, uSweep, uSweepOn, uThrY, uTime; uniform vec4 uHover, uPick;
+      uniform vec3 uCool, uWarm, uSwarmC, uSuspC; uniform float uGlow, uSweep, uSweepOn, uThrY, uTime; uniform vec4 uHover, uPick;
       uniform float uPingOn, uPingT, uBeatOn, uSpotD, uRingRed; uniform vec3 uPingC; uniform vec4 uSpot; uniform vec2 uPingO;
-      varying float vHeat; varying float vSel; varying vec3 vP; varying float vBump; ${ramp}
+      varying float vHeat; varying float vSel; varying float vSw; varying float vSu; varying vec3 vP; varying float vBump; ${ramp}
       float sq(float x){ return x*x; }   // not pow(x, 2.): pow of a negative base is undefined in GLSL (NaN on some GPUs)
       void main(){
-        float sel = vSel * above(vP.y);
+        float ab = above(vP.y), sw = vSw * ab, su = vSu * ab, sel = min(1., sw + su);   // the flagged part above the threshold
         float sweep = exp(-sq((vP.x-uSweep)/.32))*uSweepOn;
         float hov = step(uHover.x,vP.x)*step(vP.x,uHover.y)*step(uHover.z,vP.z)*step(vP.z,uHover.w);
         hov = max(hov, step(uPick.x,vP.x)*step(vP.x,uPick.y)*step(uPick.z,vP.z)*step(vP.z,uPick.w));
@@ -404,7 +433,7 @@ function buildScene() {
         float spot = sqrt(max(vBump, 0.)) * uSpot.z * uSpot.w;
         float far = 1.;  // no depth fade: in an orthographic view it reads as perspective and makes the far side look wider
         float a = uGlow*(.5+.9*max(vHeat, sel*.8))*far + sweep*.32 + hov*.6 + ping*.7 + beat*.75 + spot*.8;
-        vec3 col = tint(vHeat, sel)*(1.+max(vHeat, sel*.7)*1.35+sweep*.25+hov) + uPingC*ping*.9;
+        vec3 col = tint(vHeat, sw, su)*(1.+max(vHeat, sel*.7)*1.35+sweep*.25+hov) + uPingC*ping*.9;
         col = mix(col, ringC*1.25, clamp(beat*1.3, 0., 1.));   // the ring's own colour, not added light
         gl_FragColor = vec4(mix(col, vec3(1., .16, .16)*1.4, clamp(spot*2.2, 0., 1.)), clamp(a,0.,1.));
       }`,
@@ -413,14 +442,16 @@ function buildScene() {
     uniforms: U, vertexShader: vertOf(true), side: THREE.DoubleSide,
     polygonOffset: true, polygonOffsetFactor: 3, polygonOffsetUnits: 4,   // keeps the dark sheet behind its own lines on steep slopes
     fragmentShader: `
-      uniform vec3 uBg, uCool, uWarm, uPeakC, uSelC; uniform float uThrY;
-      varying float vHeat; varying float vSel; varying vec3 vP; ${ramp}
+      uniform vec3 uBg, uCool, uWarm, uSwarmC, uSuspC, uSelC; uniform float uThrY;
+      varying float vHeat; varying float vSel; varying float vSw; varying float vSu; varying vec3 vP; ${ramp}
       void main(){
-        float sel = vSel * above(vP.y);
-        vec3 c = uBg*1.2 + tint(vHeat, sel)*max(vHeat, sel*.7)*.14 + uSelC*sel*.22 + uCool*vP.y*.006;
+        float ab = above(vP.y), sw = vSw * ab, su = vSu * ab, sel = min(1., sw + su);
+        vec3 c = uBg*1.2 + tint(vHeat, sw, su)*max(vHeat, sel*.7)*.14 + tint(0., sw, su)*sel*.22 + uCool*vP.y*.006;
         // dashed contour where the surface crosses the threshold: ~1.5 px wide, dashes of ~9 px on screen
         float d = abs(vP.y - uThrY) / clamp(fwidth(vP.y), 1e-4, .05);
         float line = 1. - smoothstep(.75, 1.75, d);
+        // the contour only where the threshold is measured: the rows of similar meaning (gap < SIMILAR_GAP)
+        line *= 1. - smoothstep(${(SIMILAR_GAP - .04).toFixed(2)}, ${(SIMILAR_GAP + .04).toFixed(2)}, (${(D / 2).toFixed(2)} - vP.z) / ${D.toFixed(2)});
         float dash = step(.45, fract((gl_FragCoord.x + gl_FragCoord.y) / 18.));
         vec3 lc = mix(vec3(1.), uSelC, .35 + .65*vSel);  // pink on the selected group, near white elsewhere
         c = mix(c, lc * (1. + vSel), line * dash * (.55 + .45*vSel));
@@ -567,8 +598,11 @@ function hover(e) {
 function thrNote(c) {
   if (S.thrY == null || c.h < S.thrY) return '';
   const i = Math.round((D / 2 - c.z) / D * (NZ - 1)) * NX + Math.round((c.x + W / 2) / W * (NX - 1));
-  const mine = field.P[i] > field.O[i] + field.C[i];            // mostly the selected group's pairs: the accent cap
-  return `<em class="thr">Above the detection threshold (mean + ${CFAR_K}σ = ${S.thrDb.toFixed(1)} dB): ${mine ? "this group's posts stand" : 'posts stand'} out from the noise here.</em>`;
+  const P = field.P[i], O = field.O[i], C = field.C[i], K = field.K[i], Y = field.Y[i];
+  const who = P > O + C ? "this group's posts stand"          // mostly the shown group's pairs
+    : K > .05 * (P + O) && K >= .3 * (K + Y) ? "a swarm's posts stand" : Y > .05 * (P + O) ? "a suspicious group's posts stand"
+    : P + O > C ? "a group's posts stand" : 'posts outside any group stand';
+  return `<em class="thr">Above the detection threshold (mean + ${CFAR_K}σ of similar-meaning points = ${S.thrDb.toFixed(1)} dB): ${who} out from the noise here.</em>`;
 }
 // one cell against the mean cell on screen, in dB
 function cellDb(y, m, l) {
@@ -783,8 +817,8 @@ function pingColour() {
   const c = new THREE.Color(red ? PING_SWARM : PING_IDLE);
   gsap.to(U.uPingC.value, {r: c.r, g: c.g, b: c.b, duration: reduced ? 0 : .6, overwrite: true});
 }
-// the selected group's colour on the map (caps above the threshold, its contour, the threshold's label): the colour
-// of its verdict, as in the title: a swarm in the accent, a suspicious group in yellow
+// the shown group's colour on the map (the threshold's contour and label): the colour of its verdict, as in the
+// title: a swarm in the accent, a suspicious group in yellow. The caps above the threshold take their own groups' verdict colours
 const SEL_COLOUR = {coordinated: PAL.sel, watching: PAL.peak, organic: PAL.cool};
 function selColour() {
   const f = shown(), hex = f ? SEL_COLOUR[effVerdict(f)] : PAL.cool;   // Quiet: nothing on screen is flagged
