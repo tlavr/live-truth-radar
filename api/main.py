@@ -26,7 +26,7 @@ from detect import operating
 from detect.config import DEFAULT as DEFAULT_CFG
 from detect.pipeline import drop_expired_synthetic
 from detect.timemap import TimeMap, time_map
-from ingest import radar, store
+from ingest import radar, source_trust, store
 from ingest.contextdev import mask_handles
 
 log = logging.getLogger("ltr.api")
@@ -143,6 +143,28 @@ def items(ids: str = Query(..., description="comma-separated item ids")) -> list
         raise HTTPException(status_code=400, detail=f"at most {MAX_ITEM_IDS} ids per request")
     with store.connect() as conn:  # T12d: an attack's future posts stay hidden until their time
         return [public_item(it) for it in store.get_items(conn, wanted, until=datetime.now(timezone.utc))]
+
+
+SOURCES = source_trust.SourceTrust()  # S1: one per process (its cache, hourly budget and locks)
+
+
+@app.get("/api/source/{domain}", response_model=source_trust.SourceInfo)
+def source(domain: str) -> source_trust.SourceInfo:
+    """S1 Source Trust for a news publisher. Never fails the card: anything wrong is `found: false`.
+    Only publishers of articles already in the DB are looked up (Context.dev credits)."""
+    host = source_trust.normalize_domain(domain)
+    if host is None:
+        return source_trust.SourceInfo(domain=domain[:253].lower())
+    try:
+        with store.connect() as conn:
+            publisher = store.news_publisher(conn, host)
+    except Exception as exc:  # DB down: no data rather than a broken sheet
+        log.warning("source %s: publisher check failed: %s", host, type(exc).__name__)
+        return source_trust.SourceInfo(domain=host)
+    publisher = source_trust.normalize_domain(publisher or "")  # also keeps the cache file name a plain host
+    if publisher is None:
+        return source_trust.SourceInfo(domain=host)
+    return SOURCES.lookup(publisher)
 
 
 class InjectRequest(BaseModel):

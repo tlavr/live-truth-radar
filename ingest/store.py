@@ -84,6 +84,19 @@ def get_items(conn: psycopg.Connection, ids: list[str], until: datetime | None =
 DEFAULT_WINDOW_MAX_ITEMS = 800
 
 
+def news_publisher(conn: psycopg.Connection, host: str) -> str | None:
+    """S1: the publisher domain (news `author`) that `host` is or is a subdomain of; None if no article has it.
+    Source Trust looks up only publishers already in the DB, so the public endpoint cannot spend credits on any domain."""
+    row = conn.execute(
+        "SELECT d FROM (SELECT DISTINCT regexp_replace(lower(author), '^www\\.', '') AS d"
+        " FROM items WHERE source = 'context_news') p"
+        " WHERE d = %s OR right(%s, length(d) + 1) = '.' || d"
+        " ORDER BY length(d) DESC LIMIT 1",
+        (host, host),
+    ).fetchone()
+    return row["d"] if row else None
+
+
 def window_max_items() -> int:
     """WINDOW_MAX_ITEMS (default 800; 0 = no cap): the pair correlator grows with the square of the accounts, and
     a loud topic (Putin, NATO) fills Bluesky's 300 posts per cycle, so the detector sees only the newest N real
