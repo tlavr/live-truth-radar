@@ -175,3 +175,40 @@ def test_brand_without_name_is_not_cached(tmp_path):
     st = trust(tmp_path, c)
     assert not st.lookup("x.com").found and not st.lookup("x.com").found
     assert c.calls.count("/brand/retrieve") == 2 and not list(tmp_path.glob("*.json"))
+
+
+def test_hq_country_beats_brand_address(tmp_path):
+    from ingest.source_trust import parse_hq_country
+    company = {"results": [{"domain": "other.com", "headquarters": {"country_code": "FR"}},
+                           {"domain": "reuters.com", "founded_year": 1851, "headquarters": {"country_code": "us"}}]}
+    assert parse_hq_country(company, "reuters.com") == "US"  # this domain's hit, upper-cased
+    assert parse_hq_country({"results": [{"domain": "reuters.com", "headquarters": {"country_code": "USA"}}]},
+                            "reuters.com") is None
+    assert trust(tmp_path, FakeClient(company=company)).lookup("reuters.com").country == "US"
+    assert trust(tmp_path / "b", FakeClient()).lookup("reuters.com").country == "GB"  # no HQ: the Brand one stays
+
+
+def test_old_cache_version_is_refetched_and_failed_search_keeps_brand(tmp_path):
+    import json
+    (tmp_path / "reuters.com.json").write_text(json.dumps(  # an entry written before CACHE_VERSION
+        {"fetched_at": 9e12, "info": {"domain": "reuters.com", "found": True, "name": "Old", "country": "IR"}}))
+    c = FakeClient()
+    st = trust(tmp_path, c)
+    assert st.lookup("reuters.com").name == "Reuters" and c.calls.count("/brand/retrieve") == 1
+    assert st.lookup("reuters.com").name == "Reuters" and c.calls.count("/brand/retrieve") == 1  # new entry hits
+
+    c2 = FakeClient()
+    c2.post = lambda path, body: BRAND if path == "/brand/retrieve" else (_ for _ in ()).throw(ContextDevError("x", 500))
+    info = trust(tmp_path / "b", c2).lookup("reuters.com")
+    assert info.found and info.country == "GB" and info.founded_year is None and info.age_years is None
+
+
+def test_non_object_cache_file_is_a_miss(tmp_path):
+    for i, raw in enumerate(["[]", "null", "1", '"x"', '{"v": 2, "info": []}']):
+        d = tmp_path / str(i)
+        d.mkdir()
+        (d / "reuters.com.json").write_text(raw)
+        c = FakeClient()
+        st = trust(d, c)
+        assert st.cached("reuters.com") is None
+        assert st.lookup("reuters.com").name == "Reuters" and c.calls.count("/brand/retrieve") == 1

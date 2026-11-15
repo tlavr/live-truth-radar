@@ -2,7 +2,8 @@
 
 Two calls per new domain: Brand (`POST /brand/retrieve`, 10 credits: name, logo, industry, country,
 employees) and Company Search (`POST /company/search`, fast mode, 2 credits, free when empty: founded
-year -> age). The parsed result is cached on disk per domain (cache/source_trust/, git-ignored):
+year -> age, headquarters country, preferred over the Brand address). The parsed result is cached on disk
+per domain (cache/source_trust/, git-ignored; entries of an older CACHE_VERSION are refetched):
 30 days when found, 1 day for "no such brand" (404, or a 400 naming NOT_FOUND). Outages (no key,
 timeout, 5xx, 429, other 400s, odd bodies, a 200 without a brand name) are not cached.
 Served by `GET /api/source/{domain}` (api/main.py); outside contracts.Finding on purpose.
@@ -31,6 +32,7 @@ log = logging.getLogger("ltr.source_trust")
 CACHE_DIR = Path(__file__).resolve().parent.parent / "cache" / "source_trust"
 FOUND_TTL_SEC = 30 * 86400
 MISSING_TTL_SEC = 86400
+CACHE_VERSION = 2  # bump when SourceInfo is computed differently (2: HQ country over the Brand address)
 MAX_NEW_PER_HOUR = 30  # at most ~30 x 12 = 360 credits an hour, whatever the dashboard asks for
 _DOMAIN_RE = re.compile(r"^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})$")
 
@@ -101,13 +103,30 @@ def parse_brand(resp: dict[str, Any], domain: str) -> SourceInfo:
     return info
 
 
+def _company_hits(resp: dict[str, Any], domain: str) -> list[dict[str, Any]]:
+    """Company Search results for exactly this domain (search hits can be other firms)."""
+    results = resp.get("results") if isinstance(resp, dict) else None
+    return [r for r in results if isinstance(r, dict) and normalize_domain(str(r.get("domain") or "")) == domain] \
+        if isinstance(results, list) else []
+
+
 def parse_company(resp: dict[str, Any], domain: str) -> int | None:
-    """Founded year of the Company Search result for exactly this domain (search hits can be other firms)."""
-    for r in (resp.get("results") or []) if isinstance(resp, dict) else []:
-        if isinstance(r, dict) and normalize_domain(str(r.get("domain") or "")) == domain:
-            y = r.get("founded_year")
-            if isinstance(y, int) and 1400 <= y <= datetime.now(timezone.utc).year:
-                return y
+    """Founded year of the Company Search result for this domain."""
+    for r in _company_hits(resp, domain):
+        y = r.get("founded_year")
+        if isinstance(y, int) and not isinstance(y, bool) and 1400 <= y <= datetime.now(timezone.utc).year:
+            return y
+    return None
+
+
+def parse_hq_country(resp: dict[str, Any], domain: str) -> str | None:
+    """Headquarters country of the Company Search result for this domain. Preferred over the Brand address,
+    which can be wrong (live, 15.11: AP News came back as IR)."""
+    for r in _company_hits(resp, domain):
+        hq = r.get("headquarters")
+        cc = _s(hq.get("country_code")) if isinstance(hq, dict) else None
+        if cc and re.fullmatch(r"[A-Za-z]{2}", cc):
+            return cc.upper()
     return None
 
 
@@ -148,6 +167,8 @@ class SourceTrust:
     def cached(self, domain: str) -> SourceInfo | None:
         try:
             entry = json.loads(self._path(domain).read_text(encoding="utf-8"))
+            if not isinstance(entry, dict) or entry.get("v") != CACHE_VERSION:  # odd file or older version: refetch
+                return None
             info = SourceInfo.model_validate(entry["info"])
             ttl = FOUND_TTL_SEC if info.found else MISSING_TTL_SEC
             return info if time.time() - entry["fetched_at"] < ttl else None
@@ -159,7 +180,8 @@ class SourceTrust:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
             p = self._path(info.domain)
             tmp = p.with_suffix(".tmp")
-            tmp.write_text(json.dumps({"fetched_at": time.time(), "info": info.model_dump()}), encoding="utf-8")
+            entry = {"v": CACHE_VERSION, "fetched_at": time.time(), "info": info.model_dump()}
+            tmp.write_text(json.dumps(entry), encoding="utf-8")
             tmp.replace(p)
         except OSError as exc:
             log.warning("source cache write failed for %s: %s", info.domain, type(exc).__name__)
@@ -218,8 +240,11 @@ class SourceTrust:
         if not info.found:
             return info
         try:  # the age is a bonus: a failed search keeps the brand
-            founded = parse_company(client.post("/company/search", {"query": domain, "mode": "fast"}), domain)
+            company = client.post("/company/search", {"query": domain, "mode": "fast"})
         except (ContextDevError, httpx.HTTPError, ValueError) as exc:
             log.warning("company search %s failed: %s", domain, type(exc).__name__)
-            founded = None
-        return with_age(info, founded)
+            return info
+        country = parse_hq_country(company, domain)
+        if country:  # the headquarters beats the Brand address; the Brand one stays when the search has none
+            info = info.model_copy(update={"country": country})
+        return with_age(info, parse_company(company, domain))
