@@ -387,6 +387,14 @@ TOPIC_SPECS: dict[str, tuple[str, list[list[str]]]] = {
     ),
     "bitcoin-crypto": ("Bitcoin crypto", [["bitcoin", r"btc\b", r"crypto\b", "cryptocurrenc"]]),
     "russell-brand-trial": ("Russell Brand trial", [["russell brand"]]),
+    "arsenal-fc": (
+        "Arsenal FC London",
+        [[r"arsenal\b", "gunners"],
+         [r"fc\b", r"afc\b", "football", "soccer", "premier league", "champions league", "fa cup", "carabao",
+          "emirates", "london", "arteta", "saka", "odegaard", "saliba", "declan rice", "havertz", "martinelli",
+          "trossard", "match", "goal", "derby", "transfer", "striker", "midfielder", "defender", "epl", "ucl",
+          "pgmol", "stadium", "troph"]],
+    ),
 }
 
 

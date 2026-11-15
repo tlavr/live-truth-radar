@@ -83,6 +83,7 @@ BSKY_QUERIES: dict[str, str] = {
     "cyberattacks": "cyberattack",
     "bitcoin-crypto": "bitcoin",
     "russell-brand-trial": "Russell Brand",
+    "arsenal-fc": "Arsenal",
 }
 
 
