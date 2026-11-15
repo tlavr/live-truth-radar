@@ -4,22 +4,22 @@
    Spotlight = a box with a huge box-shadow: no backdrop-filter, which crashed Safari's GPU over the 3D scene.
    A step whose element is not on screen shows centred. */
 (() => {
-  const KEY = 'lsr.tour', $ = id => document.getElementById(id), root = document.documentElement;
+  const KEY = 'lsr.tour.v2', $ = id => document.getElementById(id), root = document.documentElement;
   const get = () => { try { return localStorage.getItem(KEY); } catch { return null; } };
   const put = v => { try { localStorage.setItem(KEY, v); } catch { /* private mode: asked again next time */ } };
   const stage = () => root.dataset.stage;
-  const sens = on => { if ($('fa').hidden === on) $('alphaChip').click(); };   // the app's own toggle
+  const sens = on => { if (!$('alphaChip').hidden && $('fa').hidden === on) $('alphaChip').click(); };   // the app's own toggle
 
   // the start page, then the result page; `sel` = element to light up, `in`/`out` = what the step opens/closes
   const STEPS = [
     {sel: '#q', t: 'Search a topic', d: 'Type a topic or pick one from the list. The latest alerts are listed there too.'},
-    {sel: '#fa', t: 'Target false alarm rate', d: 'How many false alarms you accept. 2% = about 2 of 100 calm topics get flagged by mistake. Lower = stricter, fewer alerts. "!" shows the details.',
+    {sel: '#fa', t: 'Target false alarm rate', d: 'How many false alarms you accept. 2% = about 2 of 100 calm topics get flagged by mistake. Lower = stricter, fewer alerts. Later, "!" shows the details.',
       in: () => sens(true), out: () => sens(false)},
     {sel: '.info', t: 'Metrics', d: 'Top right: how well the detector works, measured on test data.'},
     {sel: '#playBtn', t: 'Run the check', d: 'Press play to check a topic. Next, we run it for you on a real topic.', run: true},
     {sel: '#pipe', t: 'Checking…', d: 'Collect posts, compare their meaning and timing, measure the noise, give a verdict.', wait: true},
-    {sel: '#scene', t: 'The map', d: 'Time runs along one axis, meaning gap along the other, height = how far above the usual level (dB). A peak = many posts saying the same thing at the same moment. Drag to turn the view, click a peak to see its posts.'},
-    {sel: '#vHead', t: 'Groups and verdict', d: 'The verdict on top. Each letter is a group of accounts: click one to show it.'},
+    {sel: '#scene', t: 'The map', d: 'Time runs along one axis, meaning gap along the other, height = how far above the usual level (dB). A peak = many posts saying the same thing at the same moment. After the tour: drag to turn the view, click a peak to see its posts.'},
+    {sel: '#vHead', t: 'Groups and verdict', d: 'The verdict on top. Each letter is a group of accounts: after the tour, click one to show it.'},
     {sel: '#gLine', t: 'Why, What they say, How we got here', d: 'Why: the verdict in plain words. What they say: the lines the group repeats. How we got here: every step of the detector.'},
     {sel: '#strip', t: 'Timeline', d: 'Every group as a dot at its time. Drag to move along time, scroll or pinch to zoom. Click a dot to show its group, click empty time to rewind the map there.'},
     {sel: '#strip .nowbtn', t: 'Back to Now', d: 'After a rewind, "Now" brings the map back to live.'},
@@ -29,7 +29,7 @@
   ];
   const RUN = STEPS.findIndex(s => s.run), WAIT = RUN + 1, FIRST_RESULT = RUN + 2, LAST = STEPS.length - 1;
 
-  let i = -1, box, hole, card, waitT, giveUp;
+  let i = -1, box, hole, card, waitT, giveUp, fetching = false, asking;
 
   const visible = e => {
     if (!e || e.closest('[hidden]')) return false;
@@ -89,22 +89,25 @@
   async function run() {
     if (stage() === 'result') return show(FIRST_RESULT);   // a topic is already open
     if (!$('q').value.trim()) {                     // nothing typed yet: take the first monitored topic
+      if (fetching) return; fetching = true;
       const topics = await fetch('/api/topics').then(r => r.json()).catch(() => []);
-      if (!card) return;
+      fetching = false;
+      if (!card || i !== RUN) return;               // closed or moved on while it loaded
       if (!topics.length) return show(LAST);
       $('q').value = topics[0];
     }
     show(WAIT);
-    $('search').requestSubmit();
     giveUp = setTimeout(() => { if (i === WAIT && stage() === 'home') show(LAST); }, 4000);   // not a monitored topic
+    $('playBtn').click();                          // on the start page it submits the search (app.js); Safari < 16 has no requestSubmit
   }
 
   // Back never leaves the result page: from its first step it goes to "Run the check", skipping "Checking…"
-  const back = () => show(i === FIRST_RESULT ? RUN : i - 1);
+  const back = () => show(i === FIRST_RESULT || (i === LAST && stage() !== 'result') ? RUN : i - 1);
 
   function end() {
     STEPS[i]?.out?.(); clearInterval(waitT); clearTimeout(giveUp);
     box?.remove(); box = card = hole = null; i = -1;
+    $('tourBtn')?.focus({preventScroll: true});    // focus back where the tour can be replayed
     removeEventListener('resize', place); removeEventListener('scroll', place, true); removeEventListener('keydown', key, true);
   }
   function key(e) {   // capture phase: the tour's keys never reach app.js (its Escape would leave the topic)
@@ -132,7 +135,7 @@
   }
 
   function start() {
-    document.querySelector('.tour-ask')?.remove();
+    closeAsk();
     if (box) return;
     put('done');
     box = frame('', '<div class="tour-shade"></div><div class="tour-hole" hidden></div><div class="tour-card" role="dialog" aria-modal="true" aria-labelledby="tourTitle"></div>');
@@ -146,8 +149,17 @@
     show(stage() === 'result' ? FIRST_RESULT : 0);
   }
 
+  function closeAsk() { asking?.remove(); asking = null; removeEventListener('keydown', askKey, true); }
+  function askKey(e) {   // the question: Escape = skip, focus stays on its two buttons
+    if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); put('never'); closeAsk(); }
+    else if (e.key === 'Tab') {
+      const f = [...asking.querySelectorAll('button')], k = f.indexOf(document.activeElement);
+      e.preventDefault(); f[(k + (e.shiftKey ? f.length - 1 : 1)) % f.length].focus();
+    }
+  }
   function ask() {
-    const o = frame('tour-ask tour-dim', `<div class="tour-shade"></div>
+    if (box || get()) return;                      // a tour already runs ("?" pressed first) or answered already
+    const o = asking = frame('tour-ask tour-dim', `<div class="tour-shade"></div>
       <div class="tour-card tour-mid" role="dialog" aria-modal="true" aria-labelledby="tourAsk">
         <h2 id="tourAsk">Take a quick tour?</h2>
         <p class="tour-d">A short walk through the radar: search, sensitivity, metrics, then a real check and how to read it.</p>
@@ -156,8 +168,9 @@
     o.addEventListener('click', e => {
       const a = e.target.closest('button')?.dataset.a; if (!a) return;
       if (a === 'go') return start();
-      put('never'); o.remove();
+      put('never'); closeAsk();
     });
+    addEventListener('keydown', askKey, true);
     o.querySelector('.tour-next').focus({preventScroll: true});
   }
 
