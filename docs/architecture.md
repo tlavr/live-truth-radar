@@ -1,114 +1,114 @@
-# Архитектура Live Swarm Radar
+# Live Swarm Radar Architecture
 
-*Урезанный объём под хакатон: делаем ядро глубоко, а не всё поверхностно. Нас двое: P1 «Труба» и P2 «Мозг». План, сроки и чекпоинты: [HANDOFF.md](HANDOFF.md#5-план-по-задачам), карточки задач: [tasks.md](tasks.md).*
+*Scope trimmed for the hackathon: we build the core deeply rather than everything shallowly. The two roles are P1 "Pipe" and P2 "Brain." See [HANDOFF.md](HANDOFF.md#5-task-plan) for the plan, deadlines, and checkpoints and [tasks.md](tasks.md) for the task cards.*
 
-## Как работает (для ребёнка)
-Представь **дежурного детектива**, который сидит на Hostinger и **каждые несколько минут смотрит в интернет** через бинокль Context.dev.
-1. Собирает новые статьи и посты по нескольким темам.
-2. Замечает, что **17 аккаунтов за 10 минут написали почти одно и то же** → «рой!».
-3. Читает тексты и говорит: «Тут **запугивание**: „если не сделаете X, завтра будет катастрофа“, без фактов».
-4. Честно говорит, **насколько уверен**, и показывает, как часто он ошибается (метрики).
+## How it works (for a kid)
+Imagine an **on-duty detective** sitting on Hostinger who **looks at the internet every few minutes** through Context.dev binoculars.
+1. Collects new articles and posts across several topics.
+2. Notices that **17 accounts wrote almost the same thing in 10 minutes** → "swarm!".
+3. Reads the texts and says: "Here is **fear appeal**: 'if you don't do X, tomorrow will be a catastrophe,' with no facts."
+4. Honestly states **how confident** it is and shows how often it makes mistakes (metrics).
 
-## Объём: MUST / SHOULD / CUT
-| Уровень | Что | Когда |
+## Scope: MUST / SHOULD / CUT
+| Tier | What | When |
 |---|---|---|
-| **MUST** | Ingest (Context.dev news search + social scrape, поллинг каждые 2–5 мин, 3–5 тем), Swarm Detector (эмбеддинги → луч на тему (бимформинг) → отбеливание → коррелятор пар «время × смысл» → CFAR → SPRT, SNR в дБ; дизайн: [signal-processing.md §3](signal-processing.md)), объяснение вердикта Gemini (приём + цитата + уверенность), Eval (инжекция синтетического роя + ~50 размеченных живых аккаунтов), дашборд на одну страницу + `/metrics` (с T12d — live-сканирование по Check) + инжекция только через Bot Hive `/redteam` (в продукте кнопки нет), деплой на Hostinger | К Сб 19:00–20:30 (T0–T14, I1) |
-| **SHOULD** | Только **S1** — Source Trust через Context.dev brand/company (P1) | Только если весь MUST, кроме T14, готов к Сб 20:00; дедлайн Вс 01:00; отдельный `GET /api/source/{domain}` |
-| **CUT** | Oxylabs (целиком, включая гео-`/search`); SemEval; Context.dev scrape полного текста, monitors/webhooks (заменены поллингом), research, structured extraction; Fact-check, Change Watch; Gemma, Nemotron, Modal / Verda, Aiven, CRACI; спектрограммы, карта delay-Doppler (задержка от первого поста × скорость роста; не путать с телом неопределённости «задержка × смысловая расстройка», оно MUST), MMSE-фьюжн; бот-датасеты TwiBot/Cresci | Только в слайд «что дальше» |
+| **MUST** | Ingest (Context.dev news search + social scrape, polling every 2–5 min, 3–5 topics), Swarm Detector (embeddings → topic beam (beamforming) → whitening → "time × meaning" pair correlator → CFAR → SPRT, SNR in dB; design: [signal-processing.md §3](signal-processing.md)), Gemini verdict explanation (technique + quote + confidence), Eval (synthetic swarm injection + ~50 labeled live accounts), single-page dashboard + `/metrics` (with T12d — live scan on Check) + injection only via Bot Hive `/redteam` (no button in the product), deploy to Hostinger | By Sat 19:00–20:30 (T0–T14, I1) |
+| **SHOULD** | Only **S1** — Source Trust via Context.dev brand/company (P1) | Only if all MUST except T14 is ready by Sat 20:00. Deadline Sun 01:00. Separate `GET /api/source/{domain}` |
+| **CUT** | Oxylabs (completely, including geo-`/search`); SemEval; Context.dev full-text scrape, monitors/webhooks (replaced by polling), research, structured extraction; Fact-check, Change Watch; Gemma, Nemotron, Modal / Verda, Aiven, CRACI; spectrograms, delay-Doppler map (delay from first post × growth rate — not to be confused with the "delay × semantic detuning" ambiguity surface, which is MUST), MMSE fusion; TwiBot/Cresci bot datasets | Only for the "What's Next" slide |
 
-*Это канонический список уровней: остальные файлы на него ссылаются.*
+*This is the canonical tier list: the other files reference it.*
 
-## Схема (MUST)
+## Diagram (MUST)
 ```
-          ┌──────────────── Hostinger VPS (Docker Compose, публичный HTTPS-домен) ───────────┐
- ВЕБ      │                                                                                   │
- новости ─┼─► worker: поллинг Context.dev и Bluesky каждые N мин ──► db: Postgres   │
- соцсети  │   (news search) + Bluesky searchPosts            (items, actors, inject_req.,    │
-          │                                                   findings, labels)              │
-          │   worker: эмбеддинги Gemini → отбеливание → корреляция аккаунтов                │
-          │           → CFAR → SPRT → вердикт → объяснение Gemini (приём + цитата)           │
-          │                                                                                   │
-          │   api: FastAPI (REST + отдаёт дашборд)  ──►  дашборд: алерты, карточка, метрики │
-          │   eval: синтетический рой в живом потоке → ROC, precision, FPR, время до решения │
-          └───────────────────────────────────────────────────────────────────────────────────┘
-             LLM: Gemini (основной) · Hostinger AI Router (запасной, клиент `openai`, модель из `HOSTINGER_AI_ROUTER_MODEL`)
+          ┌──────────────────── Hostinger VPS (Docker Compose, public HTTPS domain) ─────────────────────┐
+ WEB      │                                                                                              │
+ news ─── ┼─► worker: poll Context.dev and Bluesky every N min ──► db: Postgres                          │
+ social   │   (news search) + Bluesky searchPosts               (items, actors, inject_req.,             │
+          │                                                       findings, labels)                      │
+          │   worker: Gemini embeddings → whitening → account correlation                                │
+          │           → CFAR → SPRT → verdict → Gemini explanation (technique + quote)                   │
+          │                                                                                              │
+          │   api: FastAPI (REST + serves dashboard) ──► dashboard: alerts, cards, metrics               │
+          │   eval: synthetic swarm in live stream → ROC, precision, FPR, time to decision               │
+          └──────────────────────────────────────────────────────────────────────────────────────────────┘
+             LLM: Gemini (primary) · Hostinger AI Router (fallback, `openai` client, model from `HOSTINGER_AI_ROUTER_MODEL`)
 ```
 
-## Модули
-| # | Модуль | Уровень | Кто | Папка | Что делает | Тулы |
+## Modules
+| # | Module | Tier | Who | Folder | What It Does | Tools |
 |---|---|---|---|---|---|---|
-| 0 | **Live Ingest** | MUST | P1 | `ingest/` | Каждые 2–5 мин тянет свежие статьи и посты по 3–5 темам, сохраняет текст, автора, время, URL как `Item` (T6b: у каждого источника свой клиент и свой `since`; `BLUESKY_ENABLED=0` выключает Bluesky) | Context.dev news search + Bluesky `searchPosts` (без логина; Reddit через Context.dev — за флагом, по умолчанию выкл) |
-| 1 | **Swarm Detector** | MUST | P2 | `detect/` | Эмбеддинги + луч на тему (бимформинг) + отбеливание (режекция клаттера темы) → коррелятор пар аккаунтов «время × смысл» с лагом → CFAR по парам → рой ≥ 3, когерентное накопление, SNR в дБ → SPRT (решение) + проверка «эхо новости» → `Finding` | Gemini embeddings + numpy/scipy (возможно, Codex) |
-| 2 | **Explain / Technique** | MUST | P1 | `ingest/explain.py` (в worker) | Для `Finding`: приём манипуляции + цитата-доказательство + уверенность + объяснение простыми словами → `Explanation` | Gemini structured output; AI Router запасной |
-| S | **Synthetic Swarm** | MUST | P2 | `synth/` | ~30 вариаций для нескольких месседжей (часть отложена для eval), фейковые аккаунты с лагами, `synthetic = true`, `campaign_id` | Gemini |
-| E | **Eval Harness** | MUST | P2 | `eval/` | ROC (Pd vs Pfa), доля найденных, постов/секунд до решения → `MetricsReport`; live FPR / precision по разметке | numpy |
-| UI | **Radar Dashboard** | MUST | P1 | `web/` | Главный экран: выбор темы (луча), лента алертов, карточка со светофором, фразой и телом неопределённости, посты, приём; вкладка «Детали»: heatmap корреляции, SNR, SPRT-трасса; `/metrics`, live-сканирование по Check (инжекция — только Bot Hive `/redteam`) | Статический HTML + JS + Chart.js, отдаёт FastAPI |
+| 0 | **Live Ingest** | MUST | P1 | `ingest/` | Pulls fresh articles and posts across 3–5 topics every 2–5 min, saves text, author, timestamp, and URL as `Item` (T6b: each source has its own client and its own `since`. `BLUESKY_ENABLED=0` disables Bluesky) | Context.dev news search + Bluesky `searchPosts` (no login required. Reddit via Context.dev is behind a flag, off by default) |
+| 1 | **Swarm Detector** | MUST | P2 | `detect/` | Embeddings + topic beam (beamforming) + whitening (topic clutter rejection) → lagged "time × meaning" account-pair correlator → pairwise CFAR → swarm ≥ 3, coherent integration, SNR in dB → SPRT (decision) + "news echo" check → `Finding` | Gemini embeddings + numpy/scipy (possibly Codex) |
+| 2 | **Explain / Technique** | MUST | P1 | `ingest/explain.py` (in worker) | For `Finding`: manipulation technique + evidence quote + confidence + plain-language explanation → `Explanation` | Gemini structured output, AI Router fallback |
+| S | **Synthetic Swarm** | MUST | P2 | `synth/` | ~30 variations across several messages (some held out for eval), fake accounts with lags, `synthetic = true`, `campaign_id` | Gemini |
+| E | **Eval Harness** | MUST | P2 | `eval/` | ROC (Pd vs Pfa), detection rate, posts/seconds to decision → `MetricsReport`, live FPR / precision from labels | numpy |
+| UI | **Radar Dashboard** | MUST | P1 | `web/` | Main screen: topic (beam) selector, alert feed, card with traffic light, phrase, and ambiguity surface, posts, technique. "Details" tab: correlation heatmap, SNR, SPRT trace. `/metrics`, live scan on Check (injection is Bot Hive `/redteam` only) | Static HTML + JS + Chart.js, served by FastAPI |
 | Ops | **Deploy** | MUST | P1 | `infra/` | Docker Compose, caddy HTTPS, Hostinger VPS, `tests/smoke.py` | Hostinger |
-| 3 | **Source Trust** | SHOULD (S1) | P1 | `ingest/` | Кто стоит за доменом: компания, возраст, чужое лого | Context.dev brand + company |
+| 3 | **Source Trust** | SHOULD (S1) | P1 | `ingest/` | Who is behind the domain: company, age, someone else's logo | Context.dev brand + company |
 | — | Geo Echo (Oxylabs), Fact-check, Change Watch | CUT | — | — | — | — |
 
-## Репо и контракт
+## Repo and Contract
 ```
-CLAUDE.md                 общее: инструкции агентам
-contracts/models.py       ОБЩЕЕ — меняем только вдвоём
-fixtures/items.json       тестовые данные (генерирует `make fixtures`, руками не править)
-fixtures/items_live_sample.json  реальный сэмпл из БД (T2, обновляется на синках), авторы псевдонимизированы
-fixtures/items_live_background.json  живой фон для eval за 48 ч (T15), авторы псевдонимизированы, email замаскированы
-fixtures/findings.json    пример находок (их отдаёт мок-детектор P1 до I1)
-ingest/  api/  web/  infra/      P1
-detect/  synth/  eval/           P2
-tests/                    test_contracts.py (общий), test_detect_*.py (P2), smoke.py (P1)
-docs/                     план и workflow
-Makefile                  `make test` (pytest, без сети, <5 с), `make smoke URL=...`
+CLAUDE.md                           Shared agent instructions
+contracts/models.py                 SHARED. Changes require both owners.
+fixtures/items.json                 Test data generated by `make fixtures`. Never edit by hand.
+fixtures/items_live_sample.json     Live DB sample (T2, refreshed at sync points). Authors are pseudonymized.
+fixtures/items_live_background.json 48 h of live background for eval (T15). Authors are pseudonymized and emails masked.
+fixtures/findings.json              Sample findings served by the P1 mock detector until I1.
+ingest/  api/  web/  infra/          P1
+detect/  synth/  eval/               P2
+tests/                              test_contracts.py (shared), test_detect_*.py (P2), smoke.py (P1)
+docs/                               Plan and workflow
+Makefile                            `make test` (pytest, offline, <5 s), `make smoke URL=...`
 ```
-Слои связаны **одним контрактом** — pydantic v2 в [`contracts/models.py`](../contracts/models.py) (источник истины, здесь только кратко):
-- `Item` — пост/статья: `source` (`context_social` / `context_news` / `synthetic`), `author`, `published_at` (UTC), `text`, `url`, `topic`, `synthetic`, `campaign_id` (ground truth только у синтетики).
-- `Finding` — вердикт (`coordinated` / `organic` / `watching`), `accounts`, `item_ids`, `llr`, `sprt_trace`, `sprt_upper` / `sprt_lower` (пороги для графика), `decided_at_item`, `first_seen` / `last_seen`, `correlation` и `lag_sec` (квадратные матрицы в порядке `accounts`, для heatmap), `id` = `finding_id(topic, accounts)` (стабильный), `snr_db` (весь рой после накопления) и `snr_db_single` (средняя пара до накопления: «x → y дБ»), `explanation: Explanation | None` (`technique`, `quote`, `confidence`, `summary`), `synthetic`, необязательные `ambiguity` (сетка «задержка × смысловая расстройка» для главного экрана) и `note` (например, «эхо новости»).
-- `AlertsResponse` (+ `last_poll_at`: «обновлено N мин назад»), `MetricsReport` (ROC, detection rate, рабочая Pfa, постов/секунд до решения, live FPR / precision, `n_labelled`, `failure_examples`; необязательные `pd_by_size`, `swarm_purity`, `live_precision_ci`).
-- Вход детектора (P2): `detect.pipeline.detect(items, *, alpha=0.02, beta=0.1) -> list[Finding]`.
-- API (P1): `GET /health`, `GET /api/alerts` → `AlertsResponse`, `GET /api/metrics` → `MetricsReport`, `GET /api/items?ids=…` → `list[Item]` (тексты для карточки), `POST /api/inject` (API без кнопки в продукте; детектор запускает worker через `inject_requests`).
+Layers are connected by a **single contract** — pydantic v2 in [`contracts/models.py`](../contracts/models.py) (source of truth; summarized here only):
+- `Item` — post/article: `source` (`context_social` / `context_news` / `synthetic`), `author`, `published_at` (UTC), `text`, `url`, `topic`, `synthetic`, `campaign_id` (ground truth for synthetic data only).
+- `Finding` — verdict (`coordinated` / `organic` / `watching`), `accounts`, `item_ids`, `llr`, `sprt_trace`, `sprt_upper` / `sprt_lower` (chart thresholds), `decided_at_item`, `first_seen` / `last_seen`, `correlation` and `lag_sec` (square matrices in `accounts` order, for the heatmap), `id` = `finding_id(topic, accounts)` (stable), `snr_db` (entire swarm after integration) and `snr_db_single` (average pair before integration: "x → y dB"), `explanation: Explanation | None` (`technique`, `quote`, `confidence`, `summary`), `synthetic`, optional `ambiguity` ("delay × semantic detuning" grid for the main screen) and `note` (e.g., "news echo").
+- `AlertsResponse` (+ `last_poll_at`: "updated N min ago"), `MetricsReport` (ROC, detection rate, operating Pfa, posts/seconds to decision, live FPR / precision, `n_labelled`, `failure_examples`; optional `pd_by_size`, `swarm_purity`, `live_precision_ci`).
+- Detector input (P2): `detect.pipeline.detect(items, *, alpha=0.02, beta=0.1) -> list[Finding]`.
+- API (P1): `GET /health`, `GET /api/alerts` → `AlertsResponse`, `GET /api/metrics` → `MetricsReport`, `GET /api/items?ids=…` → `list[Item]` (card text), `POST /api/inject` (API without a button in the product. The worker runs the detector via `inject_requests`).
 
-Интерфейсы вне контракта (генератор для `/api/inject`, `eval/report.json`, `eval/labels.csv`, `/api/source/{domain}`, расположение worker): [HANDOFF.md §5](HANDOFF.md#5-план-по-задачам).
+Out-of-contract interfaces (generator for `/api/inject`, `eval/report.json`, `eval/labels.csv`, `/api/source/{domain}`, worker location): [HANDOFF.md §5](HANDOFF.md#5-task-plan).
 
-P2 работает офлайн на `fixtures/` (без сети и БД), P1 — с мок-детектором до интеграции **I1 (Сб 15:00)**. Подробнее: [workflow.md](workflow.md).
+P2 works offline on `fixtures/` (no network or DB), while P1 works with a mock detector until **I1 (Sat 15:00)** integration. Details: [workflow.md](workflow.md).
 
-## Стек на VPS (Docker Compose)
-| Сервис | Что внутри |
+## VPS Stack (Docker Compose)
+| Service | What's inside |
 |---|---|
-| `caddy` | Reverse proxy + автоматический HTTPS для домена Hostinger |
-| `api` | Python, FastAPI: REST для дашборда, отдаёт статический дашборд |
-| `worker` | Python (`ingest/worker.py`): поллинг Context.dev, `detect()` (numpy/scipy), объяснения Gemini. Eval гоняет P2 отдельно (`python -m eval.run` → `eval/report.json`) |
+| `caddy` | Reverse proxy + automatic HTTPS for the Hostinger domain |
+| `api` | Python, FastAPI: REST for the dashboard, serves the static dashboard |
+| `worker` | Python (`ingest/worker.py`): Context.dev polling, `detect()` (numpy/scipy), Gemini explanations. P2 runs eval separately (`python -m eval.run` → `eval/report.json`) |
 | `db` | Postgres |
 
-Фронт без сборки (HTML + JS + Chart.js), чтобы не тратить время на тулчейн. Это решение по умолчанию: если в команде есть человек, который быстро делает React, можно поменять, не трогая остальное.
+Buildless frontend (HTML + JS + Chart.js) so we don't waste time on a toolchain. This is the default choice: if someone on the team can build React quickly, we can swap it out without touching the rest.
 
-## Хранилище
-Эмбеддинги кэшируются на диске (`cache/`, volume, в git не попадает); векторный поиск в БД не нужен, поэтому pgvector не берём.
-Таблицы: `actors` (аккаунт/автор), `items` (пост/статья: текст, автор, время, URL, источник, флаг `synthetic`), `findings` (вердикт, LLR, SNR, объяснение), `labels` (ручная разметка).
-Ответы Context.dev кэшируем у себя (повторный запрос стоит тех же кредитов). Схема БД — P1 (T4), но поля `items` / `findings` повторяют контракт.
+## Storage
+Embeddings are cached on disk (`cache/`, volume, excluded from git). Vector search in the DB isn't needed, so we skip pgvector.
+Tables: `actors` (account/author), `items` (post/article: text, author, time, URL, source, `synthetic` flag), `findings` (verdict, LLR, SNR, explanation), `labels` (manual labeling).
+We cache Context.dev responses locally (a repeat request costs the same credits). The DB schema is P1 (T4), but the `items` / `findings` fields mirror the contract.
 
-## Данные для метрик (40% оценки!)
-| Уровень | Набор | Для чего |
+## Data for metrics (40% of the score!)
+| Tier | Dataset | Purpose |
 |---|---|---|
-| MUST | **Синтетический рой:** LLM пишет ~30 вариаций для нескольких месседжей (часть отложена для eval; детектор на синтетике не обучается), разносим по фейковым аккаунтам с лагами, прячем в реальные посты (`synthetic = true`) | ROC и время до решения для Swarm Detector |
-| MUST | **Ручная разметка ~50 живых аккаунтов (T14, оба):** рубрика 15 мин, единица — аккаунт, классы «органика / подозрительно / не понятно»; **~25 из алертов** (→ live precision) + **~25 случайных без алерта** из тех же тем (→ live FPR) | Precision и FPR на реальных людях, отдельно от синтетики |
-| CUT | SemEval-2020 Task 11 (корпус приёмов) | Вдвоём не успеем; приёмы показываем объяснением с цитатой, без отдельной метрики |
-| CUT | TwiBot-20/22, Cresci-2017 | Доступ по запросу, не успеем |
+| MUST | **Synthetic swarm:** An LLM writes ~30 variations for several messages (a subset is held out for eval, and the detector is not trained on synthetic data), which we distribute across fake accounts with lags and hide among real posts (`synthetic = true`) | ROC and time-to-decision for the Swarm Detector |
+| MUST | **Manual labeling of ~50 live accounts (T14, both):** 15 min rubric, unit is an account, classes "organic / suspicious / unclear"; **~25 from alerts** (→ live precision) + **~25 random non-alert accounts** from the same topics (→ live FPR) | Precision and FPR on real people, separate from synthetic data |
+| CUT | SemEval-2020 Task 11 (techniques corpus) | With just the two of us, we won't have time. We show techniques via an explanation with a quote, without a separate metric |
+| CUT | TwiBot-20/22, Cresci-2017 | Access by request, won't have time |
 
-## Демо-сценарий на 2 минуты
-1. Открываем `https://<домен Hostinger>`: лента живых алертов по 3–5 темам (обновляется поллингом).
-2. Выбираем тему и жмём Check → идёт live-сканирование (строка «Live · …», фон спокоен). В соседней вкладке Bot Hive (`/redteam`) жмём Attack → посты ботов появляются там по одному, а на экране темы за ~30 с собирается рой и появляется алерт «🐝 Рой: [N] аккаунтов, SNR из [x] дБ (одна пара) до [y] дБ (весь рой)» (числа — реальные, из демо); в Bot Hive метки «Detected» и «Caught N / M».
-3. Карточка: светофор и фраза, тело неопределённости (острый пик в углу карты «задержка × смысловая расстройка»), посты, приём «🎭 Fear appeal» с цитатой; на вкладке «Детали» heatmap корреляции аккаунтов и SPRT-трасса («решение на [k]-м посте»).
-4. (SHOULD S1) «🔗 Источник: …» — кто стоит за доменом, от Context.dev brand/company.
-5. Страница `/metrics`: ROC, рабочая точка, Pd от размера роя, чистота роя, live precision с интервалом и FPR, примеры ошибок.
+## 2-minute demo script
+1. Open `https://<Hostinger-domain>`: a feed of live alerts across 3–5 topics (updated via polling).
+2. Select a topic and click Check → live scanning runs ("Live · …" line, calm background). In the adjacent Bot Hive tab (`/redteam`), click Attack → bot posts appear there one by one, while on the topic screen a swarm assembles in ~30 s and an alert appears: "🐝 Swarm: [N] accounts, SNR from [x] dB (single pair) to [y] dB (entire swarm)" (the numbers are real, from the demo). Bot Hive shows the labels "Detected" and "Caught N / M".
+3. Card: traffic light and phrase, ambiguity surface (sharp peak in the corner of the "delay × semantic detuning" map), posts, technique "🎭 Fear appeal" with a quote. On the "Details" tab, an account correlation heatmap and SPRT trace ("decision at post [k]").
+4. (SHOULD S1) "🔗 Source: …" — who is behind the domain, from Context.dev brand/company.
+5. `/metrics` page: ROC, operating point, Pd vs. swarm size, swarm purity, live precision with an interval and FPR, error examples.
 
-## Главные риски
-| Риск | Что делаем |
+## Key Risks
+| Risk | What we do |
 |---|---|
-| Social scrape Context.dev не отдаёт автора или время | Подтвердилось в T2 (reddit-search падает с WEBSITE_ACCESS_ERROR). Решение T6b: соцсеть = Bluesky `searchPosts` (автор = хэндл, время = `createdAt`/`indexedAt`). Без логина `cursor` даёт 403, листаем по `until`. Запасной вариант: `BLUESKY_ENABLED=0` → только новости + синтетический рой, авторы = домены |
-| Мало реальных роёв за выходные | Инжекция тестовой цели: это и метрика, и демо |
-| Лимиты Gemini | Hostinger AI Router как запасной LLM; эмбеддинги кэшируем |
-| Деплой ломается в последний момент | Деплой скелета к Сб 03:00 (T5), smoke после каждого деплоя, фича-фриз кода (F) в Вс 02:00 |
-| Детектор не готов к интеграции | Чекпоинт T10 Сб 14:00: P1 работает на моке, при отставании S1 не делаем, P1 помогает P2 |
+| Context.dev social scrape does not return author or time | Confirmed in T2 (reddit-search fails with WEBSITE_ACCESS_ERROR). Decision T6b: social network = Bluesky `searchPosts` (author = handle, time = `createdAt`/`indexedAt`). Without login, `cursor` gives 403, paginated via `until`. Fallback: `BLUESKY_ENABLED=0` → news only + synthetic swarm, authors = domains |
+| Few real swarms over the weekend | Test target injection: this is both a metric and a demo |
+| Gemini limits | Hostinger AI Router as a fallback LLM, and we cache embeddings |
+| Deployment breaks at the last minute | Skeleton deploy by Sat 03:00 (T5), smoke test after every deploy, code feature freeze (F) on Sun 02:00 |
+| Detector is not ready for integration | Checkpoint T10 Sat 14:00: P1 runs on a mock, if behind schedule we skip S1, and P1 helps P2 |
 
-Зачем каждый тул и условия призов: [tech-challenges.md](tech-challenges.md).
+Why each tool is used and prize requirements: [tech-challenges.md](tech-challenges.md).

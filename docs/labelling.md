@@ -1,34 +1,34 @@
-# Разметка живых аккаунтов (T14)
+# Labeling live accounts (T14)
 
-Цель: `live_precision` и `live_fpr` в `/api/metrics` на реальных аккаунтах. Формулы и перевзвешивание описаны в [signal-processing.md §3.10](signal-processing.md#310-метрики-pd-pfa-precision), формат файлов в [HANDOFF §5](HANDOFF.md#5-план-по-задачам).
+Goal: `live_precision` and `live_fpr` in `/api/metrics` on real accounts. Formulas and reweighting are described in [signal-processing.md §3.10](signal-processing.md#310-metrics-pd-pfa-precision), and the file format is in [HANDOFF §5](HANDOFF.md#5-task-plan).
 
-## Что размечаем
-Строка в `eval/labels.csv` = один аккаунт в одной теме. У news-потока аккаунт = **домен издателя** (итог T2), поэтому размечаем издания, а не людей. Смотрим только посты аккаунта в окне детектора (лист `review.md`), не по памяти об издании.
+## What we label
+A row in `eval/labels.csv` = one account in one topic. For the news stream, an account = **publisher domain** (outcome of T2), so we label publishers, not people. Look only at the account's posts in the detector window (the `review.md` sheet), not from memory about the publisher.
 
-Колонка `verdict` подсказывает, откуда строка в выборке (`coordinated` = алерт, `watching` = добор, пусто = случайная без алерта). **Размечать надо, не глядя на verdict:** решение по постам, а не по детектору.
+The `verdict` column indicates where the row in the sample came from (`coordinated` = alert, `watching` = top-up, empty = random without an alert). **Label without looking at verdict:** base the decision on the posts, not on the detector.
 
-## Рубрика
-| `label` | Когда ставим |
+## Rubric
+| `label` | When to assign |
 |---|---|
-| `suspicious` | Почти дословный текст (заголовок/лид) у нескольких аккаунтов за минуты, **без** ссылки на общий первоисточник; контент-ферма или клон-агрегатор (нет редакции, «О нас», авторов; массовый рерайт чужих статей); пачка постов одного и того же нарратива с одинаковыми оборотами; домен-однодневка. |
-| `organic` | Узнаваемое издание с собственной подачей (свой заголовок, свои детали, свой автор); перепечатка агентской новости (AP, Reuters, AFP, dpa…) **с атрибуцией** — это «эхо новости», а не рой; совпадение формулировок объясняется общим первоисточником (пресс-релиз, заявление, цитата). |
-| `unclear` | Постов мало (1–2) и по ним не решить; сайт недоступен; признаки в обе стороны. В формулы не входит, число `unclear` пишем честно. |
+| `suspicious` | Nearly verbatim text (headline/lead) across multiple accounts within minutes, **without** a link to a common primary source; content farm or clone aggregator (no editorial staff, "About us", or authors; mass rewriting of others' articles); a batch of posts with the same narrative and identical phrasing; fly-by-night domain. |
+| `organic` | Recognizable publication with its own framing (its own headline, details, and author); a wire-service reprint (AP, Reuters, AFP, dpa…) **with attribution** — that is a "news echo", not a swarm; matching wording is explained by a common primary source (press release, statement, quote). |
+| `unclear` | Too few posts (1–2) to decide; site unavailable; signals pointing both ways. Excluded from formulas, and the `unclear` count is recorded honestly. |
 
-Правила:
-- Сомневаешься между `suspicious` и `organic` — ставь `unclear`, не угадывай.
-- Синтетики в выборке нет (скрипт её исключает); если всё же видна (`synthetic`, `campaign_id`), строку удалить и сказать P1.
-- ~20–40 с на аккаунт; на 50 строк ≈ 30 мин.
+Rules:
+- If in doubt between `suspicious` and `organic`, assign `unclear`—do not guess.
+- There is no synthetic data in the sample (the script excludes it). If any is still visible (`synthetic`, `campaign_id`), delete the row and tell P1.
+- ~20–40 s per account. For 50 rows, ≈ 30 min.
 
-## `note` (уходит в публичный git)
-Только причина, **без хэндлов, доменов, имён и URL**: «рерайт без атрибуции», «агентская перепечатка», «1 пост, мало данных». Перед коммитом проверка: ни один хэндл из `cache/label_handles.csv` не встречается в `eval/`.
+## `note` (goes to public git)
+Reason only, **without handles, domains, names, or URLs**: "rewrite without attribution", "wire reprint", "1 post, too little data". Pre-commit check: no handle from `cache/label_handles.csv` appears in `eval/`.
 
-## Порядок
-1. На VPS: `ssh $VPS 'cd live-truth-radar && docker compose -f infra/docker-compose.yml exec -T api python -m ingest.label_sample --review'` → `cache/labels/` (`labels.csv`, `labels_meta.json`, `review.md`).
-2. Локально: `scp` из `cache/labels/` и `cache/label_handles.csv` (команды в docstring `ingest/label_sample.py`), `cp -n cache/labels/labels.csv cache/labels/labels_meta.json eval/`. Если в `eval/` уже лежит старый неразмеченный `labels.csv`, сначала удалить его: `cp -n` его не заменит, и номера из `review.md` разъедутся со строками.
-3. По `cache/labels/review.md` (номер = строка `labels.csv` без заголовка) заполнить `label` и `note` в `eval/labels.csv`.
-4. `make eval` → проверить `n_labelled`, `live_precision`, `live_precision_ci`, `live_fpr` в `eval/report.json` → `make test` → коммит `eval/labels.csv`, `eval/labels_meta.json`, `eval/report.json` → PR → `make deploy` → `make smoke`.
+## Procedure
+1. On VPS: `ssh $VPS 'cd live-truth-radar && docker compose -f infra/docker-compose.yml exec -T api python -m ingest.label_sample --review'` → `cache/labels/` (`labels.csv`, `labels_meta.json`, `review.md`).
+2. Locally: `scp` from `cache/labels/` and `cache/label_handles.csv` (commands in the docstring of `ingest/label_sample.py`), `cp -n cache/labels/labels.csv cache/labels/labels_meta.json eval/`. If `eval/` already contains an old unlabeled `labels.csv`, delete it first: `cp -n` will not replace it, and the numbers from `review.md` will drift out of sync with the rows.
+3. Using `cache/labels/review.md` (number = row of `labels.csv` excluding the header), fill in `label` and `note` in `eval/labels.csv`.
+4. `make eval` → check `n_labelled`, `live_precision`, `live_precision_ci`, `live_fpr` in `eval/report.json` → `make test` → commit `eval/labels.csv`, `eval/labels_meta.json`, `eval/report.json` → PR → `make deploy` → `make smoke`.
 
-`review.md` и `label_handles.csv` содержат реальные хэндлы и живут только в `cache/` (git-ignored).
+`review.md` and `label_handles.csv` contain real handles and live only in `cache/` (git-ignored).
 
-## Итог разметки (14.11)
-Выборка с VPS: окно 6 ч, 5 тем, 51 аккаунт (`coordinated` 0, `watching` 9, без алерта 42; `--n-quiet 42`, чтобы набрать ≥ 40 строк в формулах). Разметка: черновик модели по этой рубрике, проверен человеком (P1). Итог: organic 49, unclear 1, suspicious 1 (без алерта). `n_labelled = 42`, `live_fpr = 0.0`; `live_precision` не определена: живых `coordinated` в окне не было. В сабмите писать именно так.
+## Labeling summary (14.11)
+Sample from VPS: 6 h window, 5 topics, 51 accounts (`coordinated` 0, `watching` 9, without alert 42; `--n-quiet 42` to get ≥ 40 rows in the formulas). Labeling: model draft based on this rubric, human-verified (P1). Outcome: organic 49, unclear 1, suspicious 1 (without alert). `n_labelled = 42`, `live_fpr = 0.0`. `live_precision` is undefined: there were no live `coordinated` in the window. Write it exactly like this in the submission.

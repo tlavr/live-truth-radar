@@ -1,72 +1,72 @@
-# Тулы и тех-челленджи Live Swarm Radar
+# Live Swarm Radar Tools and Tech Challenges
 
-Коды и ключи в репо **не храним**: они в Junction Hackerpack, у нас в `.env` (git-ignored).
-Объём урезан до ядра (MUST / SHOULD / CUT), см. [architecture.md](architecture.md). Порядок работ: [HANDOFF.md](HANDOFF.md#5-план-по-задачам), карточки: [tasks.md](tasks.md). Нас двое: P1 «Труба», P2 «Мозг».
+We **do not store** codes and keys in the repo: they are in Junction Hackerpack, and in our `.env` (git-ignored).
+The scope is trimmed to the core (MUST / SHOULD / CUT). See [architecture.md](architecture.md). Work order: [HANDOFF.md](HANDOFF.md#5-task-plan), cards: [tasks.md](tasks.md). There are two of us: P1 "Pipe", P2 "Brain".
 
-## Итог за 10 секунд
-| Тул | Роль в радаре | Приз | Уровень |
+## Summary in 10 seconds
+| Tool | Role in the radar | Prize | Tier |
 |---|---|---|---|
-| **Hostinger VPS + AI Router** | Дом: всё крутится тут, публичный URL. AI Router = запасной LLM | обязательно для основного | ✅ **MUST** |
-| **Context.dev** | Антенна: живые новости и посты | €750 / €250 / swag | ✅ **MUST, ядро** |
-| **Gemini API** | Эмбеддинги, классификатор приёмов, объяснение кластера | €4000 + $1000 GCP/чел · €2000 · €1000 | ✅ **MUST** |
-| Codex | Мог бы писать `detect/` | $10k / $5k / $2.5k кредитов | ◐ возможно позже (пока пишем с Claude) |
+| **Hostinger VPS + AI Router** | Home: everything runs here, public URL. AI Router = fallback LLM | required for the main challenge | ✅ **MUST** |
+| **Context.dev** | Antenna: live news and posts | €750 / €250 / swag | ✅ **MUST, core** |
+| **Gemini API** | Embeddings, technique classifier, cluster explanation | €4000 + $1000 GCP/person · €2000 · €1000 | ✅ **MUST** |
+| Codex | Could write `detect/` | $10k / $5k / $2.5k credits | ◐ maybe later (writing with Claude for now) |
 | Oxylabs, Gemma, Nemotron, Modal / Verda, Aiven, CRACI | — | — | ❌ **CUT** |
 
-Пример, как это работает вместе: Context.dev приносит 40 новых постов про «отключение света» → Gemini превращает их в векторы → луч на тему, отбеливание и коррелятор пар находят рой из 17 аккаунтов → CFAR и SPRT говорят «координировано» при заданной доле ложных тревог → Gemini объясняет приём («запугивание») с цитатой → (SHOULD S1) Context.dev brand/company показывает, кто стоит за доменом.
+Example of how it works together: Context.dev brings in 40 new posts about "power outage" → Gemini turns them into vectors → topic beam, whitening, and pair correlator find a swarm of 17 accounts → CFAR and SPRT say "coordinated" at a given false-alarm rate → Gemini explains the technique ("fear appeal") with a quote → (SHOULD S1) Context.dev brand/company shows who is behind the domain.
 
-**Правило для сабмита:** в тексте и в списке тех-челленджей оставляем только то, что **реально работает в демо**. Не сделали SHOULD — вычёркиваем.
+**Submission rule:** in the write-up and in the tech-challenges list, keep only what **actually works in the demo**. If we did not build a SHOULD item, cross it out.
 
 ---
 
-## 1. Hostinger (основной челлендж Decode the Noise) · ✅ MUST
-**Что даёт (1 месяц бесплатно):**
-- **VPS KVM 2:** 2 vCPU, 8 ГБ RAM, 100 ГБ NVMe, Docker, root, **бесплатный домен**.
-- **AI Router:** один ключ на 150+ моделей (Anthropic, OpenAI, DeepSeek, Mistral, xAI), совместим с OpenAI и Anthropic SDK.
-- **Connector / API / MCP** (`github.com/hostinger/api-mcp-server`): деплой и домен прямо из редактора.
+## 1. Hostinger (main challenge Decode the Noise) · ✅ MUST
+**What it provides (1 month free):**
+- **VPS KVM 2:** 2 vCPU, 8 GB RAM, 100 GB NVMe, Docker, root, **free domain**.
+- **AI Router:** one key for 150+ models (Anthropic, OpenAI, DeepSeek, Mistral, xAI), compatible with the OpenAI and Anthropic SDKs.
+- **Connector / API / MCP** (`github.com/hostinger/api-mcp-server`): deploy and domain management straight from the editor.
 
-**Роль у нас:** Docker Compose на VPS: `caddy` (HTTPS), `api` (FastAPI + дашборд), `worker` (поллинг Context.dev, детекторы, Gemini; eval P2 гоняет отдельно → `eval/report.json`), `db` (Postgres). AI Router = запасной LLM (если упрёмся в лимиты Gemini) и показывает судьям, что мы используем их стек.
+**Our setup:** Docker Compose on the VPS: `caddy` (HTTPS), `api` (FastAPI + dashboard), `worker` (Context.dev polling, detectors, Gemini, while P2 runs eval separately → `eval/report.json`), `db` (Postgres). AI Router = fallback LLM (if we hit Gemini limits) and shows the judges that we use their stack.
 
-**Обязательно:** живой публичный URL к концу хакатона. 40% оценки = качество детекции и честные метрики.
+**Required:** live public URL by the end of the hackathon. 40% of the score = detection quality and honest metrics.
 
-## 2. Context.dev · ✅ MUST, ядро
-**Условие приза:** ≥1 эндпоинт **в основном потоке**, данные **видимо управляют демо**. Сдать репо + демо + **заметку «какие эндпоинты и зачем»**.
-**Судят:** 40% креатив (комбинация эндпоинтов), 30% центральность живых данных, 30% техника (точность, латентность, изменения во времени).
-**Лимиты:** 50 000 кредитов на команду без срока, до 50 параллельных запросов, без rate limit.
+## 2. Context.dev · ✅ MUST, core
+**Prize requirement:** ≥1 endpoint **in the main flow**, with data **visibly driving the demo**. Submit repo + demo + **a note on "which endpoints and why"**.
+**Judging criteria:** 40% creativity (endpoint combination), 30% centrality of live data, 30% technical execution (accuracy, latency, changes over time).
+**Limits:** 50 000 credits per team with no expiration, up to 50 concurrent requests, no rate limit.
 
-| Эндпоинт | Что делает у нас | Уровень |
+| Endpoint | What it does for us | Tier |
 |---|---|---|
-| **News search** | Поток свежих статей по 3–5 темам (поллинг каждые 2–5 мин) | MUST |
-| **Social scrape** (TikTok, Instagram, Reddit) | Посты + автор + время → сигнал аккаунта «время × смысл» для поиска роя | Не работает (T2: Reddit — `WEBSITE_ACCESS_ERROR`, TikTok/Instagram не ищут по теме). Соцсеть с T6b — Bluesky `searchPosts` (не Context.dev), Reddit-код за флагом `REDDIT_ENABLED` |
-| **Brand + company enrichment** | Кто стоит за доменом, чужое ли лого (Source Trust) → «комбинация эндпоинтов» для судей | SHOULD (S1, P1) |
-| Scrape полного текста, Monitors + webhooks, Research, Structured extraction | Хватает текста из поиска / заменены поллингом / Fact-check вырезан | CUT |
+| **News search** | Stream of fresh articles across 3–5 topics (polling every 2–5 min) | MUST |
+| **Social scrape** (TikTok, Instagram, Reddit) | Posts + author + timestamp → account "time × meaning" signal for swarm detection | Does not work (T2: Reddit — `WEBSITE_ACCESS_ERROR`, TikTok/Instagram do not search by topic). Starting with T6b, the social source is Bluesky `searchPosts` (not Context.dev), Reddit code behind flag `REDDIT_ENABLED` |
+| **Brand + company enrichment** | Who is behind the domain, whether the logo belongs to someone else (Source Trust) → "endpoint combination" for the judges | SHOULD (S1, P1) |
+| Full-text scrape, Monitors + webhooks, Research, Structured extraction | Search text is enough / replaced by polling / Fact-check is cut | CUT |
 
-**Сначала проба (T2, P1, Пт 23:15):** есть ли автор и время в news search / social scrape. Если нет — `[ALT]` в [submission-draft.md](submission-draft.md).
-**Подводные камни:** проверять флаг `success` (200 бывает с ошибкой); кэш до 3 дней стоит тех же кредитов → сохранять результаты у себя; crawl и batch асинхронные.
+**First check (T2, P1, Fri 23:15):** whether author and timestamp are present in news search / social scrape. If not — `[ALT]` in [submission-draft.md](submission-draft.md).
+**Gotchas:** check the `success` flag (200 can come back with an error). Context.dev's own cache (up to 3 days) still charges full credits → cache results locally. Crawl and batch are asynchronous.
 
 ## 3. Gemini API · ✅ MUST
-**Условие приза:** выйти **за рамки «добавили LLM»**. В сабмите объяснить: проблему, как интегрирован Gemini, что инновационно, почему без Gemini не работает. Ключ в Google AI Studio, **только 18+**.
+**Prize requirement:** go **beyond "we added an LLM"**. In the submission, explain the problem, how Gemini is integrated, what is innovative, and why it does not work without Gemini. Key in Google AI Studio, **18+ only**.
 
-**Роль у нас:**
-- **Эмбеддинги** постов → согласованная фильтрация в пространстве смысла: посты сравниваются друг с другом, перефраз находится без банка шаблонов.
-- **Technique Classifier** со structured output: приём + цитата-доказательство + уверенность.
-- **Длинный контекст:** весь кластер роя (сотни постов) за один вызов → объяснение «почему это кампания».
-- Генерация вариаций для синтетического роя (eval).
+**Role in our stack:**
+- **Embeddings** of posts → matched filtering in semantic space: posts are compared against each other, and paraphrasing is detected without a template bank.
+- **Technique Classifier** with structured output: technique + supporting quote + confidence.
+- **Long context:** the entire swarm cluster (hundreds of posts) in a single call → explanation of "why this is a campaign".
+- Generating variations for the synthetic swarm (eval).
 
-**Почему Gemini важен (для текста сабмита):** длинный контекст позволяет судить о группе, а не об одном посте, и это ровно наш «деспрединг».
+**Why Gemini matters (for the submission text):** long context lets us judge a group rather than a single post, and that is literally our "despreading".
 
-## 4. Codex · ◐ возможно позже
-**Условие приза:** показать, **как Codex реально помог строить**. $100 на человека (личная ссылка в Hackerpack, 30 дней).
-**Как честно:** P2 «Мозг» пишет в Codex `detect/` (`cfar`, `sprt`, корреляция) — изолированный модуль с юнит-тестами на синтетике и одним контрактом (`contracts/models.py`), то есть удобная задача для Codex. Доказательства: ссылки на задачи/PR Codex, скриншоты, `docs/codex-log.md` («задача → что сделал Codex → что поправили»), ведём по ходу; в сабмите честно, кто что писал.
-**Сейчас:** код пишем с Claude, Codex в preliminary не отмечаем. Если подключим позже (решить не позже Сб 11:00), с этого момента ведём `docs/codex-log.md`; иначе в сабмите его нет. Задним числом лог не пишем.
+## 4. Codex · ◐ maybe later
+**Prize requirement:** show **how Codex actually helped build**. $100 per person (personal link in Hackerpack, 30 days).
+**How to keep it honest:** P2 "Brain" writes `detect/` in Codex (`cfar`, `sprt`, correlation) — an isolated module with synthetic unit tests and a single contract (`contracts/models.py`), making it a convenient task for Codex. Evidence: links to Codex tasks/PRs, screenshots, and `docs/codex-log.md` ("task → what Codex did → what we fixed"), maintained as we go. In the submission, we state honestly who wrote what.
+**Current status:** we are writing code with Claude and are not listing Codex in the preliminary submission. If we adopt it later (decide no later than Sat 11:00), we will maintain `docs/codex-log.md` from that point on. Otherwise, it stays out of the submission. We do not write logs retroactively.
 
 ## 5. Oxylabs · ❌ CUT
-Вдвоём не тянем, а приз за «Best *agentic* usecase» с одним гео-`/search` — шансы низкие. Подписку не активируем, поэтому и отменять нечего.
+As a team of two we cannot stretch to cover it, and for the "Best *agentic* usecase" prize with a single geo-`/search`, our chances are low. We are not activating the subscription, so there is nothing to cancel.
 
-## 6. Остальной CUT (не берём)
-- **Gemma.** EmbeddingGemma на CPU — лишняя интеграция, эмбеддинги уже даёт Gemini.
-- **Nemotron.** Силён в картинках и видео, а у нас текст.
-- **Modal / Verda.** Им нужно, чтобы GPU был центральным. Нам GPU не нужен.
-- **Aiven.** Postgres в Docker на VPS проще и держит всё на Hostinger.
-- **CRACI.** CI на их раннере не добавляет ничего к детекции, а судят глубину интеграции.
+## 6. Remaining CUT items (not using)
+- **Gemma.** EmbeddingGemma on CPU is an unnecessary integration since Gemini already provides embeddings.
+- **Nemotron.** Strong on images and video, whereas we work with text.
+- **Modal / Verda.** They require the GPU to be central. We do not need a GPU.
+- **Aiven.** Postgres in Docker on the VPS is simpler and keeps everything on Hostinger.
+- **CRACI.** CI on their runner adds nothing to detection, and judging is based on depth of integration.
 
-Полный канонический список CUT: [architecture.md](architecture.md#объём-must--should--cut).
+Full canonical CUT list: [architecture.md](architecture.md#scope-must--should--cut).

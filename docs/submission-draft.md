@@ -1,9 +1,9 @@
-# Драфт сабмита v4 · Live Swarm Radar · The Kerfufflers
-## Основной: Decode the Noise (Hostinger) · тех: Context.dev, Gemini (Codex: возможно позже, пока не используем) · идея: обработка сигналов
+# Submission Draft v4 · Live Swarm Radar · The Kerfufflers
+## Main: Decode the Noise (Hostinger) · tech: Context.dev, Gemini (Codex: maybe later, not using yet) · idea: signal processing
 
-*Объём урезан до ядра, см. [architecture.md](architecture.md). Нас двое; preliminary (T3) и финальный текст (T17) ведёт P2 «Мозг». Правило: в финальном тексте только то, что реально работает в демо.*
+*Scope is cut down to the core, see [architecture.md](architecture.md). There are two of us. P2 "Brain" handles the preliminary (T3) and final text (T17). Rule: the final text only includes what actually works in the demo.*
 
-# ⏰ БЛОК ДЛЯ PRELIMINARY SUBMISSION (T3, до Пт 23:59), копировать как есть
+# ⏰ BLOCK FOR PRELIMINARY SUBMISSION (T3, by Fri 23:59), copy as is
 
 **Project Name:** `Live Swarm Radar`
 
@@ -14,22 +14,22 @@ Bots whisper below the noise floor. Live Swarm Radar is a spread-spectrum receiv
 
 **Challenge Picker:** `Decode the Noise`
 
-**Description (короткая версия, 640 символов):**
+**Description (short version, 640 characters):**
 ```markdown
 Propaganda campaigns behave like a spread-spectrum signal: each bot account is too weak to flag alone, but together they carry one message. **Live Swarm Radar** applies radar and signal-processing math to the live web: matched filters find a narrative even when reworded, cross-correlation of account activity "despreads" hidden swarms, a CFAR threshold raises alerts, and a sequential likelihood-ratio test (SPRT) decides "coordinated / organic / keep watching" at a false-alarm rate we choose. Every verdict is explained in plain language with evidence and sources. Live web data comes from Context.dev; the system runs live on Hostinger.
 ```
 
-**Source Code:** ссылка на GitHub-репо (можно пустой)
+**Source Code:** link to GitHub repo (can be empty)
 
-**Tech Challenges (отметить сейчас, можно поменять до вс 10:00):** Best Use of Context.dev: Fully Structured Web · Best Use of Gemini API
-*Codex пока не отмечаем: код пишем с Claude; отметим, только если подключим позже и будет лог. Oxylabs не отмечаем (CUT).*
+**Tech Challenges (select now, can be changed until Sun 10:00):** Best Use of Context.dev: Fully Structured Web · Best Use of Gemini API
+*Not selecting Codex yet: we are writing code with Claude. We will select it only if we connect it later and have a log. Not selecting Oxylabs (CUT).*
 
 ---
 
-# ФИНАЛЬНАЯ ВЕРСИЯ (до вс 10:00)
+# FINAL VERSION (by Sun 10:00)
 
-## Description (~4599/5000 с пометками [SHOULD] / [ONLY IF TRUE], markdown), заменить короткую на эту
-*`[скобки]` заменить реальными цифрами, ничего не выдумывать. Строку или фрагмент с пометкой `[SHOULD]` (Source Trust, S1) / `[ONLY IF TRUE]` (Codex) удалить, если это не работает вживую; иначе убрать саму пометку. Замена `[ALT]` — сразу под блоком.*
+## Description (~4599/5000 with [SHOULD] / [ONLY IF TRUE] tags, markdown), replace the short one with this
+*Replace `[brackets]` with real numbers, do not invent anything. Delete any line or fragment tagged `[SHOULD]` (Source Trust, S1) / `[ONLY IF TRUE]` (Codex) if it does not work live. Otherwise, remove the tag itself. The `[ALT]` replacement is right below the block.*
 ```markdown
 ## The idea: propaganda is a signal hidden in noise
 In radio, a spread-spectrum (CDMA) signal sits **below the noise floor**: no single sample stands out, but a receiver that knows the code adds the pieces coherently and the signal rises out of the noise.
@@ -56,7 +56,7 @@ We report detection the way radar engineers do:
 Current results: **detection [X]% of injected campaigns at [Pfa]%; live FPR [Z], precision [P] (95% interval [lo–hi])** on the labelled set. Known failure cases are listed on the metrics page. When evidence is weak, the verdict stays *"keep watching"* instead of accusing a real person. The detector has no template bank and is never trained on the synthetic campaigns, so the scores are not circular. Precision is reported only on hand-labelled live accounts, because on synthetic tests it depends on how often we inject.
 
 ## Explainable verdicts
-Each alert shows the evidence a human can check in seconds: the correlated accounts and their timing, the reworded posts that matched, the quoted key phrase, the source data, and an ambiguity map (time lag × semantic mismatch) where a coordinated group shows up as one sharp peak; the SNR and the SPRT trace showing when the decision was made sit on a details tab.
+Each alert shows the evidence a human can check in seconds: the correlated accounts and their timing, the reworded posts that matched, the quoted key phrase, the source data, and an ambiguity map (time delay × semantic mismatch) where a coordinated group shows up as one sharp peak; the SNR and the SPRT trace showing when the decision was made sit on a details tab.
 
 ## Deployed live on Hostinger
 Docker Compose on a Hostinger VPS with a public HTTPS domain: FastAPI, a detector worker and Postgres. The worker polls Context.dev every few minutes, so alerts follow the live web. Gemini is the main model, with Hostinger AI Router as a fallback. Public dashboard and REST API.
@@ -77,41 +77,41 @@ Fact-checking with source fusion, cross-country geo echo, change watch for silen
 *Team The Kerfufflers · Junction 2026*
 ```
 
-**[ALT] — только если на VPS остаётся `BLUESKY_ENABLED=0` (T6b, Bluesky выключен):** заменить в пункте Context.dev предложение «Social posts … same topics.» на *"News search gives fresh articles with authors and timestamps, which become the activity codes for despreading."* И добавить в «Honest, measurable detection»: *"Swarm detection is demonstrated on injected synthetic accounts; in the live stream, 'accounts' are news authors and domains."*
+**[ALT] — only if `BLUESKY_ENABLED=0` remains on the VPS (T6b, Bluesky disabled):** in the Context.dev item, replace the sentence "Social posts … same topics." with *"News search gives fresh articles with authors and timestamps, which become the activity codes for despreading."* And add to "Honest, measurable detection": *"Swarm detection is demonstrated on injected synthetic accounts; in the live stream, 'accounts' are news authors and domains."*
 
-## Как текст закрывает критерии Hostinger
-| Критерий | Вес | Где |
+## How the text covers Hostinger criteria
+| Criterion | Weight | Where |
 |---|---|---|
-| Качество детекции: точность, FP, объяснимость | 40% | «Honest, measurable detection» (ROC, Neyman–Pearson, инжекция цели), «keep watching», «Explainable verdicts» |
-| Техника + живой деплой на Hostinger | 25% | «Deployed live on Hostinger» + Demo link |
-| Оригинальность и эффект | 20% | Вся радарная рамка: CDMA-деспрединг, CFAR, SPRT |
-| Ясность демо | 15% | Видео ниже |
+| Detection quality: accuracy, FP, explainability | 40% | "Honest, measurable detection" (ROC, Neyman–Pearson, target injection), "keep watching", "Explainable verdicts" |
+| Tech + live deployment on Hostinger | 25% | "Deployed live on Hostinger" + Demo link |
+| Originality and impact | 20% | The entire radar framing: CDMA despreading, CFAR, SPRT |
+| Demo clarity | 15% | Video below |
 
-## Ссылки
-| Поле | Что вставить |
+## Links
+| Field | What to insert |
 |---|---|
-| Project Demo | `https://[домен-hostinger]` (**обязательно Hostinger**) |
+| Project Demo | `https://[hostinger-domain]` (**must be Hostinger**) |
 | Source Code | `https://github.com/[org]/live-truth-radar` |
-| Video | YouTube или Loom, ~2 мин |
-| Other Link | `https://[домен]/metrics`: ROC и латентность |
+| Video | YouTube or Loom, ~2 min |
+| Other Link | `https://[domain]/metrics`: ROC and latency |
 
-## Видео (2 мин)
-| Время | Кадр |
+## Video (2 min)
+| Time | Shot |
 |---|---|
-| 0:00–0:15 | «Боты шепчут ниже уровня шума»: поодиночке аккаунты не видны |
-| 0:15–0:50 | Инжекция тестовой кампании в живой поток → на карте «задержка × смысловая расстройка» вырастает острый пик → SNR из [x] дБ (одна пара) в [y] дБ (весь рой) (реальные числа из демо) |
-| 0:50–1:10 | SPRT-трасса: решение «coordinated» на [k]-м посте |
-| 1:10–1:30 | Карточка: приём манипуляции с подсветкой фраз (+ источник, если S1 сделан) |
-| 1:30–1:50 | ROC-кривая и рабочая точка |
-| 1:50–2:00 | Hostinger + Context.dev + Gemini, что дальше |
+| 0:00–0:15 | "Bots whisper below the noise floor": individual accounts are invisible |
+| 0:15–0:50 | Injecting a test campaign into the live stream → a sharp peak grows on the "delay × semantic detuning" map → SNR from [x] dB (single pair) to [y] dB (entire swarm) (real numbers from the demo) |
+| 0:50–1:10 | SPRT trace: "coordinated" decision on post [k] |
+| 1:10–1:30 | Card: manipulation technique with highlighted phrases (+ source, if S1 is done) |
+| 1:30–1:50 | ROC curve and operating point |
+| 1:50–2:00 | Hostinger + Context.dev + Gemini, what's next |
 
-## Презентация (7 слайдов)
-1. Пропаганда = сигнал под уровнем шума. 2. Приёмная цепочка. 3. Деспрединг роя (SNR). 4. SPRT и CFAR: рано и с заданной ложной тревогой. 5. ROC + инжекция цели. 6. Архитектура на Hostinger + партнёры. 7. Кому и что дальше.
+## Presentation (7 slides)
+1. Propaganda = signal below the noise floor. 2. Receiver chain. 3. Swarm despreading (SNR). 4. SPRT and CFAR: early and with a target false-alarm rate. 5. ROC + target injection. 6. Architecture on Hostinger + partners. 7. Who it's for and what's next.
 
-## Тех-челленджи
-| Тех-челлендж | Условие зачёта | Статус |
+## Tech Challenges
+| Tech Challenge | Eligibility requirement | Status |
 |---|---|---|
-| ✅ Context.dev | ≥1 эндпоинт в ядре + заметка «какие и зачем» (в описании + README-раздел, T17) | MUST, ядро |
-| ✅ Gemini | Почему важен (в описании) | MUST |
-| ◐ Codex | Ссылки на задачи/PR, скрины, `docs/codex-log.md` (ведёт P2 по ходу) | Возможно позже: пока код пишем с Claude; отмечаем только при реальном использовании |
-| ❌ Oxylabs, Gemma, Nemotron, Modal / Verda, Aiven, CRACI | — | CUT (см. [architecture.md](architecture.md#объём-must--should--cut)) |
+| ✅ Context.dev | ≥1 endpoint in the core + a note on "which ones and why" (in the description + README section, T17) | MUST, core |
+| ✅ Gemini | Why it matters (in the description) | MUST |
+| ◐ Codex | Links to issues/PRs, screenshots, `docs/codex-log.md` (maintained by P2 along the way) | Maybe later: writing code with Claude for now. Only select if actually used |
+| ❌ Oxylabs, Gemma, Nemotron, Modal / Verda, Aiven, CRACI | — | CUT (see [architecture.md](architecture.md#scope-must--should--cut)) |

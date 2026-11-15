@@ -1,174 +1,174 @@
-# Workflow: как мы работаем вдвоём с агентами
+# Workflow: how the two of us work with agents
 
-*Коротко и практично. Карточки задач: [tasks.md](tasks.md). План и сроки: [HANDOFF.md](HANDOFF.md). Все времена: Europe/Helsinki.*
+*Short and practical. Task cards: [tasks.md](tasks.md). Plan and schedule: [HANDOFF.md](HANDOFF.md). All times: Europe/Helsinki.*
 
-## 1. Разделение P1 / P2 и почему так
+## 1. The P1 / P2 split and why
 
-| Кто | Роль | Папки | Инструмент |
+| Who | Role | Folders | Tool |
 |---|---|---|---|
-| **P1 «Труба»** | Context.dev ingest, Postgres, Docker Compose, деплой на Hostinger (caddy HTTPS), FastAPI, объяснения Gemini, дашборд, smoke | `ingest/ api/ web/ infra/` | Claude Code |
-| **P2 «Мозг»** | Эмбеддинги Gemini, луч на тему + отбеливание, коррелятор пар аккаунтов, CFAR, SPRT, генератор синтетического роя, eval (ROC, метрики) | `detect/ synth/ eval/` | Claude Code (Codex — возможно позже) |
+| **P1 "Pipe"** | Context.dev ingest, Postgres, Docker Compose, Hostinger deployment (caddy HTTPS), FastAPI, Gemini explanations, dashboard, smoke | `ingest/ api/ web/ infra/` | Claude Code |
+| **P2 "Brain"** | Gemini embeddings, topic beam + whitening, account-pair correlator, CFAR, SPRT, synthetic swarm generator, eval (ROC, metrics) | `detect/ synth/ eval/` | Claude Code (Codex — possibly later) |
 
-Делим **по слоям**, а не по фичам, потому что между слоями ровно **одна граница**:
-- **Контракт** `contracts/models.py` (`Item`, `Finding`, `Explanation`, `AlertsResponse`, `MetricsReport`) + функция `detect.pipeline.detect(items) -> list[Finding]`. Пока контракт не меняется, мы не мешаем друг другу.
-- **Фикстуры** `fixtures/items.json` и `fixtures/findings.json`: P2 работает полностью офлайн (без сети, без БД), P1 показывает данные, не дожидаясь детектора.
-- **Mock-детектор** у P1 возвращает `fixtures/findings.json`. На интеграции I1 (сб 15:00) он заменяется настоящим `detect()` одной строкой.
+We split **by layer**, not by feature, because there is exactly **one boundary** between layers:
+- **Contract** `contracts/models.py` (`Item`, `Finding`, `Explanation`, `AlertsResponse`, `MetricsReport`) + function `detect.pipeline.detect(items) -> list[Finding]`. As long as the contract does not change, we stay out of each other's way.
+- **Fixtures** `fixtures/items.json` and `fixtures/findings.json`: P2 runs completely offline (no network, no DB), and P1 displays data without waiting for the detector.
+- **Mock detector** in P1 returns `fixtures/findings.json`. At I1 integration (Sat 15:00), it is replaced with the real `detect()` in a single line.
 
-Итог: до I1 никто никого не ждёт, а интеграция = «поменять импорт и проверить на живых данных».
+Result: before I1, nobody waits on anyone, and integration = "swap the import and check on live data".
 
-## 2. T0 — кикофф (45 мин, до пт 22:00)
+## 2. T0 — kickoff (45 min, by Fri 22:00)
 
-- [ ] Оба прочитали `CLAUDE.md` и пробежали `docs/tasks.md` (свои карточки).
-- [ ] Вместе прошли `contracts/models.py`: поля понятны, ничего не забыто. Это последний момент, когда контракт меняется свободно.
-- [ ] `make test` зелёный у обоих; фикстуры парсятся в модели.
-- [ ] Выбрали 3–5 тем для поллинга (живые, спорные, с соцсетями), записали в `.env.example` / HANDOFF.
-- [ ] Codex пока не используем (пишем с Claude). Если позже подключим — с первой же задачи ведём `docs/codex-log.md`.
-- [ ] Подтвердили интерфейсы вне контракта (список в HANDOFF §5, в tasks.md помечены ⚙): генератор кампании для `/api/inject`, `eval/report.json` для `/api/metrics`, `eval/labels.csv`, `/api/source/{domain}`.
-- [ ] Тиммейт добавлен в GitHub-репозиторий, оба могут пушить ветки.
-- [ ] Договорились о канале связи и о точках синхронизации (§5).
+- [ ] Both read `CLAUDE.md` and skimmed `docs/tasks.md` (our own cards).
+- [ ] Walked through `contracts/models.py` together: the fields are clear and nothing is missing. This is the last point when the contract can change freely.
+- [ ] `make test` is green for both. Fixtures parse into the models.
+- [ ] Chose 3–5 topics for polling (active, controversial, with social media) and recorded them in `.env.example` / HANDOFF.
+- [ ] Not using Codex yet (writing with Claude). If we bring it in later, we maintain `docs/codex-log.md` starting from the very first task.
+- [ ] Confirmed interfaces outside the contract (listed in HANDOFF §5, marked ⚙ in tasks.md): campaign generator for `/api/inject`, `eval/report.json` for `/api/metrics`, `eval/labels.csv`, `/api/source/{domain}`.
+- [ ] Teammate added to the GitHub repository, and both can push branches.
+- [ ] Agreed on the communication channel and sync points (§5).
 
-## 3. Цикл одной задачи
+## 3. Single-task cycle
 
-1. **Свежий контекст**: `/clear` (новая сессия) на каждую задачу. Не тащим хвост прошлой задачи.
-2. **Старт**: промпт-шаблон из §10. Агент читает `CLAUDE.md`, свою карточку и только нужные файлы.
-3. **Plan mode**: агент пишет план: какие файлы, какие функции, какой тест, как проверить «Готово, когда».
-4. **Ревью плана человеком (2–3 мин)**: не тот файл? лезет в чужую папку? меняет контракт? делает CUT-фичу? Поправить до кода.
-5. **Реализация** (имплементатор = основной агент) + `make test` зелёный (на красном петлю не начинаем).
-6. **Петля проверки**: максимум 3 раунда проверки и 2 раунда исправлений (подробно ниже).
-7. **Проверка человеком**: ручная проверка пункта «Готово, когда» из карточки (запустить, посмотреть, `make smoke` после деплоя), плюс всё, что верификаторы вынесли в `UNVERIFIED`.
-8. **Маленький PR в main**. Коммит делает основной агент после шага 7 и только по слову человека; субагенты не коммитят. Свои папки мержим без кросс-ревью; `contracts/` только вдвоём. В описании PR: сколько раундов проверки прошло и что осталось открытым.
+1. **Fresh context**: `/clear` (new session) for each task. Do not drag in the tail of the previous task.
+2. **Start**: prompt template from §10. The agent reads `CLAUDE.md`, its own card, and only the needed files.
+3. **Plan mode**: the agent writes a plan: which files, which functions, which test, and how to verify "Done when".
+4. **Human plan review (2–3 min)**: wrong file? touching someone else's folder? changing the contract? building a CUT feature? Fix before coding.
+5. **Implementation** (implementer = main agent) + `make test` green (never start the loop on red).
+6. **Verification loop**: at most 3 verification rounds and 2 fix rounds (details below).
+7. **Human verification**: manual check of the "Done when" item from the card (run, inspect, `make smoke` after deploy), plus everything the verifiers put in `UNVERIFIED`.
+8. **Small PR into main**. The main agent makes the commit after step 7 and only on the human's say-so. Subagents do not commit. We merge our own folders without cross-review, and `contracts/` only with both of us. In the PR description: how many verification rounds ran and what remains open.
 
-### Петля «реализация → проверка → исправление»
-Субагенты `verifier` и `analyzer` описаны в `.claude/agents/`; имплементатор и дирижёр петли = основной агент.
-- **Верификаторы** (`verifier`, только чтение, ничего не правят и не запускают того, что пишет в репо, ходит в сеть или деплоит): два запуска параллельно с разным фокусом.
-  - `logic` = правильность кода. Для `detect/ synth/ eval/`: математика против [signal-processing.md §3](signal-processing.md) и крайние случаи (пустой вход, один аккаунт, нулевой разброс). Для `ingest/ api/ web/ infra/`: схема БД, запросы, обработка ошибок, конфигурация compose/caddy.
-  - `fit` = пункты «Готово, когда», контракт, качество тестов, чужие папки, секреты, скорость.
-  - Каждый баг подтверждается запуском или точной цитатой строк, а не догадкой. Что проверить офлайн нельзя (Docker, VPS, сеть, `make eval`), идёт в раздел `UNVERIFIED` с командой для человека и на вердикт не влияет.
-  - Итог: `PASS` или `FAIL` и список находок.
-- **Анализатор** (`analyzer`, запускается один, когда верификаторы закончили): получает находки, каждую воспроизводит, отклоняет ложные с причиной, для настоящих пишет падающий тест и чинит первопричину. Тесты не ослабляет и не удаляет, `contracts/` и чужие папки не трогает.
+### The "implement → verify → fix" loop
+Subagents `verifier` and `analyzer` are described in `.claude/agents/`. The implementer and loop conductor is the main agent.
+- **Verifiers** (`verifier`, read-only, edit nothing and run nothing that writes to the repo, accesses the network, or deploys): two parallel runs with different focuses.
+  - `logic` = code correctness. For `detect/ synth/ eval/`: math against [signal-processing.md §3](signal-processing.md) and edge cases (empty input, single account, zero variance). For `ingest/ api/ web/ infra/`: DB schema, queries, error handling, compose/caddy configuration.
+  - `fit` = "Done when" items, contract, test quality, others' folders, secrets, speed.
+  - Every bug is confirmed by a run or an exact line quote, not a guess. Anything that cannot be verified offline (Docker, VPS, network, `make eval`) goes into the `UNVERIFIED` section with a command for the human and does not affect the verdict.
+  - Outcome: `PASS` or `FAIL` and a list of findings.
+- **Analyzer** (`analyzer`, runs alone after the verifiers finish): receives the findings, reproduces each one, rejects false positives with a reason, and for real ones writes a failing test and fixes the root cause. Does not weaken or delete tests, and does not touch `contracts/` or others' folders.
 
-**Серьёзность** (одинаково везде):
-- `BLOCKER` = доказанный неверный результат, падение, невыполненный пункт «Готово, когда», красный `make test`, секрет или реальный хэндл в дифе, изменённый без согласования контракт или чужая папка, сеть в тестах.
-- `SHOULD-FIX` = доказанный дефект, который проявляется только вне сценария «Готово, когда», либо отсутствующий или бессодержательный тест из карточки.
-- `NIT` = всё остальное. На вердикт не влияет и петлю не запускает; основной агент передаёт анализатору только однострочные NIT.
-- `FAIL` = есть хотя бы один `BLOCKER` или `SHOULD-FIX`. При сомнении между двумя уровнями берётся нижний.
+**Severity** (same everywhere):
+- `BLOCKER` = proven wrong result, crash, unmet "Done when" item, red `make test`, secret or real handle in the diff, unapproved change to the contract or someone else's folder, or network calls in tests.
+- `SHOULD-FIX` = proven defect that only manifests outside the "Done when" scenario, or a missing or vacuous test from the card.
+- `NIT` = everything else. Does not affect the verdict and does not trigger the loop. The main agent passes only single-line NITs to the analyzer.
+- `FAIL` = there is at least one `BLOCKER` or `SHOULD-FIX`. When in doubt between two severity levels, choose the lower one.
 
-**«Диф задачи»** = рабочее дерево против merge-base с `origin/main`, включая незакоммиченное и новые файлы: `git diff $(git merge-base origin/main HEAD)` + `git ls-files --others --exclude-standard`. Перед петлёй основной агент делает `git fetch origin main`. Каждый раунд проверяется **весь** диф задачи заново, а не только последние правки: исправление может сломать соседнее.
+**"Task diff"** = working tree against merge-base with `origin/main`, including uncommitted changes and new files: `git diff $(git merge-base origin/main HEAD)` + `git ls-files --others --exclude-standard`. Before the loop, the main agent runs `git fetch origin main`. Each round checks the **entire** task diff anew, not just the latest edits, because a fix can break something adjacent.
 
-**Алгоритм** (итерация = один раунд проверки):
+**Algorithm** (iteration = one verification round):
 ```
-раунд = 1
-повторять:
-    make test красный → чинит тот, кто правил последним; на красном верификаторов не запускаем
-    верификаторы проверяют весь диф задачи
-    основной агент сливает отчёты
-    если нет BLOCKER и SHOULD-FIX (кроме помеченных «решает человек») → выход: готово
-    если раунд == 3 → стоп: список человеку (чинить, упростить или вырезать); анализатор не запускаем
-    анализатор разбирает находки и чинит, make test
-    раунд += 1
+round = 1
+repeat:
+    if make test fails → the last editor fixes it before any verifiers run
+    verifiers review the entire task diff
+    the main agent consolidates the reports
+    if no BLOCKER or SHOULD-FIX remains (except findings marked "human decides") → done
+    if round == 3 → stop and give the human the list to fix, simplify, or cut. Skip the analyzer.
+    the analyzer reviews and fixes findings, then runs make test
+    round += 1
 ```
-Третье исправление не делается: непроверенный код из петли не выходит.
+A third fix is not made: unverified code never leaves the loop.
 
-**Что передаётся между агентами:**
-- Верификатору: id задачи, владелец (P1/P2), номер раунда, фокус, список находок, отклонённых или отданных человеку в прошлых раундах (с причинами).
-- Слияние отчётов делает основной агент: одно место (`file:line`) и одна причина = одна находка с наибольшей серьёзностью; итог раунда `FAIL`, если `FAIL` хотя бы у одного верификатора. Находки получают номера `R<раунд>-<n>`.
-- Анализатору: id задачи, владелец, номер раунда, слитый список находок с номерами.
-- Анализатор возвращает по каждой находке: «исправлено» / «отклонено» (с причиной) / «решает человек».
-- Отклонённую находку верификатор может повторить только с новым воспроизведением, которое опровергает причину отказа. Второй отказ по той же находке = спор: идёт человеку и на вердикт больше не влияет. Если верификаторы противоречат друг другу, решает воспроизведение у анализатора; если это вопрос дизайна, решает человек.
-- «Решает человек» (нужно решение по дизайну или контракту, либо правка вне своих папок): анализатор находку не трогает, основной агент сразу сообщает о ней человеку, петля продолжается по остальным. На вердикт следующих раундов она не влияет, но задача не считается готовой, пока человек не решил.
+**What is passed between agents:**
+- To the verifier: task ID, owner (P1/P2), round number, focus, and list of findings rejected or handed off to a human in previous rounds (with reasons).
+- The main agent merges the reports: same location (`file:line`) and same cause = one finding with the highest severity. The round result is `FAIL` if at least one verifier reports `FAIL`. Findings are numbered `R<round>-<n>`.
+- To the analyzer: task ID, owner, round number, and the merged, numbered list of findings.
+- For each finding, the analyzer returns: "fixed" / "rejected" (with a reason) / "human decides".
+- A verifier can only resubmit a rejected finding with a new reproduction that refutes the reason for rejection. A second rejection on the same finding = dispute: it goes to a human and no longer affects the verdict. If verifiers contradict each other, the analyzer's reproduction decides. If it is a design question, a human decides.
+- "Human decides" (a design or contract decision is needed, or an edit outside one's own folders): the analyzer leaves the finding untouched, the main agent reports it to a human immediately, and the loop continues with the rest. It does not affect the verdict of subsequent rounds, but the task is not considered done until the human decides.
 
-**Объём петли** (экономим лимиты):
-| Что в дифе | Петля |
+**Loop scope** (saving limits):
+| What's in the diff | Loop |
 |---|---|
-| `detect/`, `synth/`, `eval/`, `ingest/`, `api/`, `infra/` (схема БД, compose, caddy), `contracts/` | Полная: два верификатора |
-| Только `web/`, только `tests/`, `Makefile`, или меньше ~30 строк кода | Один верификатор с фокусом `both` |
-| Только `docs/` и `*.md` | Без петли |
+| `detect/`, `synth/`, `eval/`, `ingest/`, `api/`, `infra/` (DB schema, compose, caddy), `contracts/` | Full: two verifiers |
+| Only `web/`, only `tests/`, `Makefile`, or fewer than ~30 lines of code | One verifier focused on `both` |
+| Only `docs/` and `*.md` | No loop |
 
-Правила остановки одинаковые. Субагенты петли не входят в лимит «1–2 агента на человека» (§4): верификаторы только читают и работают в том же worktree.
+The stopping rules are the same. Loop subagents do not count toward the "1–2 agents per person" limit (§4): verifiers are read-only and work in the same worktree.
 
-**В конце основной агент показывает человеку:** сколько раундов проверки прошло; таблицу находок (номер, серьёзность, исправлено / отклонено с причиной / решает человек / открыто); список `UNVERIFIED` с командами для ручной проверки; последнюю строку `make test`.
+**At the end, the main agent shows the human:** how many verification rounds ran, the findings table (number, severity, fixed / rejected with reason / human decides / open), the `UNVERIFIED` list with commands for manual verification, and the last line of `make test` output.
 
-*Пример:* T10. Имплементатор написал коррелятор. Раунд 1: верификатор `logic` нашёл `R1-1 BLOCKER`: «лаг считается с обратным знаком, на входе бот 2 позже бота 1 на 80 с, на выходе −80». Анализатор добавил тест на знак лага, исправил, `make test` зелёный. Раунд 2: оба верификатора `PASS`. В PR пишем «петля: 2 раунда проверки, 1 исправление, открытых находок нет».
+*Example:* T10. The implementer wrote the correlator. Round 1: verifier `logic` found `R1-1 BLOCKER`: "the lag is computed with the opposite sign; in the input, bot 2 is 80 s after bot 1, and the output is −80". The analyzer added a test for the lag sign, fixed it, and `make test` is green. Round 2: both verifiers report `PASS`. In the PR, we write "loop: 2 verification rounds, 1 fix, no open findings".
 
 ## 4. Git
 
-- Ветки: `p1/<task-id>-slug`, `p2/<task-id>-slug` (например, `p1/T4-compose-skeleton`, `p2/T10-cfar-sprt`).
-- Максимум 1–2 агента на человека. Параллельные агенты одного человека: отдельные **git worktree** (`git worktree add ../ltr-T9 -b p2/T9-synth`), иначе они перетирают файлы друг друга.
-- Мерж в `main` каждые 1–2 часа маленькими PR. `main` всегда должен проходить `make test`.
-- В коммитах и PR не пишем названия моделей. Сообщения коммитов на английском.
-- **Протокол изменения контракта** (`contracts/models.py`):
-  1. Кто хочет изменить, пишет второму: что, зачем, обратно совместимо ли (новое поле с дефолтом — почти всегда ок).
-  2. Оба согласны → одна ветка `contract/<slug>`, правка модели + фикстур + `tests/test_contracts.py` в одном PR.
-  3. Оба делают rebase на main сразу после мержа.
-  4. Удаление/переименование полей после I1 — только если без этого демо не работает.
+- Branches: `p1/<task-id>-slug`, `p2/<task-id>-slug` (for example, `p1/T4-compose-skeleton`, `p2/T10-cfar-sprt`).
+- Maximum 1–2 agents per person. Parallel agents for the same person: use separate **git worktree**s (`git worktree add ../ltr-T9 -b p2/T9-synth`), otherwise they overwrite each other's files.
+- Merge into `main` every 1–2 hours in small PRs. `main` must always pass `make test`.
+- Do not mention model names in commits or PRs. Commit messages must be in English.
+- **Contract change protocol** (`contracts/models.py`):
+  1. Whoever wants to make a change messages the other person: what, why, and whether it is backward-compatible (a new field with a default is almost always OK).
+  2. Both agree → one `contract/<slug>` branch, editing the model + fixtures + `tests/test_contracts.py` in a single PR.
+  3. Both rebase onto main immediately after the merge.
+  4. Deleting/renaming fields after I1 — only if the demo does not work without it.
 
-## 5. Точки синхронизации (по 10 минут)
+## 5. Sync checkpoints (10 minutes each)
 
-Сб 04:30 (до сна P1) · Сб 11:00 · **I1 Сб 15:00** · Сб 19:00 · Вс 01:00.
+Sat 04:30 (before P1's sleep) · Sat 11:00 · **I1 Sat 15:00** · Sat 19:00 · Sun 01:00.
 
-Чек-лист на 10 минут:
-- [ ] Оба смержили готовое в `main`, `make test` зелёный на main.
-- [ ] Задеплоили `main` на VPS, `make smoke URL=https://<домен>` проходит.
-- [ ] Цепочка вживую: ingest пишет items → детектор (mock или настоящий) → `/api/alerts` → дашборд.
-- [ ] Сверили статус по tasks.md: что готово, что отстаёт (§8).
-- [ ] Нужны ли изменения контракта? Если да, по протоколу §4.
-- [ ] Следующие 1–2 задачи каждого и время следующей синхронизации.
+10-minute checklist:
+- [ ] Both merged completed work into `main`, and `make test` is green on main.
+- [ ] Deployed `main` to the VPS, and `make smoke URL=https://<domain>` passes.
+- [ ] Live chain: ingest writes items → detector (mock or real) → `/api/alerts` → dashboard.
+- [ ] Checked status against tasks.md: what is done, what is behind schedule (§9).
+- [ ] Are any contract changes needed? If yes, follow the protocol in §4.
+- [ ] Each person's next 1–2 tasks and the time of the next sync.
 
-## 6. Тестирование (минимум, но обязательный)
+## 6. Testing (minimal, but mandatory)
 
-**Тестируем:**
-- `detect/`: юнит-тесты на синтетике по карточкам (T7: 3, T10: 6–8), весь `make test` < 5 с: лаговая пара → пик корреляции на нужном лаге; независимые случайные аккаунты → нет тревоги; SPRT пересекает верхний порог на известной последовательности LLR и нижний на органике; CFAR молчит на ровном фоне и срабатывает на всплеске.
-- Контракт: фикстуры парсятся в модели (2–3 теста, `tests/test_contracts.py`).
-- `tests/smoke.py`: живые `/health` и `/api/alerts`, проверка схемы. После каждого деплоя.
+**We test:**
+- `detect/`: synthetic unit tests per task card (T7: 3, T10: 6–8), entire `make test` < 5 s: lagged pair → correlation peak at the expected lag; independent random accounts → no alert; SPRT crosses the upper threshold on a known LLR sequence and the lower threshold on organic data; CFAR stays silent on a flat background and triggers on a spike.
+- Contract: fixtures parse into models (2–3 tests, `tests/test_contracts.py`).
+- `tests/smoke.py`: live `/health` and `/api/alerts`, schema check. After every deploy.
 
-**Не тестируем:** UI, моки Context.dev/Gemini (кроме pydantic-валидации ответов), покрытие. В `make test` нет сети: всё, что ходит в Gemini/Context.dev, за флагом или с кэшем.
+**We don't test:** UI, Context.dev/Gemini mocks (except Pydantic response validation), or coverage. There is no network access in `make test`: everything that calls Gemini/Context.dev is behind a flag or cached.
 
-## 7. Экономия лимитов
+## 7. Saving limits
 
-- Лимиты сжигают не тесты, а **перечитывание больших доков**. Агент читает `CLAUDE.md` + карточку + нужные файлы, а не весь `docs/`.
-- Одна задача = одна сессия. `/clear` между задачами.
-- Карточки маленькие; если задача не влезает в один план, режем её на две.
-- Не просить «улучшить всё»: только «Готово, когда» из карточки.
-- Ответы Context.dev и Gemini кэшируем на диск/в БД: повторный запрос стоит тех же кредитов.
-- Длинные логи не вставлять в чат целиком: последние 30 строк или grep по ошибке.
+- What burns through limits is not tests, but **re-reading large docs**. The agent reads `CLAUDE.md` + the task card + the needed files, not the entire `docs/`.
+- One task = one session. `/clear` between tasks.
+- Task cards are small. If a task does not fit into a single plan, we split it into two.
+- Do not ask to "improve everything": only the "Done when" criteria from the card.
+- Cache Context.dev and Gemini responses to disk/DB: a repeated request costs the same credits.
+- Do not paste entire long logs into the chat: only the last 30 lines or a grep for the error.
 
-## 8. Codex у P2 и `docs/codex-log.md`
+## 8. Codex for P2 and `docs/codex-log.md`
 
-Сейчас не используем: код пишем с Claude. Раздел на случай, если подключим позже и P2 действительно будет писать `detect/` (и/или `synth/`, `eval/`) в Codex. Это честный путь на тех-челлендж Codex; если Codex не использовали, лог не пишем и Codex не заявляем.
+Not currently in use: we write code with Claude. This section is in case we bring it in later and P2 actually writes `detect/` (and/or `synth/`, `eval/`) in Codex. That is the honest path for the Codex tech challenge. If we did not use Codex, we do not write a log and do not claim Codex.
 
-Формат записи (одна на задачу, коротко, честно, включая неудачи):
+Entry format (one per task, brief, honest, including failures):
 
 ```markdown
-## T10 · CFAR + SPRT · сб 13:40
-- Задача: что просили у Codex (1–2 строки).
-- Что сделал Codex: файлы/функции, сколько итераций.
-- Что мы исправили руками: ошибки, что пришлось переписать и почему.
-- Итог: тесты зелёные? в main?
+## T10 · CFAR + SPRT · Sat 13:40
+- Task: what was asked of Codex (1–2 lines).
+- What Codex did: files/functions, how many iterations.
+- What we fixed manually: errors, what had to be rewritten and why.
+- Outcome: are tests green? in main?
 ```
 
-## 9. Если отстаём
+## 9. If we fall behind
 
-- **Чекпоинт сб 14:00 (T10):** детектор должен находить синтетический рой в фикстурах. Если нет → **S1 вырезаем**, P1 после T8/T11 помогает P2 (интеграция, eval, отладка на живых данных). Математику упрощаем: сначала рабочий коррелятор пар + SPRT, CFAR можно заменить фиксированным порогом на `R_ij`.
-- S1 начинаем только если все MUST, кроме разметки T14, готовы к сб 20:00.
-- Любая задача отстаёт > 1 ч → на ближайшей синхронизации решаем: упростить или вырезать. Живой URL и честные метрики важнее фич.
-- **F, вс 02:00 — freeze кода.** После: только фиксы, видео, слайды, сабмит.
+- **Checkpoint Sat 14:00 (T10):** the detector must find a synthetic swarm in the fixtures. If not → **we cut S1**, and P1 after T8/T11 helps P2 (integration, eval, debugging on live data). We simplify the math: first a working pair correlator + SPRT, and CFAR can be replaced with a fixed threshold on `R_ij`.
+- We start S1 only if all MUST items, except T14 labeling, are ready by Sat 20:00.
+- Any task falls behind by > 1 h → at the next sync we decide whether to simplify or cut. A live URL and honest metrics matter more than features.
+- **F, Sun 02:00 — code freeze.** After: only fixes, video, slides, submit.
 
-## 10. Промпт-шаблон для старта задачи
+## 10. Prompt template for starting a task
 
 ```text
-Задача <ID> из docs/tasks.md. Я <P1 «Труба» | P2 «Мозг»>.
-Прочитай CLAUDE.md и карточку <ID> в docs/tasks.md. Остальные доки открывай,
-только если карточка или CLAUDE.md на них указывают.
-Сначала план (plan mode): какие файлы меняешь/создаёшь, какие функции и сигнатуры,
-какой тест добавишь, как проверим пункт «Готово, когда». Код не пиши, пока я не одобрю план.
-Ограничения: только мои папки (<ingest/ api/ web/ infra/ | detect/ synth/ eval/>),
-contracts/ не трогать, без сети в тестах, ключи только из .env.
-После реализации: make test, затем петля проверки из docs/workflow.md §3 (объём петли по
-таблице оттуда: субагенты verifier с фокусами logic и fit → analyzer чинит → снова verifier;
-максимум 3 раунда проверки и 2 раунда исправлений; если третья проверка снова нашла BLOCKER
-или SHOULD-FIX, ничего не чини, остановись и покажи список мне).
-В конце: покажи, как выполнен «Готово, когда», сколько раундов проверки прошло, таблицу
-находок (исправлено / отклонено с причиной / решает человек / открыто), список UNVERIFIED
-с командами для ручной проверки, последнюю строку make test. Не коммить без моего слова;
-предложи сообщение коммита на английском без названий моделей.
+Task <ID> from docs/tasks.md. I am <P1 "Pipe" | P2 "Brain">.
+Read CLAUDE.md and card <ID> in docs/tasks.md. Open other docs
+only if the card or CLAUDE.md points to them.
+First, a plan (plan mode): which files you will modify/create, which functions and signatures,
+which test you will add, and how we will verify the "Done when" item. Do not write code until I approve the plan.
+Constraints: only my folders (<ingest/ api/ web/ infra/ | detect/ synth/ eval/>),
+do not touch contracts/, no network in tests, keys only from .env.
+After implementation: make test, then the verification loop from docs/workflow.md §3 (loop scope per
+the table there: verifier subagents with logic and fit focuses → analyzer fixes → verifier again;
+at most 3 verification rounds and 2 fix rounds; if the third verification again finds a BLOCKER
+or SHOULD-FIX, do not fix anything, stop, and show me the list).
+At the end: show how "Done when" was satisfied, how many verification rounds ran, a table
+of findings (fixed / rejected with reason / human decides / open), the UNVERIFIED list
+with commands for manual verification, and the last line of make test. Do not commit without my go-ahead.
+Propose a commit message in English without model names.
 ```

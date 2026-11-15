@@ -1,311 +1,311 @@
-# Live Swarm Radar как настоящий радар: обработка сигналов против пропаганды
+# Live Swarm Radar like a real radar: signal processing against propaganda
 
-*The Kerfufflers · брейншторм · пт 13.11*
+*The Kerfufflers · brainstorm · Fri 13.11*
 
-## 0. Главная метафора (питч в одной фразе)
+## 0. Core metaphor (one-sentence pitch)
 
-> **Пропаганда — это широкополосный сигнал, спрятанный под уровнем шума. Каждый бот «шепчет» тихо, но если сложить их правильно, кампания вылезает из шума. Мы построили приёмник, который это делает в реальном времени.**
+> **Propaganda is a wideband signal hidden below the noise floor. Each bot "whispers" quietly, but if you add them up the right way, the campaign emerges from the noise. We built a receiver that does this in real time.**
 
-Почему это сильно для тех-челленджа Context.dev: там 30% за технику (точность, латентность, изменения во времени) и 30% за центральность живых данных. А радарная теория как раз про **обнаружить как можно раньше при заданной вероятности ложной тревоги**. И название уже совпадает: *Live Swarm Radar*.
+Why this is strong for the Context.dev tech challenge: there is 30% for technical execution (accuracy, latency, changes over time) and 30% for centrality of live data. Radar theory is specifically about **detecting as early as possible at a given false-alarm probability**. And the name already matches: *Live Swarm Radar*.
 
-*Что именно строим: **§3 (согласованный дизайн движка)**. Объём на выходные: §4 и канонический список в [architecture.md](architecture.md). §1–2 ниже — карта идей, а не план.*
+*What we are actually building: **§3 (agreed engine design)**. Weekend scope: §4 and the canonical list in [architecture.md](architecture.md). §1–2 below is a map of ideas, not a plan.*
 
-### Словарь перевода «радио → интернет»
-| Радиофизика | Мир пропаганды |
+### "Radio → Internet" translation dictionary
+| Radiophysics | World of propaganda |
 |---|---|
-| Шум | Обычная органическая болтовня людей |
-| Сигнал | Координированная кампания / нарратив |
-| Антенна, приёмник | Context.dev news search + Bluesky `searchPosts` (поллинг каждые 2–5 мин) |
-| Отсчёт сигнала | Пост / статья с временем, автором, текстом |
-| Канал с искажениями | Площадка или СМИ, которое перевирает факт |
-| Многолучёвость (multipath) | Один и тот же текст приходит через репосты разными путями |
-| Ложная тревога (Pfa) | Обвинили честного человека |
-| Вероятность обнаружения (Pd) | Нашли настоящую кампанию |
+| Noise | Ordinary organic human chatter |
+| Signal | Coordinated campaign / narrative |
+| Antenna, receiver | Context.dev news search + Bluesky `searchPosts` (polling every 2–5 min) |
+| Signal sample | Post / article with time, author, text |
+| Distorted channel | Platform or media outlet that distorts a fact |
+| Multipath | The same text arrives via reposts along different paths |
+| False alarm (Pfa) | Accused an honest person |
+| Probability of detection (Pd) | Found a real campaign |
 
 ---
 
-## 1. Карта: концепт → детектор → можно ли за выходные
+## 1. Map: concept → detector → doable in a weekend
 
-⭐ = собрать за выходные реально · 🎤 = очень сильно для питча
+⭐ = realistic to build over the weekend · 🎤 = very strong for the pitch
 
-| # | Концепт | Что ловит | Как собрать | ⭐ | 🎤 |
+| # | Concept | What it catches | How to build | ⭐ | 🎤 |
 |---|---|---|---|---|---|
-| 1 | **Корреляционный приёмник / согласованный фильтр** | Нарратив, даже перефразированный | Эмбеддинг поста · эмбеддинг «шаблона» = косинусная корреляция | ⭐⭐⭐ | 🎤🎤 |
-| 2 | **Расширяющие последовательности (CDMA) + «деспрединг»** | Рой ботов, где каждый ниже порога | Временные ряды активности аккаунтов → кросс-корреляция с поиском лага → кластеры | ⭐⭐ | 🎤🎤🎤 |
-| 3 | **CFAR-порог** (Constant False Alarm Rate) | Всплеск по теме на фоне «шума» | Скользящее среднее фона по соседним окнам × коэффициент | ⭐⭐⭐ | 🎤🎤 |
-| 4 | **Отношение правдоподобия + SPRT (тест Вальда)** | Решение «кампания / органика / ждём» как можно раньше | Сумма LLR по приходящим признакам, два порога из α и β | ⭐⭐⭐ | 🎤🎤🎤 |
-| 5 | **Спектральный анализ (FFT, спектрограмма)** | Боты по расписанию (cron) | FFT ряда постов аккаунта → острые пики = робот | ⭐⭐⭐ | 🎤🎤 |
-| 6 | **SNR в децибелах** | «Насколько громок сигнал кампании» | Энергия координированной части / энергия фона, в дБ | ⭐⭐⭐ | 🎤🎤 |
-| 7 | **MMSE / фильтр Калмана** | Правда ли утверждение, по многим шумным источникам | Взвешенное объединение источников по их «шуму» (надёжности) | ⭐⭐ | 🎤🎤 |
-| 8 | **Многолучёвость + RAKE-приёмник** | Первоисточник и эхо-копии | Самое раннее «прибытие» = прямой луч, остальные = эхо | ⭐⭐ | 🎤🎤 |
-| 9 | **OFDM: поднесущие + пилоты** | Какая тема «накачивается», как СМИ искажает факты | Темы = поднесущие; надёжные источники = пилоты для оценки «канала» СМИ | ⭐ | 🎤🎤 |
-| 10 | **OTFS: delay-Doppler** | Форма распространения: органика vs вброс | 2D-карта: задержка от первого поста × скорость роста | ⭐⭐ | 🎤🎤🎤 |
-| 11 | **Последовательное подавление помех (SIC)** | Тихая кампания под громкой новостью | Убираем доминирующий нарратив, ищем остаток | ⭐ | 🎤 |
-| 12 | **Канал с ошибками (BER)** | Как факт мутирует по цепочке репостов | Семантическое расстояние на каждом «хопе» | ⭐⭐ | 🎤 |
-| 13 | **ROC, Neyman–Pearson** | Честные метрики | Фиксируем Pfa (FPR), максимизируем Pd | ⭐⭐⭐ | 🎤🎤 |
-| 14 | **Инжекция тестовой цели** | Проверка детектора | Подмешиваем синтетическую кампанию и смотрим, найдём ли | ⭐⭐⭐ | 🎤🎤 |
+| 1 | **Correlation receiver / matched filter** | Narrative, even paraphrased | Post embedding · "template" embedding = cosine correlation | ⭐⭐⭐ | 🎤🎤 |
+| 2 | **Spreading sequences (CDMA) + "despreading"** | Bot swarm where each one is below the threshold | Account activity time series → cross-correlation with lag search → clusters | ⭐⭐ | 🎤🎤🎤 |
+| 3 | **CFAR threshold** (Constant False Alarm Rate) | Topic surge against background "noise" | Moving average of background over neighboring windows × coefficient | ⭐⭐⭐ | 🎤🎤 |
+| 4 | **Likelihood ratio + SPRT (Wald test)** | "Campaign / organic / wait" decision as early as possible | Sum of LLR over incoming features, two thresholds from α and β | ⭐⭐⭐ | 🎤🎤🎤 |
+| 5 | **Spectral analysis (FFT, spectrogram)** | Scheduled bots (cron) | FFT of an account's post series → sharp peaks = robot | ⭐⭐⭐ | 🎤🎤 |
+| 6 | **SNR in decibels** | "How loud the campaign signal is" | Energy of coordinated part / background energy, in dB | ⭐⭐⭐ | 🎤🎤 |
+| 7 | **MMSE / Kalman filter** | Whether a claim is true, across many noisy sources | Weighted combination of sources by their "noise" (reliability) | ⭐⭐ | 🎤🎤 |
+| 8 | **Multipath + RAKE receiver** | Original source and echo copies | Earliest "arrival" = direct path, the rest = echoes | ⭐⭐ | 🎤🎤 |
+| 9 | **OFDM: subcarriers + pilots** | Which topic is being "pumped", how media distort facts | Topics = subcarriers. Reliable sources = pilots for estimating the media "channel" | ⭐ | 🎤🎤 |
+| 10 | **OTFS: delay-Doppler** | Spread shape: organic vs. planted drop | 2D map: delay from first post × growth rate | ⭐⭐ | 🎤🎤🎤 |
+| 11 | **Successive interference cancellation (SIC)** | Quiet campaign under a loud news story | Subtract the dominant narrative, search the residual | ⭐ | 🎤 |
+| 12 | **Channel with errors (BER)** | How a fact mutates along a repost chain | Semantic distance at each "hop" | ⭐⭐ | 🎤 |
+| 13 | **ROC, Neyman–Pearson** | Honest metrics | Fix Pfa (FPR), maximize Pd | ⭐⭐⭐ | 🎤🎤 |
+| 14 | **Test target injection** | Detector validation | Mix in a synthetic campaign and see if we find it | ⭐⭐⭐ | 🎤🎤 |
 
 ---
 
-## 2. Подробно, с примерами
+## 2. In detail, with examples
 
-### 2.1. Согласованный фильтр = поиск нарратива по «шаблону» ⭐⭐⭐
-**В радио:** знаешь форму импульса → коррелируешь вход с ним → пик = цель.
-**У нас:** «шаблон» = эмбеддинг известного месседжа (например, «вакцины вызывают X» или первый пост новой кампании). Каждый новый пост коррелируем с шаблоном:
+### 2.1. Matched filter = searching for a narrative by "template" ⭐⭐⭐
+**In radio:** you know the pulse shape → correlate the input with it → peak = target.
+**In our setup:** "template" = embedding of a known message (for example, "vaccines cause X" or the first post of a new campaign). We correlate each new post with the template:
 `corr = cos(e_post, e_template)`
-Пик выше порога → пост принадлежит нарративу, **даже если слова другие** (эмбеддинги ловят смысл).
-**Пример:** шаблон «Finland closes border because of NATO provocation». Пост «Border shut down — thanks to NATO games» даёт corr 0.83 → наш.
-**Бонус «банк фильтров»:** держим N шаблонов (известные нарративы) и прогоняем каждый пост через все, как банк фильтров в радаре.
+Peak above threshold → the post belongs to the narrative, **even if the words are different** (embeddings capture meaning).
+**Example:** template "Finland closes border because of NATO provocation". The post "Border shut down — thanks to NATO games" gives corr 0.83 → ours.
+**"Filter bank" bonus:** we keep N templates (known narratives) and run every post through all of them, like a filter bank in a radar.
 
-### 2.2. CDMA и «деспрединг»: главная звезда питча 🎤🎤🎤
-**В радио (CDMA):** сигнал «размазан» расширяющей последовательностью по широкой полосе, его мощность **ниже шума**. Приёмник, который знает код, умножает и суммирует → сигнал вырастает в N раз (**выигрыш обработки**, processing gain), а шум нет.
-**У нас:**
-- Каждый бот публикует мало, ниже порога любого «детектора одного аккаунта».
-- Но у ботов одной кампании **общий «код»**: одинаковые моменты активности, одинаковые ссылки, похожие тексты.
-- Представим активность аккаунта как последовательность 0/1 по минутам: `a_i[t] = 1`, если аккаунт i постил по теме в минуту t.
-- **Органичные люди ≈ независимые случайные коды** → их взаимная корреляция около нуля (как ортогональные коды).
-- **Боты одной кампании ≈ один код** (иногда со сдвигом: «бот 2 постит через 3 минуты после бота 1») → **пик взаимной корреляции на лаге τ**.
+### 2.2. CDMA and "despreading": the main star of the pitch 🎤🎤🎤
+**In radio (CDMA):** the signal is "smeared" by a spreading sequence across a wide band, and its power is **below the noise**. A receiver that knows the code multiplies and sums → the signal grows by a factor of N (**processing gain**), while the noise does not.
+**In our setup:**
+- Each bot posts little, below the threshold of any "single-account detector".
+- But bots in the same campaign share a **common "code"**: the same activity timestamps, the same links, similar texts.
+- Let's represent an account's activity as a 0/1 sequence by minute: `a_i[t] = 1` if account i posted on the topic at minute t.
+- **Organic humans ≈ independent random codes** → their cross-correlation is near zero (like orthogonal codes).
+- **Bots in the same campaign ≈ one code** (sometimes with a shift: "bot 2 posts 3 minutes after bot 1") → **cross-correlation peak at lag τ**.
 
 ```
-R_ij(τ) = Σ_t a_i[t] · a_j[t+τ]   (нормированная)
+R_ij(τ) = Σ_t a_i[t] · a_j[t+τ]   (normalized)
 ```
-Строим матрицу max_τ R_ij → граф → кластеры = рои.
-**«Деспрединг»:** складываем сигналы аккаунтов кластера когерентно (с учётом лагов) → суммарный SNR растёт ~ в N раз. Показываем на демо: «поодиночке каждый бот на уровне −8 дБ, вместе +11 дБ, кампания обнаружена».
-**Совмещаем с 2.1:** код = не только время, но и вектор текста. Совпадение по времени **и** по смыслу = очень сильный признак.
-**Риск:** нужны таймстемпы и авторы постов. Social-эндпоинты Context.dev их не дали (T2), поэтому с T6b соцсеть = Bluesky (автор = хэндл, время = `createdAt`/`indexedAt`). Запасной вариант (`BLUESKY_ENABLED=0`): news search (авторы = домены/авторы статей) + синтетический рой.
+We build the max_τ R_ij matrix → graph → clusters = swarms.
+**"Despreading":** we sum the signals of the cluster's accounts coherently (accounting for lags) → total SNR grows ~N times. We show this in the demo: "individually each bot is at −8 dB, together +11 dB, campaign detected".
+**Combining with 2.1:** the code is not only time, but also the text vector. Coincidence in time **and** in meaning = a very strong feature.
+**Risk:** Timestamps and post authors are needed. Context.dev social endpoints did not provide them (T2), so as of T6b, the social network = Bluesky (author = handle, time = `createdAt`/`indexedAt`). Fallback option (`BLUESKY_ENABLED=0`): news search (authors = domains/article authors) + synthetic swarm.
 
-### 2.3. CFAR: адаптивный порог тревоги ⭐⭐⭐
-**В радаре:** шум везде разный, поэтому порог считают по **соседним ячейкам**: `T = k · mean(соседей)`. Так держат **постоянную вероятность ложной тревоги**.
-**У нас:** для каждой темы считаем число упоминаний в окне 5 минут. Порог = k × среднее по 10 соседним окнам (с защитными ячейками вокруг). *k — множитель CFAR, не путать с α из SPRT.*
-**Пример:** у темы «выборы» фон 200 постов/5 мин, у темы «ферма в Лапландии» фон 2. Всплеск до 260 у выборов — норма, а до 30 у фермы — тревога. Фиксированный порог тут бы ошибся, CFAR нет.
-**Почему для Context.dev:** CFAR пересчитывается на каждом новом батче поллинга, алерт появляется через минуты = реальновременность.
+### 2.3. CFAR: adaptive alarm threshold ⭐⭐⭐
+**In radar:** Noise varies everywhere, so the threshold is computed from **neighboring cells**: `T = k · mean(neighbors)`. This maintains a **constant probability of false alarm**.
+**In our system:** For each topic, we count the number of mentions in a window of 5 minutes. Threshold = k × average across 10 neighboring windows (with guard cells around them). *k is the CFAR multiplier, not to be confused with α from SPRT.*
+**Example:** The topic "elections" has a background of 200 posts/5 min, while the topic "farm in Lapland" has a background of 2. A spike to 260 for elections is normal, whereas a spike to 30 for the farm is an alarm. A fixed threshold would get this wrong, whereas CFAR does not.
+**Why for Context.dev:** CFAR is recomputed on each new polling batch, so an alert appears within minutes = real-time operation.
 
-### 2.4. Отношение правдоподобия и SPRT (тест Вальда) 🎤🎤🎤
-**Идея:** две гипотезы: H0 = «органика», H1 = «координированная кампания». Каждый новый признак (похожесть текста, синхронность; одинаковые ссылки — если есть в данных) даёт приращение:
+### 2.4. Likelihood ratio and SPRT (Wald test) 🎤🎤🎤
+**Idea:** Two hypotheses: H0 = "organic", H1 = "coordinated campaign". Each new feature (text similarity, synchronicity, and identical links — if present in the data) adds an increment:
 ```
-Λ = Σ log( P(признак | H1) / P(признак | H0) )
+Λ = Σ log( P(feature | H1) / P(feature | H0) )
 ```
-**SPRT (Wald):** не ждём конца, а решаем **сразу, как только доказательств хватает**:
-- `Λ ≥ log((1−β)/α)` → «кампания!»
-- `Λ ≤ log(β/(1−α))` → «органика»
-- иначе → «продолжаем наблюдать»
+**SPRT (Wald):** We do not wait until the end, but decide **as soon as there is enough evidence**:
+- `Λ ≥ log((1−β)/α)` → "campaign!"
+- `Λ ≤ log(β/(1−α))` → "organic"
+- otherwise → "keep watching"
 
-**Где α** — допустимая доля ложных тревог (например, 2%), **β** — допустимая доля пропусков (10%). При α=0.02, β=0.1: верхний порог log(45) ≈ 3.8, нижний ≈ −2.3.
-**Пример (числа условные):** пост 1 близок к шаблону нарратива (+1.2), пост 2 почти дословный повтор (+1.5), пост 3 в ту же минуту, что и пост 2 (+1.4) → Λ = 4.1 > 3.8 → тревога на **третьем** посте, а не через час.
-**Почему это киллер-фича:** SPRT математически даёт **минимальное среднее время до решения** при заданных ошибках. Это идеальный ответ на «реальновременность» (Context.dev) и на «честность про ложные срабатывания» (мы сами задаём α).
-**Как получить вероятности:** гистограммы признаков на размеченных данных (органика vs синтетические/известные рои), либо простая логистическая регрессия → её логиты и есть LLR.
+**Where α** is the acceptable false alarm rate (for example, 2%), and **β** is the acceptable miss rate (10%). At α=0.02, β=0.1: upper threshold log(45) ≈ 3.8, lower ≈ −2.3.
+**Example (illustrative numbers):** Post 1 is close to the narrative template (+1.2), post 2 is an almost verbatim repeat (+1.5), and post 3 arrives in the same minute as post 2 (+1.4) → Λ = 4.1 > 3.8 → alarm on the **third** post instead of an hour later.
+**Why this is a killer feature:** SPRT mathematically yields the **minimum expected time to decision** for given error bounds. This is the ideal answer to "real-time operation" (Context.dev) and to "honesty about false positives" (we set α ourselves).
+**How to obtain the probabilities:** Feature histograms on labeled data (organic vs synthetic/known swarms), or a simple logistic regression → its logits are the LLR.
 
-### 2.5. Спектральный анализ: боты «тикают» ⭐⭐⭐
-**В радио:** FFT показывает частоты, спектрограмма показывает, как они меняются во времени.
-**У нас:** временной ряд постов аккаунта → FFT.
-- **Человек:** пик на 24 часа (суточный ритм), остальное размыто (широкий спектр).
-- **Бот по cron:** **острые линии** на периоде 15 мин, 1 час и их гармониках.
-**Признак:** спектральная плоскостность (spectral flatness) и «пиковость». Мало ровного шума + острые линии = робот.
-**Пример на демо:** спектрограмма двух аккаунтов рядом: у одного «радуга», у другого «гребёнка».
+### 2.5. Spectral analysis: bots "tick" ⭐⭐⭐
+**In radio:** FFT shows frequencies, and a spectrogram shows how they change over time.
+**In our system:** An account's post time series → FFT.
+- **Human:** A peak at 24 hours (circadian rhythm), with the rest spread out (broad spectrum).
+- **Cron-based bot:** **Sharp lines** at a period of 15 min, 1 hr, and their harmonics.
+**Feature:** Spectral flatness and "peakiness." Little flat noise + sharp lines = bot.
+**Demo example:** Spectrograms of two accounts side by side: one shows a "rainbow," the other a "comb."
 
-### 2.6. SNR в децибелах ⭐⭐⭐
-Для каждого нарратива: `SNR = 10·log10(P_координированная / P_фон)`.
-Это просто красивое и понятное число на дашборде: «Нарратив X: +14 дБ над шумом, растёт».
+### 2.6. SNR in decibels ⭐⭐⭐
+For each narrative: `SNR = 10·log10(P_coordinated / P_background)`.
+It is simply a clean, intuitive number on the dashboard: "Narrative X: +14 dB above noise, rising."
 
-### 2.7. MMSE / Калман: объединение источников для фактчека ⭐⭐
-**В радио:** несколько шумных измерений одной величины → оптимальная оценка = взвешивание по обратной дисперсии шума.
-**У нас:** утверждение «закон принят 12 ноября». Каждый источник даёт «измерение» (подтверждает +1 / опровергает −1 / не знает 0) со своей надёжностью σ²:
+### 2.7. MMSE / Kalman: combining sources for fact-checking ⭐⭐
+**In radio:** Multiple noisy measurements of one quantity → optimal estimate = weighting by inverse noise variance.
+**In our system:** A claim "the law was passed on November 12." Each source provides a "measurement" (confirms +1 / refutes −1 / does not know 0) with its own reliability σ²:
 ```
 x̂ = Σ (y_k / σ_k²) / Σ (1 / σ_k²)
 ```
-Надёжное агентство (σ² малая) весит много, анонимный блог мало. **Калман по времени:** оценка обновляется с каждым новым источником, а заодно учится надёжность самих источников (если источник часто расходится с консенсусом, его σ² растёт).
-**Пример:** Reuters +1 (σ²=0.1), блог −1 (σ²=2), газета +1 (σ²=0.3) → x̂ ≈ +0.9 → «подтверждается».
+A reliable agency (small σ²) carries high weight, while an anonymous blog carries little. **Kalman over time:** The estimate updates with each new source, and at the same time the reliability of the sources themselves is learned (if a source frequently disagrees with the consensus, its σ² increases).
+**Example:** Reuters +1 (σ²=0.1), blog −1 (σ²=2), newspaper +1 (σ²=0.3) → x̂ ≈ +0.9 → "confirmed."
 
-### 2.8. Многолучёвость + RAKE: кто первоисточник ⭐⭐
-**В радио:** сигнал приходит прямым лучом и эхами с задержкой; RAKE-приёмник собирает «пальцами» все лучи.
-**У нас:** одна история приходит через десятки репостов. Сортируем «прибытия» по времени: **первое прибытие = прямой луч (первоисточник)**, остальные = эхо. Профиль задержек (delay spread) показывает:
-- органика: эхо размазано на часы;
-- вброс: десятки «эхо» за 2 минуты от новых аккаунтов = подозрительно.
+### 2.8. Multipath + RAKE: finding the primary source ⭐⭐
+**In radio:** A signal arrives via a direct path and delayed echoes, and a RAKE receiver collects all the paths with its "fingers."
+**In our system:** A single story arrives through dozens of reposts. We sort the "arrivals" by time: **first arrival = direct path (primary source)**, and the rest = echoes. The delay spread shows:
+- organic: echoes spread out over hours.
+- coordinated push: dozens of "echoes" within 2 minutes from new accounts = suspicious.
 
-### 2.9. OFDM: поднесущие и пилоты ⭐
-**Поднесущие:** разложим поток дискуссии на ортогональные «поднесущие» = темы (кластеры эмбеддингов или главные компоненты). Следим за мощностью каждой. Кампания = внезапная **закачка энергии в одну поднесущую**.
-**Пилоты и оценка канала:** в OFDM известные пилот-символы позволяют оценить, как канал искажает сигнал. У нас «пилоты» = факты, которые мы точно знаем (официальная статистика). Смотрим, как конкретное СМИ их передаёт → получаем **«импульсную характеристику» СМИ** (насколько оно преувеличивает, искажает). Дальше «эквализируем» его новые заявления.
-Красиво для питча, но для выходных сложно. Брать идею пилотов в слайд «что дальше».
+### 2.9. OFDM: subcarriers and pilots ⭐
+**Subcarriers:** We decompose the discussion stream into orthogonal "subcarriers" = topics (embedding clusters or principal components). We monitor the power of each one. A campaign = a sudden **power injection into a single subcarrier**.
+**Pilots and channel estimation:** In OFDM, known pilot symbols let us estimate how the channel distorts the signal. In our system, "pilots" = facts we know for sure (official statistics). We observe how a specific media outlet reports them → we obtain the **media outlet's "impulse response"** (how much it exaggerates or distorts). Then we "equalize" its new statements.
+Great for the pitch, but too complex for the weekend. Put the pilots idea on the "what's next" slide.
 
-### 2.10. OTFS: delay-Doppler карта нарратива 🎤🎤🎤
-**В радио:** OTFS работает в плоскости «задержка × доплер», где каждая цель/отражатель — точка.
-**У нас:** для каждого поста в нарративе:
-- **delay** = сколько прошло от первого поста нарратива;
-- **Doppler** = скорость изменения (ускорение) потока в этот момент или скорость роста охвата аккаунта.
-2D-гистограмма → картинка:
-- **Органика:** «размытое облако», задержки от минут до дней, умеренный «доплер».
-- **Вброс:** **яркое пятно** около нуля задержки с огромным «доплером» (все сразу и резко).
-Строится просто (2D-гистограмма + heatmap), а выглядит эффектно. Отличный визуальный «вау» для жюри.
+### 2.10. OTFS: delay-Doppler map of a narrative 🎤🎤🎤
+**In radio:** OTFS operates in the "delay × Doppler" plane, where each target/reflector is a point.
+**In our system:** For each post in a narrative:
+- **delay** = time elapsed since the first post of the narrative.
+- **Doppler** = rate of change (acceleration) of the stream at that moment, or the growth rate of the account's reach.
+2D histogram → image:
+- **Organic:** A "diffuse cloud," delays from minutes to days, moderate "Doppler."
+- **Coordinated push:** A **bright spot** near zero delay with huge "Doppler" (everyone at once and abruptly).
+It is easy to build (2D histogram + heatmap) and looks striking. A great visual "wow" for the judges.
 
-### 2.11. SIC: подавление сильного сигнала ⭐
-Сначала вычитаем доминирующий органический нарратив (большая новость дня), потом ищем в остатке слабую скрытую кампанию. Для выходных необязательно.
+### 2.11. SIC: strong-signal cancellation ⭐
+First we subtract the dominant organic narrative (the big news of the day), then we look for a weak hidden campaign in the residual. Optional for the weekend.
 
-### 2.12. Канал с ошибками: мутация факта ⭐⭐
-Цепочка репостов = канал связи. На каждом «хопе» измеряем семантическое расстояние от оригинала (как bit error rate). Факт, который на 3-м хопе превратился в противоположный, = «канал с высоким BER», а узел, где это случилось, подозрителен.
+### 2.12. Channel with errors: fact mutation ⭐⭐
+A repost chain = a communication channel. At each "hop", we measure the semantic distance from the original (like bit error rate). A fact that turned into its opposite at hop 3 = a "high-BER channel", and the node where this happened is suspicious.
 
-### 2.13–2.14. ROC + инжекция тестовой цели ⭐⭐⭐
-- Метрики показываем как **ROC-кривую (Pd vs Pfa)**, как в радиолокации, и **рабочую точку по Нейману–Пирсону**: «при ложных тревогах [x]% ловим [y]% инжектированных кампаний» (реальные числа из eval).
-- **Инжекция тестовой цели:** как в радаре, где подают тестовый сигнал. Генерируем синтетическую кампанию (LLM пишет 30 вариаций, разносим по фейковым аккаунтам с лагами), подмешиваем в живой поток, измеряем: нашли ли и **через сколько секунд**. Это и честная метрика, и живое демо.
+### 2.13–2.14. ROC + test target injection ⭐⭐⭐
+- We show metrics as a **ROC curve (Pd vs Pfa)**, as in radar, and a **Neyman–Pearson operating point**: "at [x]% false alarms, we catch [y]% of injected campaigns" (real numbers from eval).
+- **Test target injection:** as in radar, where a test signal is injected. We generate a synthetic campaign (an LLM writes 30 variations, distributed across fake accounts with lags), mix it into the live stream, and measure whether we found it and **after how many seconds**. This is both an honest metric and a live demo.
 
 ---
 
-## 3. Согласованный дизайн движка v1 (что строить)
+## 3. Agreed engine v1 design (what to build)
 
-*Решения P2 от сб 14.11 (вопрос за вопросом). **Этот раздел главный:** где он расходится с §1–2 (карта идей), верен он. Все числа в примерах условные, реальные появятся из `make eval`.*
+*P2 decisions from Sat 14.11 (question by question). **This section is the main one:** where it diverges from §1–2 (idea map), this one is correct. All numbers in the examples are illustrative. Real ones will come from `make eval`.*
 
 ```
- АНТЕННА + ЛУЧ        ФРОНТ-ЭНД            КОРРЕЛЯТОР              ОБНАРУЖИТЕЛЬ             РЕШЕНИЕ          ДИСПЛЕЙ
- Context.dev,     →  эмбеддинг поста  →  пары аккаунтов:      →  фон по всем парам    →  SPRT по постам  →  карта «задержка ×
- луч = тема          + отбеливание       R_ij = max_τ R_ij(τ)     (OS-CFAR) → z_ij →      группы (α, β)       смысловая расстройка»,
- (бимформинг)        (режекция клаттера)  (время × смысл)          рой ≥ 3 → накопление    + «эхо новости»     светофор, детали
+ANTENNA + BEAM    FRONT END              CORRELATOR              DETECTOR                       DECISION                 DISPLAY
+Context.dev,    → Post embedding       → Account pairs:        → Background across all pairs  → SPRT over group posts  → Delay × semantic detuning map,
+beam = topic      + whitening            R_ij = max_τ R_ij(τ)    (OS-CFAR) → z_ij →             (α, β)                   traffic light,
+(beamforming)     (clutter rejection)    (time × meaning)        swarm ≥ 3 → integration        + news echo              and details
 ```
 
-### 3.1. Цель (H1)
-**Рой аккаунтов:** группа из N ≥ 3 аккаунтов постит одно и то же по смыслу и синхронно по времени. Цель не «нарратив» и не «один аккаунт-бот» (у аккаунта 3–6 постов за окно, для спектра мало отсчётов).
-Вердикт называется **«координированное поведение»**, а не «боты» или «пропаганда»: мы меряем синхронность, а не намерения.
+### 3.1. Goal (H1)
+**Account swarm:** a group of N ≥ 3 accounts posts the same thing in meaning and synchronously in time. The target is not a "narrative" and not a "single bot account" (an account has 3–6 posts per window, which is too few samples for a spectrum).
+The verdict is called **"coordinated behavior"**, not "bots" or "propaganda": we measure synchronicity, not intent.
 
-### 3.2. Сигнал: время × смысл
-Пост = отсчёт с двумя координатами: время `t` и единичный вектор смысла `e` (эмбеддинг). Сигнал аккаунта векторный: `s_i[t] = ẽ` поста в момент t, иначе 0.
-Банк заранее известных шаблонов **не нужен**: каждый пост служит опорным сигналом для остальных (как в пассивной локации), смысл сам работает как код. Шаблон нарратива (центроид постов роя) получается как побочный продукт, для карточки.
+### 3.2. Signal: time × meaning
+A post = a sample with two coordinates: time `t` and a unit meaning vector `e` (embedding). An account's signal is vector-valued: `s_i[t] = ẽ` of the post at time t, otherwise 0.
+A bank of pre-known templates is **not needed**: each post serves as a reference signal for the others (as in passive radar), and meaning itself works as the code. The narrative template (the centroid of the swarm's posts) comes out as a byproduct, for the card.
 
-### 3.2a. Бимформинг: тема = луч
-Радар не слушает всё небо сразу, он направляет луч. Наш луч = **тема, за которой наблюдаем**.
-- **Механическое наведение:** запрос Context.dev по теме (антенну повернули в нужную сторону). Тем 3–5, это **многолучевой приём**: каждый луч обрабатывается отдельно, со своим фоном и своим порогом CFAR (§3.5), поэтому шумная тема не глушит тихую.
-- **Цифровое формирование луча:** у темы есть направляющий вектор `â_topic` в пространстве смысла. Усиление поста = проекция на луч: `b_p = clip((⟨e_p, â⟩ − c_lo) / (c_hi − c_lo), 0, 1)`. Пост в главном лепестке (по теме) идёт с весом 1, мусор, который поиск зацепил случайно, попадает в **боковые лепестки** и подавляется. В корреляторе пара постов входит с весом `√(b_p · b_q)`.
-- **Откуда `â`:** робастное среднее эмбеддингов темы в окне `ē_topic` (по одному голосу на аккаунт, чтобы рой не «перетянул» луч на себя), нормированное до единичной длины: `â = ē_topic / ‖ē_topic‖`. Каждый пост раскладывается на две части: проекция на луч `⟨e, â⟩` отвечает на вопрос «пост по теме?», а остаток `e − ⟨e, â⟩·â` несёт «код» для коррелятора (§3.3). Одно разложение, две роли.
-- **На дисплее:** переключатель тем = выбор луча («куда смотрит радар»). Уровень фона у каждого луча свой, но это внутренняя величина детектора, на экран не выводится.
-*Пример:* тема «тарифы на трамвай». Пост «fare hike is a scam» имеет проекцию 0.6 → в луче, вес 1. Пост про хоккей, попавший в выдачу из-за слова Helsinki, имеет проекцию 0.1 → боковой лепесток, вес 0, в корреляцию не входит.
-Старт: `c_lo` = 0.15, `c_hi` = 0.35. Эти числа подобраны под hash-эмбеддер; у Gemini «пол» косинуса выше, поэтому пороги луча перекалибруем на живом сэмпле (I1) и в T15.
-**Калибровка (`detect/calibrate_beam.py`):** луч темы строится только по органическим постам (в окне детектора луч тоже держится на органике: голос на аккаунт и отсечение 20%), посты роя и вариации синтетики его не формируют. `c_lo` = медиана, `c_hi` = q90 проекций постов **чужих** тем на этот луч: половина чужих постов получает вес 0, всё, что выше 90% чужих, получает вес 1. Свои посты роя и синтетика темы в выборе её порогов не участвуют (детектор не учится на цели); чужие темы могут быть и синтетическими. Почему не по постам своей темы: у Gemini косинусы сжаты (чужая тема 0.79–0.83, рой по теме 0.82–0.87, органика 0.87–0.91), и `c_hi`, взятый из органики (было 0.88), вдвое срезал вес постов роя: Pd роя из 3 аккаунтов 0.28 вместо 0.60 (`eval/report.json`, сб 14.11). T15 (сб 14.11): пересчитано на живых данных (6 тем, 289 органических постов): 0.78 / 0.80.
-**Известное ограничение луча (сб 14.11, до T15; решение — ниже):** у Gemini проекции «пропаганда по теме, но далеко от центра органики» и «чужая тема» перекрываются, порогом их не разделить. Пример: вариации месседжа «fare hike is a scam to fund politicians' pet projects» имеют проекцию ≈ 0.80 (медиана чужой темы 0.807) и получают вес луча 0.00–0.34, хотя между собой похожи на 0.92–0.96. Залп такого месседжа не даёт эха, SPRT набирает −3 за три поста (нижний порог −2.28) и выносит `organic` до второго залпа. Это все промахи на малых роях (60 окон на размер: Pd 3 акк. 0.75, 4 акк. 1.00 при 0.81/0.83). Проверено: смягчение ограничителя SPRT (−0.5) не помогает; луч 0.78/0.84 даёт Pd 3 акк. 0.98, но посты чужой темы проходят с весом ≈ 0.47 (было 0.22). Цену этой утечки на фикстурах не измерить (мусора из поиска в них нет, Pfa = 0 при любом варианте), поэтому пороги не меняем до живого сэмпла. Варианты для T15: смягчить пороги по Pfa на живых данных или направлять луч по тексту запроса темы, а не по центру органики (меняет §3.2a). Инжект на 12 аккаунтов (демо) это не задевает: Pd = 1.0.
+### 3.2a. Beamforming: topic = beam
+A radar does not listen to the whole sky at once. It steers a beam. Our beam = **the topic we are watching**.
+- **Mechanical steering:** a Context.dev query for the topic (the antenna was turned in the right direction). There are 3–5 topics, so this is **multibeam reception**: each beam is processed separately, with its own background and its own CFAR threshold (§3.5), so a noisy topic does not drown out a quiet one.
+- **Digital beamforming:** a topic has a steering vector `â_topic` in meaning space. A post's gain = its projection onto the beam: `b_p = clip((⟨e_p, â⟩ − c_lo) / (c_hi − c_lo), 0, 1)`. A post in the main lobe (on-topic) gets weight 1, while junk that search caught by accident falls into the **sidelobes** and is suppressed. In the correlator, a pair of posts enters with weight `√(b_p · b_q)`.
+- **Deriving `â`:** Compute `ē_topic`, the robust mean of the topic embeddings in the window. Give each account one vote so a swarm cannot pull the beam toward itself. Normalize the mean to unit length using `â = ē_topic / ‖ē_topic‖`. Each post is decomposed into two parts: the projection onto the beam `⟨e, â⟩` answers "is the post on-topic?", and the residual `e − ⟨e, â⟩·â` carries the "code" for the correlator (§3.3). One decomposition, two roles.
+- **On the display:** the topic switcher = beam selection ("where the radar is looking"). Each beam has its own background level, but that is an internal detector value and is not shown on screen.
+*Example:* the "tram fares" topic. The post "fare hike is a scam" has projection 0.6 → in the beam, weight 1. A post about hockey that landed in the results because of the word Helsinki has projection 0.1 → sidelobe, weight 0, excluded from correlation.
+Start: `c_lo` = 0.15, `c_hi` = 0.35. These numbers are tuned for the hash embedder. For Gemini, the cosine "floor" is higher, so we will recalibrate the beam thresholds on a live sample (I1) and in T15.
+**Calibration (`detect/calibrate_beam.py`):** the topic beam is built only from organic posts (in the detector window, the beam is also anchored on organic posts: one vote per account and 20% cutoff), while swarm posts and synthetic variations do not form it. `c_lo` = median and `c_hi` = q90 of the projections of posts from **other** topics onto this beam: half of other-topic posts get weight 0, and everything above 90% of other-topic posts gets weight 1. The topic's own swarm posts and synthetics do not participate in choosing its thresholds (the detector does not train on the target). Other topics may also be synthetic. Why not from posts of the topic itself: with Gemini, cosines are compressed (other topic 0.79–0.83, on-topic swarm 0.82–0.87, organic 0.87–0.91), and `c_hi` taken from organic posts (it was 0.88) cut the weight of swarm posts in half: Pd of a swarm of 3 accounts 0.28 instead of 0.60 (`eval/report.json`, Sat 14.11). T15 (Sat 14.11): recomputed on live data (6 topics, 289 organic posts): 0.78 / 0.80.
+**Known beam limitation (Sat 14.11, before T15; resolution below):** in Gemini, the projections for "on-topic propaganda, but far from the organic center" and "unrelated topic" overlap and cannot be separated by a threshold. Example: variations of the message "fare hike is a scam to fund politicians' pet projects" have a projection ≈ 0.80 (unrelated-topic median 0.807) and receive beam weight 0.00–0.34, even though their similarity to each other is 0.92–0.96. A volley of this message produces no echo, SPRT accumulates −3 over three posts (lower threshold −2.28), and calls `organic` before the second volley. These account for all misses on small swarms (60 windows per size: Pd 3 accts. 0.75, 4 accts. 1.00 at 0.81/0.83). Verified: relaxing the SPRT clamp (−0.5) does not help. Beam 0.78/0.84 yields Pd 3 accts. 0.98, but unrelated-topic posts pass through with weight ≈ 0.47 (was 0.22). The cost of this leakage cannot be measured on fixtures (they contain no search junk, so Pfa = 0 under either option), so we are not changing the thresholds until we have a live sample. Options for T15: relax the thresholds based on Pfa on live data, or steer the beam using the topic query text instead of the organic center (changes §3.2a). The 12-account inject (demo) is unaffected: Pd = 1.0.
 
-**Решение T15 (сб 14.11):** пороги взяты из той же калибровки, но на живых данных: 0.78 / 0.80. На окнах eval (α = 2%, 4 темы инжекта, 313 окон фона, по 200 окон на размер роя): ложных тревог 0 / 313 и при старых, и при новых порогах, число `watching` на фоне то же (32); Pd роя 3 / 4 / 6 / 12 аккаунтов: 0.57 / 0.86 / 0.97 / 0.99 → 0.94 / 0.99 / 1.00 / 0.99. Окна eval содержат одну тему, поэтому Pfa = 0 покрывает мусор поиска внутри темы, но не посты чужих тем. Цена: порог общий для всех тем (среднее квантилей), и луч темы с высоким фоном пропускает чужие посты: у `helsinki-tram-fares` вес > 0 у 98% постов чужих тем (вес 1 у 73%), у живых тем 11–51% (вес 1 у 2–22%); при 0.81/0.83 было 1–40%. В живом окне чужие посты почти не появляются: worker отбирает посты темы по ключевым словам заголовка, а `helsinki-tram-fares` — только синтетика. Направление луча по запросу темы и пороги по теме не делали.
+**Resolution T15 (Sat 14.11):** the thresholds are taken from the same calibration, but on live data: 0.78 / 0.80. On eval windows (α = 2%, 4 inject topics, 313 background windows, 200 windows per swarm size): false alarms are 0 / 313 under both old and new thresholds, and the number of `watching` on background is the same (32). Swarm Pd for 3 / 4 / 6 / 12 accounts: 0.57 / 0.86 / 0.97 / 0.99 → 0.94 / 0.99 / 1.00 / 0.99. Eval windows contain a single topic, so Pfa = 0 covers in-topic search junk, but not unrelated-topic posts. Cost: the threshold is shared across all topics (mean of quantiles), and a topic beam with high background lets unrelated-topic posts through: for `helsinki-tram-fares`, weight > 0 on 98% unrelated-topic posts (weight 1 on 73%), and for live topics 11–51% (weight 1 on 2–22%). Under 0.81/0.83 it was 1–40%. In a live window, unrelated-topic posts rarely appear: the worker selects topic posts by headline keywords, and `helsinki-tram-fares` is synthetic-only. Topic-query beam steering and per-topic thresholds were not implemented.
 
-### 3.3. Шум (H0) и подавление клаттера
-Шум не белый: люди в одной теме похожи (cos двух случайных постов ≈ 0.3–0.4). Это клаттер. Убираем его **отбеливанием**: убираем из каждого поста проекцию на луч `â` (§3.2a) и нормируем остаток,
+### 3.3. Noise (H0) and clutter suppression
+The noise is not white: people in the same topic are similar (cos of two random posts ≈ 0.3–0.4). This is clutter. We remove it via **whitening**: we subtract the projection onto beam `â` (§3.2a) from each post and normalize the residual,
 `ẽ = norm(e − ⟨e, â⟩·â)`.
-Если остаток почти нулевой (пост целиком «общая тема»), `ẽ = 0`: такой пост ни с кем не коррелирует.
-*На пальцах:* в комнате гудит кондиционер, все микрофоны его слышат и потому «похожи». Вычли гул, осталась речь.
-*Пример (3 координаты: «про тарифы», «скам политиков», «давка в трамвае»):* люди `(0.9, 0.44, 0)` и `(0.9, 0, 0.44)`: cos 0.81 → после вычитания проекции на луч `(1, 0, 0)` остаётся `(0, 1, 0)` и `(0, 0, 1)`, cos 0. Боты `(0.9, 0.44, 0)` и `(0.9, 0.40, 0.17)`: cos 0.98 → 0.92. Контраст вырос.
+If the residual is near zero (the post is purely "general topic"), `ẽ = 0`: such a post correlates with nothing.
+*Intuitively:* an air conditioner is humming in the room, so all microphones hear it and appear "similar." Subtract the hum, and only speech remains.
+*Example (3 coordinates: "about fares", "politicians' scam", "crowded tram"):* humans `(0.9, 0.44, 0)` and `(0.9, 0, 0.44)`: cos 0.81 → after subtracting the projection onto beam `(1, 0, 0)`, `(0, 1, 0)` and `(0, 0, 1)` remain, cos 0. Bots `(0.9, 0.44, 0)` and `(0.9, 0.40, 0.17)`: cos 0.98 → 0.92. Contrast increased.
 
-### 3.4. Коррелятор пар
-Для постов p (аккаунт i) и q (аккаунт j): смысловая близость `c_pq = √(b_p·b_q) · max(0, ⟨ẽ_p, ẽ_q⟩)` (b = усиление луча, §3.2a), задержка `Δt_pq = t_q − t_p`.
+### 3.4. Pairwise correlator
+For posts p (account i) and q (account j): semantic similarity `c_pq = √(b_p·b_q) · max(0, ⟨ẽ_p, ẽ_q⟩)` (b = beam gain, §3.2a), delay `Δt_pq = t_q − t_p`.
 ```
-R_ij(τ) = Σ_{p,q} c_pq · g(Δt_pq − τ) / √(n_i · n_j)      g = окно шириной Δ = 30 с
-R_ij    = max_{|τ| ≤ τ_max} w(τ) · R_ij(τ)                  w(τ) = exp(−|τ| / 2 мин),  τ_max = 10 мин
-lag_ij  = τ в точке максимума
+R_ij(τ) = Σ_{p,q} c_pq · g(Δt_pq − τ) / √(n_i · n_j)      g = window of width Δ = 30 s
+R_ij    = max_{|τ| ≤ τ_max} w(τ) · R_ij(τ)                  w(τ) = exp(−|τ| / 2 min),  τ_max = 10 min
+lag_ij  = τ at the maximum
 ```
-Вклад даёт только пара постов, близких **и по времени, и по смыслу**. Повторные залпы с тем же лагом складываются в одной ячейке τ (это и есть «общий код»), но не обязательны: детектор обязан сработать на **одном плотном залпе** (инжект кладёт кампанию в 15 минут).
-*Пример:* бот 1 в 12:00:10, бот 2 в 12:01:30, cos 0.9 → вклад 0.9 на лаге 80 с (вес ≈ 0.5). Тот же ответ через 40 минут → 0.
-Параметры (`τ_max`, `Δ`, ядро) лежат в конфиге: можно запустить **второй анализатор параллельно** («медленный», `τ_max` = 60 мин), как банк фильтров с разной полосой.
-*Ограничение (в слайд):* медленную кампанию с постами раз в час основной канал не видит.
+Only a pair of posts close **in both time and meaning** contributes. Repeated volleys with the same lag accumulate in a single τ bin (this is the "shared code"), but they are not required: the detector must trigger on **a single dense volley** (the inject places the campaign within 15 minutes).
+*Example:* bot 1 at 12:00:10, bot 2 at 12:01:30, cos 0.9 → contribution 0.9 at lag 80 s (weight ≈ 0.5). Same response after 40 minutes → 0.
+The parameters (`τ_max`, `Δ`, kernel) live in the config: you can run **a second analyzer in parallel** ("slow", `τ_max` = 60 min), like a filter bank with different passbands.
+*Limitation (for the slide):* the main channel does not see a slow campaign posting once an hour.
 
-### 3.5. Фон и порог (CFAR по парам)
-Опорные ячейки = все остальные пары аккаунтов той же темы и окна (OS-CFAR, порядковая статистика):
-`z_ij = (R_ij − медиана) / σ_R`, где `σ_R = max(1.4826 · MAD, σ_R,min)`; пара «горит», если `z_ij > k` (старт k = 3).
-**Пол `σ_R,min` = 0.05 обязателен:** в редком живом потоке у большинства пар `R_ij` = 0 (нет постов ближе 10 минут), медиана и MAD обе нулевые, и без пола было бы деление на ноль.
-**Минимум опорных ячеек (2000):** если пар в теме меньше, фон дополняется парами с `R` = 0 (два несвязанных аккаунта, значение при H0). Иначе в тихой теме, где рой это большинство аккаунтов (инжект в тему с 0–3 живыми аккаунтами), медиана садится на уровень самого роя и он не виден. Было 200: двух инжектов подряд (24 аккаунта, 276 пар) уже хватало, чтобы пары роя перевесили добивку, и тема оставалась без находок (найдено на VPS 14.11). При 2000 тихой считается тема примерно до 45 аккаунтов (2–3 инжекта); в большой теме (≥ 2000 пар) фоном остаётся медиана, и равномерно «шумная» тема тревог не даёт.
+### 3.5. Background and threshold (pairwise CFAR)
+Reference cells = all other account pairs in the same topic and window (OS-CFAR, order statistics):
+`z_ij = (R_ij − median) / σ_R`, where `σ_R = max(1.4826 · MAD, σ_R,min)`. A pair "lights up" if `z_ij > k` (initial k = 3).
+**The floor `σ_R,min` = 0.05 is required:** in a sparse live stream, most pairs have `R_ij` = 0 (no posts closer than 10 minutes), so both the median and MAD are zero, and without the floor there would be division by zero.
+**Minimum reference cells (2000):** if there are fewer pairs in the topic, the background is padded with pairs having `R` = 0 (two unrelated accounts, the value under H0). Otherwise, in a quiet topic where the swarm makes up the majority of accounts (an inject into a topic with 0–3 live accounts), the median settles at the swarm's own level and it goes undetected. Previously it was 200: two consecutive injects (24 accounts, 276 pairs) were already enough for the swarm pairs to outweigh the padding, leaving the topic with no detections (found on VPS 14.11). At 2000, a topic is considered quiet up to roughly 45 accounts (2–3 injects). In a large topic (≥ 2000 pairs), the median remains the background, and a uniformly "noisy" topic produces no alarms.
 
-**Время жизни инжекта (`synthetic_ttl_sec` = 900 с):** синтетическая кампания участвует в детекции 900 с после своего последнего поста (он на 4–6 мин раньше клика, то есть ~9–11 мин после клика), потом выпадает из окна целиком; повторные инжекты не копятся в 6-часовом окне. Работает, когда worker передаёт `now` в `detect` (`ingest/worker.py::load_detector`, добавлено с согласия Тимура 14.11). В тестах и eval (`now=None`) ничего не отбрасывается.
-Роев мало, пар много, поэтому медиана устойчива к самим целям. Порог адаптируется сам: в час пик и в тихой теме ложная тревога одинаковая.
+**Inject lifetime (`synthetic_ttl_sec` = 900 s):** a synthetic campaign participates in detection for 900 s after its last post (which is 4–6 min before the click, i.e., ~9–11 min after the click), and then drops out of the window completely. Repeated injects do not accumulate in the 6-hour window. This works when the worker passes `now` to `detect` (`ingest/worker.py::load_detector`, added with Timur's approval 14.11). Nothing is dropped in tests and eval (`now=None`).
+Swarms are few and pairs are many, so the median is robust to the targets themselves. The threshold adapts automatically: the false alarm rate is the same during peak hours and in a quiet topic.
 
-### 3.6. Сборка роя, накопление, SNR
-- Граф: рёбра там, где `z_ij > k`; рой = связная группа из **≥ 3 аккаунтов** (пара бывает случайной или диалогом).
-- Когерентное накопление по **всем** M = N(N−1)/2 парам группы (включая пары без ребра): `Z = Σ z_ij / √M`. Сигнал растёт как M, шум как √M, выигрыш обработки `10·lg(M)` дБ.
-- **`snr_db_single` = 20·lg(средняя z_ij)**, **`snr_db` = 20·lg(Z)**. Одна и та же статистика до и после накопления, разница ровно равна выигрышу. Если средняя `z_ij` ≤ 0.1, берём 0.1 (−20 дБ), чтобы логарифм был определён. (Вариант «частота постов аккаунта против фона» отвергнут как нестрогий.)
-*Пример:* 6 аккаунтов, 15 пар по 4σ (+12 дБ, чуть выше порога k = 3) → Z = 15·4/√15 ≈ 15.5σ (+23.8 дБ), выигрыш 11.8 дБ = 10·lg(15).
+### 3.6. Swarm assembly, integration, SNR
+- Graph: edges exist where `z_ij > k`. A swarm is a connected group of **≥ 3 accounts** (a pair can be coincidental or a dialogue).
+- Coherent integration over **all** M = N(N−1)/2 pairs in the group (including pairs without an edge): `Z = Σ z_ij / √M`. Signal grows as M, noise as √M, processing gain is `10·lg(M)` dB.
+- **`snr_db_single` = 20·lg(mean z_ij)**, **`snr_db` = 20·lg(Z)**. This is the same statistic before and after integration, and the difference equals the gain exactly. If mean `z_ij` ≤ 0.1, we take 0.1 (−20 dB) so the logarithm is defined. (The option "account post rate vs. background" was rejected as non-rigorous.)
+*Example:* 6 accounts, 15 pairs at 4σ (+12 dB, slightly above threshold k = 3) → Z = 15·4/√15 ≈ 15.5σ (+23.8 dB), gain 11.8 dB = 10·lg(15).
 
-### 3.7. Решение: SPRT
-Наблюдения = посты аккаунтов группы по времени, **начиная со второго** (первый пост роя это «зондирующий импульс», ему не на что откликаться). Признак поста, **«эхо»**, причинный (смотрит только назад, как в реальном времени): `x_k = max` по **более ранним** постам других аккаунтов группы от `c_pq · exp(−Δt/2 мин)` при `0 ≤ Δt ≤ τ_max`; если таких нет, `x_k = 0`.
-Гауссова модель со сдвигом среднего (классика Вальда):
-- H0: `x ~ N(μ0, σ²)`. μ0 и σ меряем по фону робастно: тот же причинный признак для каждого поста темы относительно постов **всех** других аккаунтов темы, но по постам аккаунтов **вне** проверяемой группы (защитные ячейки, как в CFAR: цель не входит в свой фон); если таких постов меньше 30, фон дополняется эхом 0 (одиночный пост). μ0 = медиана, σ = max(1.4826·MAD, σ_min), `σ_min` = 0.15. Медиана не даёт рою «подтянуть» фон, а пол нужен, потому что у большинства органических постов эхо ровно 0;
-- H1: `x ~ N(μ1, σ²)`, μ1 = **проектный параметр «минимальная цель»** (старт: 0.5), не обучается.
+### 3.7. Decision: SPRT
+Observations = posts from group accounts ordered by time, **starting from the second** (the swarm's first post is the "probing pulse" and has nothing to respond to). The post feature, **"echo"**, is causal (looks backward only, as in real time): `x_k = max` over **earlier** posts from other accounts in the group from `c_pq · exp(−Δt/2 min)` at `0 ≤ Δt ≤ τ_max`. If there are none, `x_k = 0`.
+Gaussian model with mean shift (Wald's classic):
+- H0: `x ~ N(μ0, σ²)`. We measure μ0 and σ robustly over the background: the same causal feature for each post in the topic relative to posts from **all** other accounts in the topic, but only over posts from accounts **outside** the group under test (guard cells, as in CFAR: the target is excluded from its own background). If there are fewer than 30 such posts, the background is padded with echo 0 (single post). μ0 = median, σ = max(1.4826·MAD, σ_min), `σ_min` = 0.15. The median prevents the swarm from "pulling up" the background, and the floor is needed because most organic posts have echo equal to 0.
+- H1: `x ~ N(μ1, σ²)`, μ1 = **design parameter "minimum target"** (initial: 0.5), not learned.
 ```
-ΔΛ_k = (μ1 − μ0)/σ² · (x_k − (μ0 + μ1)/2),   с ограничителем: ΔΛ_k ∈ [−1, +1.5]
-Λ ≥ ln((1−β)/α) → coordinated;   Λ ≤ ln(β/(1−α)) → organic;   иначе watching
+ΔΛ_k = (μ1 − μ0)/σ² · (x_k − (μ0 + μ1)/2),   clipped to ΔΛ_k ∈ [−1, +1.5]
+Λ ≥ ln((1−β)/α) → coordinated;   Λ ≤ ln(β/(1−α)) → organic;   otherwise watching
 ```
-Ограничитель = робастность к выбросам (один пост не решает всё). На синтетике ничего не обучаем, поэтому eval не круговой.
-*Пример (μ0 = 0.1, σ = 0.25, μ1 = 0.5; пороги +3.8 / −2.3):* три эха по 0.65 → +1.5 ×3 = 4.5 ≥ 3.8 → тревога на **4-м посте роя** (первый пост без эха, дальше три наблюдения). Три эха по 0.05 → −1 ×3 = −3 ≤ −2.3 → органика.
+Clamp = robustness to outliers (one post does not decide everything). Nothing is trained on synthetic data, so eval is not circular.
+*Example (μ0 = 0.1, σ = 0.25, μ1 = 0.5; thresholds +3.8 / −2.3):* three echoes of 0.65 → +1.5 ×3 = 4.5 ≥ 3.8 → alarm on **swarm post 4** (first post has no echo, followed by three observations). Three echoes of 0.05 → −1 ×3 = −3 ≤ −2.3 → organic.
 
-### 3.8. Ложная цель: «эхо новости»
-Громкая новость возбуждает всех одним внешним импульсом, и честные люди постят заголовок синхронно. Проверка: если за 60 минут до первого поста группы в теме вышла статья (`source = context_news`, автор не из группы) с тем же смыслом (cos > 0.8 между **отбелёнными** векторами статьи и центроида группы), группа помечается «эхо новости» и не может стать `coordinated` (максимум `watching`); в `Finding.note`: «эхо новости: <первые 80 символов текста статьи>». Оставшиеся ошибки идут в `failure_examples`.
-Статьи участвуют в корреляторе как обычные посты (автор = издание). В запасном режиме `[ALT]` (социальных авторов нет, все аккаунты это издания) правило выключается само: оно работает, только если в окне темы есть посты `context_social` (до T6b живой поток был только из новостей; с T6b в окне есть посты Bluesky, и правило включено). Иначе оно блокировало бы каждый инжект в новостную тему. Флаг `news_echo_enabled` в конфиге выключает его везде.
+### 3.8. False target: "news echo"
+Breaking news excites everyone with a single external pulse, and honest people post the headline synchronously. Check: if an article (`source = context_news`, author not from the group) with the same meaning (cos > 0.8 between the **whitened** vectors of the article and the group centroid) was published within 60 minutes before the group's first post in the topic, the group is labeled "news echo" and cannot become `coordinated` (at most `watching`). In `Finding.note`: "news echo: <first 80 characters of the article text>". Remaining errors go to `failure_examples`.
+Articles participate in the correlator like regular posts (author = outlet). In fallback mode `[ALT]` (no social authors, all accounts are outlets), the rule turns itself off: it runs only if the topic window contains `context_social` posts (before T6b, the live stream consisted only of news. Since T6b, the window includes Bluesky posts, and the rule is enabled). Otherwise it would block every injection into a news topic. The `news_echo_enabled` flag in the config disables it everywhere.
 
-**Перепечатка новости.** Группа, в которой **все** посты (с 15.11 — не меньше половины) это статьи `context_news` (издания перепечатывают одну заметку агентства с разницей в минуты), тоже не может стать `coordinated` (максимум `watching`); в `Finding.note`: `news reprint: <первые 80 символов самой ранней статьи группы>`. Правило работает и в `[ALT]`: издания не люди, и рой из одних изданий это синдикация, а не кампания. Группа с хотя бы одним синтетическим постом его не задевает (до 15.11 — и с социальным, см. ниже), поэтому инжект в новостную тему остаётся `coordinated`. Найдено на VPS 14.11: microsoft-global-outage, 7 изданий с текстом AP за минуту давали `coordinated`; с правилом на том же окне `watching`. Флаг `news_reprint_enabled`. **С 15.11 (50 тем):** правило срабатывает, если статьи составляют **не меньше половины** постов группы (`news_reprint_min_share = 0.5`; 1.0 — прежнее «все посты»), а синтетических постов в группе нет. Причина — живые ложные тревоги на новых темах: издания публикуют заметку агентства и одновременно постят её в Bluesky со своих аккаунтов, так что в группе 30 статей + 1 пост (new-orleans-cruise-tanker), 14 + 12 (spacex-starship), 4 + 2 (faa-ground-stop), и правило «все посты» не срабатывало. «Эхо новости» такие группы не ловит: после отбеливания косинус статьи к центроиду постов ≈ 0 (сырой ≈ 0.9), а порог 0.8. На живом окне 49 тем (15.11, только чтение): реальных `coordinated` 11 → 4. Оставшиеся — группы без статей внутри (3 спортивных аккаунта с дословным текстом AP, 7 чешских новостных аккаунтов): по форме не отличимы от копипасты, ограничение. Цена: настоящая кампания, в группе которой статей не меньше половины, тоже станет `watching`. Eval (15.11, тот же фон 48 ч): при живом `cfar_k` = 3 Pfa 0.038 → 0.013, Pd 0.91 → 0.909; рабочая точка k = 3.5 (Pfa 0.010, Pd 0.912; было k = 6, 0.013 / 0.856); Pd по размеру роя 3/4/6/8/12: 0.82/0.89/0.94/0.92/0.93 (было 0.72/0.83/0.92/0.91/0.88). `cfar_k` не меняли.
+**News reprint.** A group in which **all** posts (since 15.11, at least half) are `context_news` articles (outlets reprint the same wire story minutes apart) also cannot become `coordinated` (at most `watching`). In `Finding.note`: `news reprint: <first 80 characters of the earliest article in the group>`. The rule also works in `[ALT]`: outlets are not people, and a swarm consisting solely of outlets is syndication, not a campaign. A group with at least one synthetic post is unaffected by it (before 15.11, also one with a social post, see below), so an injection into a news topic remains `coordinated`. Found on VPS 14.11: microsoft-global-outage, 7 outlets with AP text in one minute produced `coordinated`. With the rule on the same window, `watching`. Flag `news_reprint_enabled`. **Since 15.11 (50 topics):** the rule triggers if articles make up **at least half** of the group's posts (`news_reprint_min_share = 0.5`; 1.0 is the former "all posts") and there are no synthetic posts in the group. Reason: live false alarms on new topics. Outlets publish a wire story and simultaneously post it to Bluesky from their accounts, so a group has 30 articles + 1 post (new-orleans-cruise-tanker), 14 + 12 (spacex-starship), 4 + 2 (faa-ground-stop), and the "all posts" rule did not trigger. "News echo" does not catch such groups: after whitening, the cosine of the article to the post centroid is ≈ 0 (raw ≈ 0.9), while the threshold is 0.8. On a live window of 49 topics (15.11, read-only): real `coordinated` 11 → 4. The remaining ones are groups with no articles inside (3 sports accounts with verbatim AP text, 7 Czech news accounts): indistinguishable in form from copy-paste, a limitation. Cost: a real campaign whose group has at least half articles will also become `watching`. Eval (15.11, same 48 h background): with live `cfar_k` = 3, Pfa 0.038 → 0.013, Pd 0.91 → 0.909. Operating point k = 3.5 (Pfa 0.010, Pd 0.912; previously k = 6, 0.013 / 0.856). Pd by swarm size 3/4/6/8/12: 0.82/0.89/0.94/0.92/0.93 (previously 0.72/0.83/0.92/0.91/0.88). `cfar_k` was not changed.
 
-**Вирусное эхо (T6b).** Мем («The person responsible for the Microsoft Outage. Wrong answers only.») десятки реальных людей повторяют почти дословно в течение часов; коррелятор режет этот поток на плотные группы, и каждая выглядит как copypasta (на VPS 14.11 с Bluesky — 8 ложных `coordinated` на microsoft). Отличие от кампании: то же сообщение ходит в живом потоке и вне группы. Если ≥ `viral_echo_min_accounts` (3) аккаунтов **вне группы** до или после первого (не новостного) поста группы (±`viral_echo_max_age_sec` = ±6 ч; вживую — до текущего момента) писали то же (cos > `viral_echo_cos` = 0.8 между отбелёнными векторами и центроидом группы), группа не может стать `coordinated` (максимум `watching`); в `Finding.note`: `viral echo: <первые 80 символов самого раннего такого поста>`. Почему в обе стороны: у окна есть край — у первой волны мема (или первых репостов заголовка) внутри окна нет ничего раньше, зато следующие волны других людей идут после неё. Свежая кампания несёт своё новое сообщение, вне её его никто не повторяет. Eval 14.11 (48 ч фона с Bluesky, k = 3): фон microsoft даёт тревогу в 21/34 окнах без правила, 9/34 с правилом «только назад» (версия `a227016`), 4/34 в обе стороны; Pd не изменился. Но инжекты eval имеют `source = synthetic` и правилом не учитываются как поток, поэтому это не доказывает безопасность правила для настоящих (не синтетических) кампаний. «Живой поток» — только `context_social` / `context_news`; исключение `source = synthetic` — намеренная асимметрия: инжекты демо и eval не часть живого потока, поэтому повторная атака red team на ту же тему в пределах окна (те же тексты вариаций) не гасится предыдущей атакой (и наоборот). Настоящая кампания, пришедшая как `context_social`, учитывается как поток — это задокументированное ограничение. Ограничения: вторая волна реальной кампании новыми аккаунтами, повторяющая первую, опускается до `watching`; когда в окне уже есть поздние волны, опускается и первая волна. Вживую первая волна успевает поднять тревогу до появления следующих, в ретроспективе (eval, окно целиком) — нет. Как и эхо новости, работает только при постах `context_social` в окне. Флаг `viral_echo_enabled`, код `detect/viral_echo.py`.
+**Viral echo (T6b).** Dozens of real people repeat a meme ("The person responsible for the Microsoft Outage. Wrong answers only.") almost verbatim over the course of hours. The correlator cuts this stream into dense groups, and each looks like copypasta (on the VPS on 14.11 with Bluesky, 8 false `coordinated` on microsoft). Difference from a campaign: the same message circulates in the live stream outside the group as well. If ≥ `viral_echo_min_accounts` (3) accounts **outside the group** before or after the group's first (non-news) post (±`viral_echo_max_age_sec` = ±6 h, or up to the current moment in live mode) wrote the same thing (cos > `viral_echo_cos` = 0.8 between the whitened vectors and the group centroid), the group cannot become `coordinated` (at most `watching`). In `Finding.note`: `viral echo: <first 80 characters of the earliest matching post>`. Why both directions: the window has an edge — the first wave of the meme (or the first reposts of a headline) has nothing earlier inside the window, while subsequent waves from other people follow after it. A fresh campaign brings its own new message, and no one repeats it outside the campaign. Eval 14.11 (48 h of Bluesky background, k = 3): the microsoft background triggers an alert in 21/34 windows without the rule, 9/34 with the "backward-only" rule (version `a227016`), and 4/34 in both directions. Pd did not change. However, eval injects have `source = synthetic` and are not counted as part of the stream by the rule, so this does not prove the rule is safe for real (non-synthetic) campaigns. "Live stream" means only `context_social` / `context_news`. Excluding `source = synthetic` is an intentional asymmetry: demo and eval injects are not part of the live stream, so a repeated red-team attack on the same topic within the window (with the same variation texts) is not suppressed by the previous attack (and vice versa). A real campaign arriving as `context_social` is counted as part of the stream — this is a documented limitation. Limitations: a second wave of a real campaign using new accounts that repeats the first wave drops to `watching`. When later waves are already present in the window, the first wave also drops. In live operation, the first wave manages to raise an alert before the next waves appear, whereas in retrospect (eval, full window) it does not. Like the news echo, it only works when `context_social` posts are in the window. Flag `viral_echo_enabled`, code `detect/viral_echo.py`.
 
-### 3.9. Дисплей
-**Главный экран (для обычного человека):**
-- светофор + одна фраза: «🔴 6 аккаунтов говорят одно и то же почти одновременно. Целевой уровень ложной тревоги: 2%» (число = измеренная `MetricsReport.operating_pfa`, пока отчёта нет — проектная α = 2%);
-- переключатель тем = выбор луча (§3.2a);
-- **тело неопределённости**: 2D-карта по парам постов разных аккаунтов. X = задержка |τ| (0–10 мин, шаг 30 с), Y = смысловая расстройка `1 − max(0, cos)` после отбеливания (0–1, шаг 0.1; вторая координата расстройки, как доплер у радара), яркость = число пар. Два слоя: пары внутри роя (`counts`) и все остальные пары темы (`background`). Органика = ровный низкий «ковёр», рой = острый пик в углу («кнопка»). Это внутренняя статистика детектора (§3.4), а не отдельная картинка. В карту входят пары с `|τ| ≤ τ_max` (граница включена в последний бин). *Не путать с картой delay-Doppler из §2.10 (задержка от первого поста × скорость роста): она в CUT.*
+### 3.9. Display
+**Main screen (for a general audience):**
+- traffic light + one sentence: "🔴 6 accounts are saying the same thing almost simultaneously. Target false-alarm rate: 2%" (number = measured `MetricsReport.operating_pfa`, or design α = 2% until a report is available).
+- topic switcher = beam selection (§3.2a).
+- **ambiguity surface**: 2D map over pairs of posts from different accounts. X = delay |τ| (0–10 min, step 30 s), Y = semantic detuning `1 − max(0, cos)` after whitening (0–1, step 0.1; the second mismatch coordinate, like Doppler in radar), brightness = number of pairs. Two layers: pairs inside the swarm (`counts`) and all other pairs in the topic (`background`). Organic = a flat, low "carpet", and a swarm = a sharp peak in the corner ("thumbtack"). This is an internal detector statistic (§3.4), not a separate image. The map includes pairs with `|τ| ≤ τ_max` (the boundary is included in the last bin). *Do not confuse with the delay-Doppler map from §2.10 (delay from the first post × growth rate): that one is in CUT.*
 
-**Вкладка «Детали»:** heatmap `correlation` с `lag_sec`, SPRT-трасса с порогами, SNR «до → после» в дБ.
+**Details tab:** `correlation` heatmap with `lag_sec`, SPRT trace with thresholds, SNR "before → after" in dB.
 
-### 3.10. Метрики (Pd, Pfa, precision)
-Один опыт = одно окно (6 ч одной темы).
-- **Pfa** = доля окон **без цели** (фон: живой сэмпл, живой фон за 48 ч `fixtures/items_live_background.json` и органика фикстур, размноженные перемешиванием времени), где есть хотя бы один `coordinated`. Плюс **«честные» окна** (`real`): живая лента темы, нарезанная на непересекающиеся 6-часовые куски без перемешивания. Только они — независимые опыты, поэтому в `eval/operating_points.json` по ним отдельно пишем `n_independent`, `pfa_independent` и 95%-границу `pfa_independent_upper95` (размноженные окна коррелированы, и их граница «3/N» слишком оптимистична).
-- **Pd** = доля окон **с инжектом** (отложенные фразы), где найден `coordinated`, у которого ≥ половины аккаунтов действительно из инжекта **и** который покрывает ≥ половины аккаунтов инжекта.
-- **ROC** = кривая (Pfa, Pd) при движении порога CFAR `k` (через `detect/config.py`; α и β фиксированы). **Рабочая точка Неймана–Пирсона:** среди `k` с Pfa ≤ 2% берём тот, где Pd наибольший (при равенстве — больший `k`). Pd от `k` не монотонна: при очень низком `k` рой сливается с фоновыми аккаунтами и не проходит проверку чистоты. Сообщаем Pd в ней. T15: на нашем фоне ограничение Pfa не работает (Pfa = 0 при любом `k`), рабочая точка выходит `k` = 4 только по Pd (на 2–4 Pd одинаковый), дефолт оставили `k` = 3; `pd_by_size` и время до решения в отчёте посчитаны при `k` = 4 (при 3 разница ≤ 0.5 п.п.).
-- **Время до решения:** посты и секунды от первого поста роя до порога SPRT (признак причинный, §3.7, поэтому цифра честная для реального времени).
-- **Характеристика обнаружения:** Pd от числа аккаунтов в рое (3, 4, 6, 8, 12) при фиксированной Pfa. Готовый слайд про ограничения.
-- **Precision только на живых данных.** `precision = Pd·π / (Pd·π + Pfa·(1−π))` зависит от доли окон с роем π, которую на синтетике задаём мы сами (при Pd 87%, Pfa 2%: π = 0.5 → 98%, π = 0.01 → ≈ 31%), поэтому «синтетическую precision» не публикуем.
-  - **Live precision** (единица = аккаунт): реальные аккаунты из `coordinated` (цель ~25), разметка «подозрительный / органика / непонятно»; `precision = подозрительные / (подозрительные + органика)`. Аккаунты, добранные из `watching`, размечаем, но в формулу **не** включаем. Число «непонятно» пишем в слайд и в заметку отчёта (отдельного поля в контракте нет); всегда с интервалом Вильсона (16/21 = 76%, 55–89%).
-  - **Live FPR** = `P(алерт | органика)` с **перевзвешиванием** расслоенной выборки по реальной доле алертов (пример: 400 аккаунтов, алерт у 20, среди алертов органики 24% → ≈ 5 ложных; органики без алерта ≈ 350 → FPR ≈ 1.4%). «Алерт» здесь = `coordinated`. Для перевзвешивания нужны размеры слоёв: сколько всего аккаунтов и сколько с алертом по каждой теме (`eval/labels_meta.json`, см. T14).
-  - **Чистота роя** (синтетика, вспомогательная): доля аккаунтов найденной группы, которые правда из инжекта (6 из 7 → 86%). Не зависит от π.
-- Оговорка для слайда: разметку делаем сами по рубрике, это не независимая экспертиза.
+### 3.10. Metrics (Pd, Pfa, precision)
+One trial = one window (6 h of a single topic).
+- **Pfa** = fraction of windows **without a target** (background: live sample, live background over 48 h `fixtures/items_live_background.json`, and fixture organic data, augmented by time shuffling) that contain at least one `coordinated`. Plus **"honest" windows** (`real`): a topic's live feed sliced into non-overlapping 6-hour chunks without shuffling. Only these are independent trials, so in `eval/operating_points.json` we separately report `n_independent`, `pfa_independent`, and the 95%-bound `pfa_independent_upper95` for them (augmented windows are correlated, and their "3/N" bound is too optimistic).
+- **Pd** = fraction of windows **with an inject** (held-out phrases) where a `coordinated` is found in which ≥ half of the accounts are actually from the inject **and** which covers ≥ half of the inject's accounts.
+- **ROC** = (Pfa, Pd) curve as the CFAR threshold `k` sweeps (via `detect/config.py`, with α and β fixed). **Neyman–Pearson operating point:** among `k` with Pfa ≤ 2%, we take the one with the highest Pd (on ties, the larger `k`). Pd as a function of `k` is not monotonic: at very low `k`, the swarm merges with background accounts and fails the purity check. We report Pd at this operating point. T15: on our background, the Pfa constraint has no effect (Pfa = 0 for any `k`), the operating point comes out to `k` = 4 based on Pd alone (at 2–4, Pd is the same), and the default was kept at `k` = 3. `pd_by_size` and time to decision in the report are computed at `k` = 4 (at 3, the difference is ≤ 0.5 pp).
+- **Time to decision:** posts and seconds from the first post of the swarm to the SPRT threshold (the feature is causal, §3.7, so the figure is valid for real time).
+- **Detection curve:** Pd versus the number of accounts in the swarm (3, 4, 6, 8, 12) at a fixed Pfa. Ready-made slide on limitations.
+- **Precision on live data only.** `precision = Pd·π / (Pd·π + Pfa·(1−π))` depends on the fraction π of windows with a swarm, which we set ourselves in synthetic data (at Pd 87%, Pfa 2%: π = 0.5 → 98%, π = 0.01 → ≈ 31%), so we do not publish "synthetic precision".
+  - **Live precision** (unit = account): real accounts from `coordinated` (target ~25), labeled "suspicious / organic / unclear". `precision = suspicious / (suspicious + organic)`. Accounts additionally sampled from `watching` are labeled, but **not** included in the formula. We write the "unclear" count on the slide and in the report note (there is no separate field in the contract). Always include the Wilson interval (16/21 = 76%, 55–89%).
+  - **Live FPR** = `P(alert | organic)` with **reweighting** of the stratified sample by the actual alert share (example: 400 accounts, 20 with an alert, 24% organic among alerts → ≈ 5 false; organic without an alert ≈ 350 → FPR ≈ 1.4%). "Alert" here = `coordinated`. Reweighting requires stratum sizes: total accounts and accounts with an alert per topic (`eval/labels_meta.json`, see T14).
+  - **Swarm purity** (synthetic, auxiliary): fraction of accounts in the detected group that are actually from the injection (6 out of 7 → 86%). Does not depend on π.
+- Caveat for the slide: we do the labeling ourselves using a rubric. This is not an independent expert review.
 
-### 3.11. Поля контракта под этот дизайн (согласовано P1 + P2, сб 14.11)
-Все поля **необязательные**, старый код и старые фикстуры не ломаются. Источник истины: `contracts/models.py`.
-- `Finding.ambiguity: AmbiguityMap | None` = `{lag_edges_sec, mismatch_edges, counts[][], background[][] | None}`: сетка для тела неопределённости (эмбеддингов на фронте нет, считать может только детектор). `counts[m][l]` = число пар постов роя в клетке (расстройка m, задержка l).
-- `Finding.note: str | None`: пометка детектора, например «эхо новости: <начало текста статьи>».
+### 3.11. Contract fields for this design (agreed by P1 + P2, Sat 14.11)
+All fields are **optional**. Old code and old fixtures do not break. Source of truth: `contracts/models.py`.
+- `Finding.ambiguity: AmbiguityMap | None` = `{lag_edges_sec, mismatch_edges, counts[][], background[][] | None}`: grid for the ambiguity surface (there are no embeddings on the frontend, so only the detector can compute it). `counts[m][l]` = number of swarm post pairs in cell (detuning m, lag l).
+- `Finding.note: str | None`: detector annotation, for example "news echo: <beginning of article text>".
 - `MetricsReport.pd_by_size: list[(n_accounts, pd)]`, `swarm_purity: float | None`, `live_precision_ci: (lo, hi) | None`.
 
-### 3.12. Параметры анализатора (старт; единый список, живёт в `detect/config.py`)
-| Параметр | Значение | Где |
+### 3.12. Analyzer parameters (initial; single list, lives in `detect/config.py`)
+| Parameter | Value | Where |
 |---|---|---|
-| Окно детектора | 6 ч (`DETECT_WINDOW_HOURS`) | worker |
-| `τ_max` / `Δ` / ядро | 10 мин / 30 с / `exp(−\|τ\|/2 мин)` | §3.4, §3.7 |
-| Луч `c_lo` / `c_hi` | hash: 0.15 / 0.35; Gemini: 0.78 / 0.80 (`LTR_EMBEDDER=gemini python -m detect.calibrate_beam` на живом сэмпле и живом фоне за 48 ч, T15, сб 14.11: q50 / q90 проекций чужих тем на луч органики; до T15 было 0.81 / 0.83 по фикстурам). `detect()` берёт пару по эмбеддеру, который реально сработал (при сбое Gemini это hash) | §3.2a |
-| CFAR `k` / пол `σ_R,min` / мин. опорных ячеек | 3 (в сигмах MAD) / 0.05 / 2000 пар | §3.5 |
-| Время жизни инжекта | 900 с от последнего поста кампании (`synthetic_ttl_sec`, только при `now`) | §3.5 |
-| Мин. размер роя | 3 аккаунта | §3.6 |
-| SPRT `α` / `β` | 0.02 / 0.1 → пороги ln 45 ≈ +3.81 / ln(0.1/0.98) ≈ −2.28 | §3.7 |
-| SPRT `μ1` / ограничитель / пол `σ_min` / мин. фон | 0.5 / [−1, +1.5] / 0.15 / 30 постов | §3.7 |
-| «Эхо новости» | cos > 0.8 (отбелённые векторы) с центроидом группы, статья не старше 60 мин до первого поста; выкл. в `[ALT]` | §3.8 |
-| «Перепечатка новости» | ≥ 50% постов группы `context_news` и нет синтетики (`news_reprint_min_share`) → максимум `watching`; работает и в `[ALT]` (`news_reprint_enabled`) | §3.8 |
-| «Вирусное эхо» | ≥ 3 аккаунта живого потока (не `synthetic`) вне группы, cos > 0.8 (отбелённые векторы) с центроидом группы, ±6 ч от её первого поста → максимум `watching`; выкл. в `[ALT]` (`viral_echo_enabled`). При `DETECT_WINDOW_HOURS` = 6 предел ±6 ч ничего не отсекает, важен только для более длинных окон | §3.8 |
-| Рабочая точка | Pfa ≤ 2% | §3.10 |
-| Второй анализатор (опция) | `τ_max` = 60 мин, остальное то же | §3.4 |
+| Detector window | 6 h (`DETECT_WINDOW_HOURS`) | worker |
+| `τ_max` / `Δ` / kernel | 10 min / 30 s / `exp(−\|τ\|/2 min)` | §3.4, §3.7 |
+| Beam `c_lo` / `c_hi` | hash: 0.15 / 0.35; Gemini: 0.78 / 0.80 (`LTR_EMBEDDER=gemini python -m detect.calibrate_beam` on live sample and live background over 48 h, T15, Sat 14.11: q50 / q90 of projections of other topics onto the organic beam; before T15 it was 0.81 / 0.83 on fixtures). `detect()` takes the pair for the embedder that actually succeeded (on Gemini failure, that is hash) | §3.2a |
+| CFAR `k` / floor `σ_R,min` / min reference cells | 3 (in MAD sigmas) / 0.05 / 2000 pairs | §3.5 |
+| Injection lifetime | 900 s from the campaign's last post (`synthetic_ttl_sec`, only when `now`) | §3.5 |
+| Min swarm size | 3 accounts | §3.6 |
+| SPRT `α` / `β` | 0.02 / 0.1 → thresholds ln 45 ≈ +3.81 / ln(0.1/0.98) ≈ −2.28 | §3.7 |
+| SPRT `μ1` / clamp / floor `σ_min` / min background | 0.5 / [−1, +1.5] / 0.15 / 30 posts | §3.7 |
+| "News echo" | cos > 0.8 (whitened vectors) with group centroid, article no older than 60 min before the first post; off in `[ALT]` | §3.8 |
+| "News reprint" | ≥ 50% group posts `context_news` and no synthetics (`news_reprint_min_share`) → max `watching`; also active in `[ALT]` (`news_reprint_enabled`) | §3.8 |
+| "Viral echo" | ≥ 3 live-stream accounts (not `synthetic`) outside the group, cos > 0.8 (whitened vectors) with group centroid, ±6 h from its first post → max `watching`; off in `[ALT]` (`viral_echo_enabled`). With `DETECT_WINDOW_HOURS` = 6, the ±6 h limit filters nothing out and only matters for longer windows | §3.8 |
+| Operating point | Pfa ≤ 2% | §3.10 |
+| Second analyzer (optional) | `τ_max` = 60 min, everything else the same | §3.4 |
 
-## 4. Что выбрать на выходные
+## 4. What to pick for the weekend
 
-**MVP (обязательно), подробности в §3:**
-1. Луч на тему (бимформинг) + эмбеддинги + отбеливание (режекция клаттера темы).
-2. Коррелятор пар «время × смысл» с поиском лага (деспрединг).
-3. CFAR по парам (медиана + k·MAD) → рой ≥ 3 → когерентное накопление, SNR в дБ.
-4. SPRT (гауссова модель, ограничитель) → решение с заданными α, β; проверка «эхо новости».
-5. ROC + инжекция тестовой цели → Pd, Pfa, время до решения; precision и FPR только на живой разметке.
-6. Дисплей: тело неопределённости «задержка × смысловая расстройка» на главном экране, детали на вкладке.
+**MVP (required), details in §3:**
+1. Topic beam (beamforming) + embeddings + whitening (topic clutter rejection).
+2. "Time × semantics" pair correlator with lag search (despreading).
+3. Pairwise CFAR (median + k·MAD) → swarm ≥ 3 → coherent integration, SNR in dB.
+4. SPRT (Gaussian model, clamp) → decision with specified α, β; "news echo" check.
+5. ROC + test target injection → Pd, Pfa, time to decision. Precision and FPR on live labels only.
+6. Display: "delay × semantic detuning" ambiguity surface on the main screen, details in a tab.
 
-**Вау-слой: CUT.** Объём урезан до ядра (см. [architecture.md](architecture.md)).
+**Wow layer: CUT.** Scope trimmed down to the core (see [architecture.md](architecture.md)).
 
-**В слайд «что дальше» (не строим):** delay-Doppler, спектрограммы аккаунтов, MMSE-фактчек, OFDM-пилоты для оценки «канала» СМИ, SIC, BER мутаций.
+**For the "what's next" slide (not building):** delay-Doppler, account spectrograms, MMSE fact-checking, OFDM pilots for estimating the media "channel", SIC, mutation BER.
 
-## 5. Как это продаёт проект судьям Context.dev (тех-челлендж)
-| Их критерий | Наш ответ из теории сигналов |
+## 5. How this sells the project to Context.dev judges (tech challenge)
+| Their criterion | Our signal-theory answer |
 |---|---|
-| Креатив, комбинация эндпоинтов (40%) | Веб = эфир, Context.dev = антенна: news search + social scrape (+ brand/company, SHOULD S1) складываем из многих слабых источников в один сильный сигнал |
-| Центральность живых данных (30%) | Без живого потока нет ни одного алерта: CFAR пересчитывается на каждом новом батче поллинга |
-| Техника: точность, латентность, изменения во времени (30%) | **ROC по Нейману–Пирсону** + замер «секунд до обнаружения» через инжекцию цели; **SPRT** решает за несколько постов, а не через час |
+| Creativity, endpoint combination (40%) | Web = airwaves, Context.dev = antenna: news search + social scrape (+ brand/company, SHOULD S1) combined from many weak sources into one strong signal |
+| Centrality of live data (30%) | Without the live stream there is not a single alert: CFAR is recomputed on every new polling batch |
+| Technical execution: accuracy, latency, changes over time (30%) | **Neyman–Pearson ROC** + "seconds to detection" measurement via target injection. **SPRT** decides in a few posts rather than an hour later |
 
-**Питч-фраза:** *"Bots whisper below the noise floor. We built a spread-spectrum receiver for the web: Context.dev is our antenna, and a sequential likelihood test tells you a campaign is coordinated after a few posts, at a false-alarm rate you choose."*
+**Pitch line:** *"Bots whisper below the noise floor. We built a spread-spectrum receiver for the web: Context.dev is our antenna, and a sequential likelihood test tells you a campaign is coordinated after a few posts, at a false-alarm rate you choose."*
 
-## 6. Риски и как их обойти
-| Риск | Решение |
+## 6. Risks and how to work around them
+| Risk | Mitigation |
 |---|---|
-| Нет таймстемпов или авторов в данных | Сразу проверить ответы social- и news-эндпоинтов Context.dev (задача T2); запасной вариант — news search + синтетический рой |
-| Мало реальных роёв за выходные | Инжекция тестовой цели (это и метрика, и демо) |
-| Вероятности для LLR взять неоткуда | Гауссова модель Вальда (§3.7): фон меряем по данным, μ1 = проектный параметр; на синтетике не обучаем |
-| Судьи не знают радиотехнику | Каждый термин на дашборде с подписью простыми словами («SNR = насколько кампания громче фона») |
+| No timestamps or authors in the data | Check Context.dev social and news endpoint responses immediately (task T2). Fallback — news search + synthetic swarm |
+| Few real swarms over the weekend | Test target injection (serves as both a metric and a demo) |
+| Nowhere to get probabilities for LLR | Wald's Gaussian model (§3.7): we measure the background from data, and μ1 = design parameter. We do not train on synthetic data |
+| Judges do not know radio engineering | Every term on the dashboard has a plain-language caption ("SNR = how much louder the campaign is than the background") |

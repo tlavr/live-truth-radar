@@ -54,7 +54,7 @@ detect/ synth/ eval/       P2 "Brain": swarm detector, synthetic campaigns, metr
 tests/               `make test` (offline, fast), `make smoke URL=...`
 ```
 
-Docs (in Russian):
+Documentation:
 - `docs/HANDOFF.md` – start here: what we build, roles, deadlines, task plan.
 - `docs/workflow.md` – how we work: agents, branches, per-task cycle, testing.
 - `docs/tasks.md` – task cards (T0–T18, I1, S1, F).
@@ -63,6 +63,8 @@ Docs (in Russian):
 - `docs/signal-processing.md` – the signal-processing approach.
 - `docs/architecture.md` – scope (MUST/SHOULD/CUT), modules and owners, contract, stack, data, demo script.
 - `docs/submission-draft.md` – Junction submission text.
+- `docs/labelling.md` – labeling live accounts for live precision and FPR (T14).
+- `docs/bot-hive-variations.md` – how to create bot texts for Bot Hive attacks (`synth/variations/`).
 
 ## Secrets
 Never commit API keys, credit codes or `.env` files. Keep them in `.env` (git-ignored).

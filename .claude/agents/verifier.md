@@ -57,7 +57,7 @@ run offline (Docker, VPS, network), quote the exact lines that prove it. If you 
 it, put it under UNVERIFIED, not under findings.
 
 ## Focus `fit`: does it meet the card and the rules?
-- Every "Готово, когда" item of the card is met: run the ones that are offline and read-only
+- Every "Done when" item of the card is met: run the ones that are offline and read-only
   and show the result. For items that need Docker, the VPS, the network or `make eval`,
   inspect the files and list the item under UNVERIFIED with the exact command for the human.
 - Output validates against `contracts/models.py`; `contracts/` is unchanged unless the card
@@ -66,7 +66,7 @@ it, put it under UNVERIFIED, not under findings.
   tautologies). `make test` is green and under 5 s: report the measured time.
 - Only the owner's paths are touched: P1 = `ingest/ api/ web/ infra/ tests/smoke.py` and
   tests of those modules; P2 = `detect/ synth/ eval/ tests/test_detect_* tests/test_synth_*
-  tests/test_eval_*`. For cards owned by both ("оба"), the owner is the one in your input.
+  tests/test_eval_*`. For cards marked "both", the owner is the one in your input.
 - No secrets or real account handles in code, tests or fixtures; nothing from the CUT list
   (`docs/architecture.md`). AI model names are forbidden only in commit messages and PR
   titles; model ids in code are fine.
@@ -79,11 +79,11 @@ Focus `both` = do both lists in one run.
    SHOULD-FIX.
 2. Findings, most severe first. For each: severity, `file:line`, what is wrong, the input
    and the observed output (or the quoted lines), a suggested fix.
-   - BLOCKER = proven wrong result, crash, a "Готово, когда" item not met, a red
+   - BLOCKER = proven wrong result, crash, a "Done when" item not met, a red
      `make test`, a secret or real handle in the diff, `contracts/` or another owner's path
      changed without agreement, network in tests.
    - SHOULD-FIX = proven defect that shows up only on inputs outside the card's
-     "Готово, когда", or a test named in the card that is missing or cannot fail.
+     "Done when", or a test named in the card that is missing or cannot fail.
    - NIT = everything else; never affects the verdict.
    If unsure between two levels, take the lower. No style preferences.
 3. UNVERIFIED: what you suspected or were asked to check but could not run, with the command

@@ -1,58 +1,58 @@
-# Основной челлендж: Decode the Noise (Hostinger)
+# Main challenge: Decode the Noise (Hostinger)
 
 **ID 357 · Agentic AI Track · by Hostinger**
 
-### Одной фразой
-Построить AI-инструмент, который **находит пропаганду, бот-сети и злоумышленников онлайн**, и **задеплоить его вживую на инфраструктуре Hostinger**.
+### In one sentence
+Build an AI tool that **detects propaganda, botnets, and malicious actors online**, and **deploy it live on Hostinger infrastructure**.
 
-### Почему Hostinger это интересно
-Интернет задумывался, чтобы соединять людей, а стал «самой мощной машиной манипуляции»: пропаганда распространяется быстрее фактов, бот-сети формируют общественное мнение, злоумышленники всё изощрённее. Hostinger хостит **миллионы сайтов** и видит этот шум вблизи. Их тезис: та же технология, что питает веб, может его и защищать. Лучшие идеи детекции придут от команд, которые за 48 часов доходят от идеи до живого инструмента.
+### Why Hostinger cares
+The internet was meant to connect people, yet it became "the most powerful manipulation machine": propaganda spreads faster than facts, botnets shape public opinion, and malicious actors are growing ever more sophisticated. Hostinger hosts **millions of websites** and sees this noise up close. Their thesis: the same technology that powers the web can also protect it. The best detection ideas will come from teams that go from idea to live tool in 48 hours.
 
-### Что нужно сделать
-Инструмент, который анализирует **текст, контент соцсетей или паттерны веб-трафика** и находит признаки:
-- координированной пропаганды,
-- бот-усиления (amplification),
-- поведения злоумышленников.
+### What you need to build
+A tool that analyzes **text, social media content, or web traffic patterns** and finds signs of:
+- coordinated propaganda,
+- bot amplification,
+- malicious actor behavior.
 
-**Форма свободная:** API, дашборд, классификатор с объяснимым вердиктом, сервис мониторинга для владельцев сайтов.
+**Open format:** API, dashboard, classifier with an explainable verdict, monitoring service for site owners.
 
-### Жёсткое требование
-**Должно работать вживую на инфраструктуре Hostinger** к концу хакатона, с **публичным URL**, который судьи откроют.
-Им важнее **сила и честность логики детекции**, включая **работу с ложными срабатываниями**, чем красивый фронт.
+### Hard requirement
+**Must run live on Hostinger infrastructure** by the end of the hackathon, with a **public URL** that judges can open.
+They care more about the **strength and honesty of the detection logic**, including **handling false positives**, than a pretty frontend.
 
-### Четыре направления (одно или комбинация)
-| Направление | Что это (просто) | Какие сигналы |
+### Four tracks (one or a combination)
+| Track | What it is (in plain terms) | Signals to look for |
 |---|---|---|
-| **Spot the swarm** | Найти «рой»: бот-сети, астротурфинг (фейковая «народная» поддержка), бригадинг (организованные набеги) | Время публикаций, похожесть аккаунтов, повтор текста, паттерны усиления. **Не по одному посту, а по группе** |
-| **Name the technique** | Назвать приём манипуляции и **объяснить простыми словами**, почему это пропаганда, а не просто «это пропаганда» | Нагруженная лексика, апелляция к страху, вотэбаутизм («а у вас негров линчуют»), фейковый авторитет |
-| **Clean the traffic** | Отличить вредных ботов, скрейперов и подбор паролей (credential stuffing) от живых посетителей в **логах веб-сервера** + понятная панель для владельца сайта | IP, частота, user-agent, пути, паттерны логинов |
-| **Trust the source** | Оценить **происхождение** страницы или аккаунта, чтобы человек понял, кто на самом деле за этим стоит | Возраст домена, клонированный контент, AI-сгенерированный текст, сети ссылок |
+| **Spot the swarm** | Find the "swarm": botnets, astroturfing (fake "grassroots" support), brigading (organized raids) | Posting times, account similarity, text repetition, amplification patterns. **Not by a single post, but across a group** |
+| **Name the technique** | Name the manipulation technique and **explain in plain words** why it is propaganda, rather than just "this is propaganda" | Loaded language, appeal to fear, whataboutism ("and what about you?" deflection), fake authority |
+| **Clean the traffic** | Distinguish malicious bots, scrapers, and credential stuffing from human visitors in **web server logs** + a clear dashboard for the site owner | IP, rate, user-agent, paths, login patterns |
+| **Trust the source** | Assess the **provenance** of a page or account so a person can tell who is actually behind it | Domain age, cloned content, AI-generated text, link networks |
 
-**Особо ценят:** прозрачные и **измеримые** подходы. «Покажите precision и долю ложных срабатываний, а не только демо, которое работает на счастливом пути».
+**Especially valued:** transparent and **measurable** approaches. "Show precision and false positive rate, not just a demo that works on the happy path."
 
-### Что дают (бесплатно на 1 месяц каждой команде)
-- **Hostinger VPS KVM 2:** 2 vCPU, 8 ГБ RAM, 100 ГБ NVMe, 8 ТБ трафика, root, Docker, **бесплатный домен**, шаблоны в один клик: Ollama, n8n, Node.js, Python.
-- **Hostinger AI Router:** один API-ключ и общий баланс на **150+ моделей** (Anthropic, OpenAI, DeepSeek, Mistral, xAI…), совместим с OpenAI и Anthropic SDK.
-- **Hostinger AI Builder** на 1 месяц: «навайбкодить» фронт, дашборд или лендинг и опубликовать.
-- **Hostinger Connector, API и CLI:** подключить Claude Code, Cursor, VS Code или любой MCP-клиент → деплоить, управлять сервером и доменом из редактора. Docs: docs.hostinger.com/hostinger-connector · API: developers.hostinger.com · MCP: github.com/hostinger/api-mcp-server.
-- **Менторы:** Minijus Savickas (VPS Product), Emilis Strimaitis (Innovations, AI agents) на стенде весь уикенд + канал помощи.
-- Любой язык, фреймворк, модель (open-source или hosted), лишь бы **финальный продукт крутился на Hostinger**.
-- **Доклад:** «Vibe Coding Solved Building. Now Comes the Hard Part», **сб 13:00** (про то, как запускать, защищать и эксплуатировать код). Перспективным командам — продолжение разговора с инженерами Hostinger после события.
+### What you get (free for 1 month for each team)
+- **Hostinger VPS KVM 2:** 2 vCPU, 8 GB RAM, 100 GB NVMe, 8 TB bandwidth, root, Docker, **free domain**, one-click templates: Ollama, n8n, Node.js, Python.
+- **Hostinger AI Router:** one API key and shared balance for **150+ models** (Anthropic, OpenAI, DeepSeek, Mistral, xAI…), compatible with the OpenAI and Anthropic SDKs.
+- **Hostinger AI Builder** for 1 month: "vibe-code" a frontend, dashboard, or landing page and publish it.
+- **Hostinger Connector, API, and CLI:** connect Claude Code, Cursor, VS Code, or any MCP client → deploy, manage the server and domain from your editor. Docs: docs.hostinger.com/hostinger-connector · API: developers.hostinger.com · MCP: github.com/hostinger/api-mcp-server.
+- **Mentors:** Minijus Savickas (VPS Product), Emilis Strimaitis (Innovations, AI agents) at the booth all weekend + help channel.
+- Any language, framework, or model (open-source or hosted), as long as **the final product runs on Hostinger**.
+- **Talk:** "Vibe Coding Solved Building. Now Comes the Hard Part", **Sat 13:00** (about how to run, secure, and operate code). Promising teams get a follow-up conversation with Hostinger engineers after the event.
 
-### Как судят
-| Критерий | Вес | Что это значит на практике |
+### How projects are judged
+| Criterion | Weight | What it means in practice |
 |---|---|---|
-| **Качество детекции** (точность, работа с ложными срабатываниями, объяснимость) | **40%** | Таблица метрик на размеченных данных + объяснение каждого вердикта |
-| **Техника и живой деплой на Hostinger** | 25% | Публичный URL, стабильно работает |
-| **Оригинальность и реальный эффект** | 20% | Не «ещё один классификатор фейков» |
-| **Ясность демо** | 15% | Судья за 2 минуты понял, что и почему |
+| **Detection quality** (accuracy, false positive handling, explainability) | **40%** | Metrics table on labeled data + explanation of each verdict |
+| **Engineering and live deployment on Hostinger** | 25% | Public URL, runs reliably |
+| **Originality and real-world impact** | 20% | Not "just another fake-news classifier" |
+| **Demo clarity** | 15% | A judge understands what it does and why in 2 minutes |
 
-### Призы
-€2000 / €1000 / €500. Все три команды-победителя: **год хостинга + домен**, мерч, **спотлайт в соцсетях Hostinger**.
+### Prizes
+€2000 / €1000 / €500. All three winning teams: **one year of hosting + domain**, merch, **spotlight on Hostinger social media**.
 
-### Подводные камни
-- Без живого URL на Hostinger — мимо.
-- Нужны **размеченные данные** для метрик (иначе 40% под угрозой).
-- Ложные срабатывания = обвинение честных людей. Нужен порог «не уверен» и честность.
+### Pitfalls
+- Without a live URL on Hostinger, it is a no-go.
+- You need **labeled data** for metrics (otherwise 40% is at risk).
+- False positives mean accusing innocent people. You need an "uncertain" threshold and honesty.
 
 ---
