@@ -1,22 +1,194 @@
 {
+ "abortion": {
+  "n_accounts": 109,
+  "n_alerted": 0
+ },
+ "ai-data-centers": {
+  "n_accounts": 147,
+  "n_alerted": 0
+ },
+ "bird-flu": {
+  "n_accounts": 7,
+  "n_alerted": 0
+ },
+ "bitcoin-crypto": {
+  "n_accounts": 227,
+  "n_alerted": 5
+ },
+ "chile-fuel-protests": {
+  "n_accounts": 3,
+  "n_alerted": 0
+ },
+ "climate-change": {
+  "n_accounts": 125,
+  "n_alerted": 0
+ },
+ "cop31-climate": {
+  "n_accounts": 151,
+  "n_alerted": 0
+ },
+ "cyberattacks": {
+  "n_accounts": 48,
+  "n_alerted": 0
+ },
+ "deportations": {
+  "n_accounts": 36,
+  "n_alerted": 0
+ },
+ "epstein-files": {
+  "n_accounts": 214,
+  "n_alerted": 0
+ },
  "europe-bomb-threat-hoaxes": {
-  "n_accounts": 11,
+  "n_accounts": 10,
+  "n_alerted": 0
+ },
+ "faa-ground-stop": {
+  "n_accounts": 672,
   "n_alerted": 0
  },
  "france-riots": {
   "n_accounts": 8,
   "n_alerted": 0
  },
+ "gaza-ceasefire": {
+  "n_accounts": 65,
+  "n_alerted": 0
+ },
+ "hormuz-tankers": {
+  "n_accounts": 75,
+  "n_alerted": 0
+ },
+ "ice-overhaul": {
+  "n_accounts": 10,
+  "n_alerted": 0
+ },
+ "israel": {
+  "n_accounts": 601,
+  "n_alerted": 0
+ },
  "jensen-huang-resignation": {
-  "n_accounts": 2,
+  "n_accounts": 86,
+  "n_alerted": 5
+ },
+ "measles-outbreak": {
+  "n_accounts": 174,
   "n_alerted": 0
  },
  "microsoft-global-outage": {
-  "n_accounts": 54,
+  "n_accounts": 166,
+  "n_alerted": 0
+ },
+ "midterm-vote-count": {
+  "n_accounts": 47,
+  "n_alerted": 0
+ },
+ "musk": {
+  "n_accounts": 348,
+  "n_alerted": 5
+ },
+ "nato": {
+  "n_accounts": 467,
+  "n_alerted": 0
+ },
+ "new-orleans-cruise-tanker": {
+  "n_accounts": 90,
+  "n_alerted": 0
+ },
+ "north-korea": {
+  "n_accounts": 38,
+  "n_alerted": 0
+ },
+ "openai-chatgpt": {
+  "n_accounts": 130,
+  "n_alerted": 0
+ },
+ "pakistan-militants": {
+  "n_accounts": 10,
+  "n_alerted": 0
+ },
+ "poland-russia-border": {
+  "n_accounts": 22,
+  "n_alerted": 0
+ },
+ "putin-russia": {
+  "n_accounts": 668,
+  "n_alerted": 13
+ },
+ "rfk-vaccines": {
+  "n_accounts": 19,
+  "n_alerted": 0
+ },
+ "russell-brand-trial": {
+  "n_accounts": 176,
+  "n_alerted": 5
+ },
+ "schumer-leadership": {
+  "n_accounts": 671,
+  "n_alerted": 0
+ },
+ "sean-duffy-faa": {
+  "n_accounts": 317,
+  "n_alerted": 0
+ },
+ "south-sudan-elections": {
+  "n_accounts": 8,
+  "n_alerted": 0
+ },
+ "spacex-starship": {
+  "n_accounts": 634,
+  "n_alerted": 7
+ },
+ "sudan-war": {
+  "n_accounts": 16,
+  "n_alerted": 0
+ },
+ "taiwan-china": {
+  "n_accounts": 21,
+  "n_alerted": 0
+ },
+ "tariffs": {
+  "n_accounts": 75,
+  "n_alerted": 0
+ },
+ "trump-cuba": {
+  "n_accounts": 20,
+  "n_alerted": 0
+ },
+ "trump-xi-putin-summit": {
+  "n_accounts": 51,
+  "n_alerted": 0
+ },
+ "turkey-qatar-defense-pact": {
+  "n_accounts": 2,
+  "n_alerted": 0
+ },
+ "uk-starmer": {
+  "n_accounts": 19,
   "n_alerted": 0
  },
  "ukraine-peace-talks": {
-  "n_accounts": 7,
+  "n_accounts": 57,
+  "n_alerted": 0
+ },
+ "ukraine-territory-nato": {
+  "n_accounts": 20,
+  "n_alerted": 0
+ },
+ "us-iran-strikes": {
+  "n_accounts": 517,
+  "n_alerted": 0
+ },
+ "vaccines": {
+  "n_accounts": 109,
+  "n_alerted": 0
+ },
+ "venezuela": {
+  "n_accounts": 98,
+  "n_alerted": 0
+ },
+ "wildfire": {
+  "n_accounts": 24,
   "n_alerted": 0
  }
 }

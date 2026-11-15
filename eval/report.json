@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-15T02:20:58Z",
+ "generated_at": "2026-11-15T02:42:26Z",
  "roc": [
   [
    0.0008,
@@ -50,9 +50,9 @@
  "operating_pfa": 0.0098,
  "mean_posts_to_decision": 4.29,
  "mean_seconds_to_decision": 104.9,
- "live_fpr": 0.0,
- "live_precision": null,
- "n_labelled": 42,
+ "live_fpr": 0.0022,
+ "live_precision": 0.381,
+ "n_labelled": 50,
  "failure_examples": [
   {
    "kind": "false_positive",
@@ -109,5 +109,8 @@
   ]
  ],
  "swarm_purity": 0.9962,
- "live_precision_ci": null
+ "live_precision_ci": [
+  0.2075,
+  0.5912
+ ]
 }
