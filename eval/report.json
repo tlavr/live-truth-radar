@@ -1,55 +1,55 @@
 {
- "generated_at": "2026-11-14T22:26:28Z",
+ "generated_at": "2026-11-15T02:20:58Z",
  "roc": [
   [
    0.0008,
-   0.7087
+   0.6375
   ],
   [
    0.0033,
-   0.8562
+   0.795
   ],
   [
    0.0073,
-   0.8925
+   0.8383
   ],
   [
    0.0098,
-   0.9125
+   0.8642
   ],
   [
    0.0106,
-   0.9125
+   0.8642
   ],
   [
    0.0114,
-   0.9125
+   0.8642
   ],
   [
    0.0114,
-   0.9125
+   0.8642
   ],
   [
    0.0122,
-   0.9125
+   0.8642
   ],
   [
    0.0131,
-   0.9125
+   0.8642
   ],
   [
    0.0139,
-   0.9125
+   0.8642
   ],
   [
    0.0139,
-   0.9125
+   0.8642
   ]
  ],
- "detection_rate": 0.9125,
+ "detection_rate": 0.8642,
  "operating_pfa": 0.0098,
- "mean_posts_to_decision": 4.22,
- "mean_seconds_to_decision": 85.0,
+ "mean_posts_to_decision": 4.29,
+ "mean_seconds_to_decision": 104.9,
  "live_fpr": 0.0,
  "live_precision": null,
  "n_labelled": 42,
@@ -76,38 +76,38 @@
    "kind": "false_negative",
    "finding_id": null,
    "account": null,
-   "note": "injected swarm of 4 accounts (europe-bomb-threat-hoaxes) missed: CFAR assembled no group with the injected accounts"
+   "note": "injected swarm of 4 accounts (france-riots) missed: CFAR assembled no group with the injected accounts"
   },
   {
    "kind": "false_negative",
    "finding_id": null,
    "account": null,
-   "note": "injected swarm of 4 accounts (europe-bomb-threat-hoaxes) missed: CFAR assembled no group with the injected accounts"
+   "note": "injected swarm of 4 accounts (france-riots) missed: SPRT undecided (watching, LLR 0.02) on a group with 4/4 injected accounts"
   }
  ],
  "embedder": "gemini",
  "pd_by_size": [
   [
    3,
-   0.82
+   0.7417
   ],
   [
    4,
-   0.89
+   0.8617
   ],
   [
    6,
-   0.935
+   0.93
   ],
   [
    8,
-   0.92
+   0.955
   ],
   [
    12,
-   0.93
+   0.9583
   ]
  ],
- "swarm_purity": 0.997,
+ "swarm_purity": 0.9962,
  "live_precision_ci": null
 }
