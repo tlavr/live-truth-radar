@@ -29,7 +29,7 @@
   ];
   const RUN = STEPS.findIndex(s => s.run), WAIT = RUN + 1, FIRST_RESULT = RUN + 2, LAST = STEPS.length - 1;
 
-  let i = -1, box, hole, card, waitT, giveUp, fetching = false, asking;
+  let i = -1, box, hole, card, waitT, giveUp, fetching = false, asking, opened = false;   // opened: the tour ran the check itself
 
   const visible = e => {
     if (!e || e.closest('[hidden]')) return false;
@@ -98,6 +98,7 @@
     }
     show(WAIT);
     giveUp = setTimeout(() => { if (i === WAIT && stage() === 'home') show(LAST); }, 4000);   // not a monitored topic
+    opened = true;
     $('playBtn').click();                          // on the start page it submits the search (app.js); Safari < 16 has no requestSubmit
   }
 
@@ -107,6 +108,8 @@
   function end() {
     STEPS[i]?.out?.(); clearInterval(waitT); clearTimeout(giveUp);
     box?.remove(); box = card = hole = null; i = -1;
+    if (opened && stage() !== 'home') $('stopBtn').click();   // the tour's own check: stop its scan, back to the start page
+    opened = false;
     $('tourBtn')?.focus({preventScroll: true});    // focus back where the tour can be replayed
     removeEventListener('resize', place); removeEventListener('scroll', place, true); removeEventListener('keydown', key, true);
   }
