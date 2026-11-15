@@ -187,6 +187,6 @@
 /* intercept: the explanation, one beat at a time */
 .p-cap{position:absolute;left:50%;bottom:44px;width:980px;text-align:center;opacity:0;pointer-events:none}
 .p-cap b{display:block;font-size:44px;font-weight:700;letter-spacing:-.03em;line-height:1.1;color:#F2F6F3;text-shadow:0 2px 18px rgba(0,0,0,.9)}
-.p-cap span{display:block;margin-top:10px;font-size:22px;line-height:1.35;color:rgba(242,246,243,.82);text-shadow:0 2px 12px rgba(0,0,0,.9)}
+.p-cap>span{display:block;margin-top:10px;font-size:22px;line-height:1.35;color:rgba(242,246,243,.82);text-shadow:0 2px 12px rgba(0,0,0,.9)}
 .p-cap i{display:block;margin-top:12px;font:12px ui-monospace,Menlo,monospace;font-style:normal;letter-spacing:.14em;color:rgba(218,232,222,.4)}
 .p-cap::before{content:"";position:absolute;inset:-26px -60px -18px;z-index:-1;background:radial-gradient(60% 70% at 50% 60%,rgba(12,16,14,.85),rgba(12,16,14,0));}

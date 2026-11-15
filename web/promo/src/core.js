@@ -31,7 +31,7 @@ export const SCENES = [
   {id: 'shop', name: 'Shop (insert)', dur: 5.4},
   {id: 'social', name: 'Social (insert)', dur: 5.4},
   {id: 'decay', name: 'Decay → landing', dur: 10.3},
-  {id: 'intercept', name: 'Intercept', dur: 19},
+  {id: 'intercept', name: 'Intercept', dur: 49.4},
   {id: 'bothive-caught', name: 'BotHive · caught', dur: 7.5},
   {id: 'outro', name: 'Outro', dur: 9},
 ];
