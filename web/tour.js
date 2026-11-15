@@ -62,12 +62,20 @@
   function end() {
     put('done');
     box?.remove(); box = card = hole = null;
-    removeEventListener('resize', place); removeEventListener('scroll', place, true); removeEventListener('keydown', key);
+    removeEventListener('resize', place); removeEventListener('scroll', place, true); removeEventListener('keydown', key, true);
   }
-  function key(e) {
-    if (e.key === 'Escape') end();
-    else if (e.key === 'ArrowRight' && i < STEPS.length - 1) show(i + 1);
-    else if (e.key === 'ArrowLeft' && i) show(i - 1);
+  function key(e) {   // capture phase: the tour's keys never reach app.js (its Escape would leave the topic)
+    if (e.key === 'Tab') {                         // keep focus inside the card
+      const f = [...card.querySelectorAll('button,a')], a = f[0], z = f[f.length - 1];
+      if (!card.contains(document.activeElement)) { e.preventDefault(); a.focus(); }
+      else if (e.shiftKey && document.activeElement === a) { e.preventDefault(); z.focus(); }
+      else if (!e.shiftKey && document.activeElement === z) { e.preventDefault(); a.focus(); }
+      return;
+    }
+    const go = e.key === 'Escape' ? end : e.key === 'ArrowRight' && i < STEPS.length - 1 ? () => show(i + 1)
+      : e.key === 'ArrowLeft' && i ? () => show(i - 1) : null;
+    if (!go) return;
+    e.preventDefault(); e.stopImmediatePropagation(); go();
   }
 
   function start() {
@@ -79,11 +87,12 @@
     document.body.append(box);
     hole = box.querySelector('.tour-hole'); card = box.querySelector('.tour-card');
     card.addEventListener('click', e => {
+      if (e.target.closest('.tour-link')) return put('done');
       const b = e.target.closest('button'); if (!b) return;
       if (b.dataset.go) return show(+b.dataset.go);
       ({next: () => show(i + 1), back: () => show(i - 1), close: end, done: end})[b.dataset.act]?.();
     });
-    addEventListener('resize', place); addEventListener('scroll', place, true); addEventListener('keydown', key);
+    addEventListener('resize', place); addEventListener('scroll', place, true); addEventListener('keydown', key, true);
     show(0);
   }
 
