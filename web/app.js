@@ -81,7 +81,7 @@ const PAL = {bg: '#0C100E', cool: '#63CF97', muted: '#A3B8AA', warm: '#B7F063', 
 // grid of the time x meaning map (detect/timemap.py): the last L time bins of 30 s (10 min), 20 meaning-gap
 // bins of 0.05. Ordinary axes: the origin is "now" and meaning gap 0; time runs to the right into the past.
 // Labels every LABEL_EVERY bins (2 min, 0.2); a small tick at every bin.
-const M = 20, L = 20, BIN_MIN = .5, LABEL_EVERY = 4, MAP_MAX_AGE_MS = 20000;
+const M = 20, L = 20, BIN_MIN = .5, LABEL_EVERY = 4;
 const U0 = 0, U1 = L;  // the surface starts and ends exactly at the axes
 const W = 10, D = 6, PEAK = 3.1, NX = 190, NZ = 56;
 const PING_SEC = 2.4, PING_SPEED = 5;     // sonar: a ring leaves the antenna's corner at each data update and crosses the whole map; life (s), speed
@@ -232,11 +232,14 @@ const TICK_H = .26, AX_OFF = .35, HEIGHT_TICKS = [0, .2, .4, .6, .8, 1];
 const axSide = {x: -1, z: 1};  // x: -1 = meaning-gap axis on the left edge (gap 0 side), z: 1 = time axis on the front edge
 const timeZ = sz => sz > 0 ? Z(0) + AX_OFF : Z(M) - AX_OFF;
 const gapX = sx => sx < 0 ? X(0) - AX_OFF : X(L) + AX_OFF;
+let tickPhase = 0;                                    // see setOrigin: the time ticks move with the surface
 function drawAxes() {
   const sx = axSide.x, sz = axSide.z, ax = [], zt = timeZ(sz), xg = gapX(sx), zf = timeZ(-sz);
   ax.push(X(0), 0, zt, X(L), 0, zt, xg, 0, Z(0), xg, 0, Z(M));
-  for (let l = 0; l <= L; l++) {
-    const x = X(l), big = l % LABEL_EVERY === 0;
+  const f = tickPhase % 1, k0 = Math.floor(tickPhase);
+  for (let j = 0; j <= L; j++) {
+    const l = j + f; if (l > L + 1e-6) break;
+    const x = X(l), big = ((j - k0) % LABEL_EVERY + LABEL_EVERY) % LABEL_EVERY === 0;
     ax.push(x, 0, zt, x, 0, zt + sz * (big ? .14 : .07));
     if (big) ax.push(x, 0, zt, x, TICK_H, zt);
   }
@@ -462,7 +465,7 @@ const AXES = [
   {t: 'Meaning gap', p: (sx, sz) => [gapX(sx) + sx * 1.35, 0, Z(M / 2)], a: side, title: 1},
   // tick labels: the local clock time of each label, counted back from the origin (filled by setOrigin)
   ...Array.from({length: L / LABEL_EVERY + 1}, (_, k) => ({t: '', tk: k,
-    p: (sx, sz) => [X(k * LABEL_EVERY), 0, timeZ(sz) + sz * .4], a: () => 'c', k: 1})),
+    p: (sx, sz) => [X(k * LABEL_EVERY + tickPhase), 0, timeZ(sz) + sz * .4], a: () => 'c', k: 1})),
   // meaning gap 0..1: 0 = same meaning, 1 = unrelated
   ...[0, .2, .4, .6, .8, 1].map(g => ({t: g === 0 ? 'same meaning' : g === 1 ? 'unrelated' : String(g),
     p: (sx, sz) => [gapX(sx) + sx * .35, 0, Z(g * M)], a: side, k: 1})),
@@ -1096,6 +1099,7 @@ function syncClear() { $('clear').classList.toggle('visible', $('q').value.lengt
 /* ------------------------------------------------------------------ home: topics + feed */
 /* home: the topic picker under the search field: the monitored topics, then the latest alerts, filtered as you type */
 let sugItems = [], sugAt = -1;                       // the options on screen ({topic, fid?}) and the highlighted one
+let sugAll = false;                                  // "Show all N topics" pressed: every matching topic, the list scrolls
 const SUG_TOPICS = 5, SUG_ALERTS = 5;                // any number of topics: the 5 most recently active (or best matching) ones
 function renderHome() { if (!$('suggest').hidden) renderSuggest(); }
 // every typed word must appear in the topic's name (or its id), in any order
@@ -1111,9 +1115,11 @@ function matchTopics(typed) {
 }
 function renderSuggest() {
   const typed = $('q').value.trim(), hit = topicHit(typed);
+  const last = new Map();                            // topic -> its newest finding's time (the detector's last run there)
+  for (const f of S.findings) if (f.created_at > (last.get(f.topic) ?? '')) last.set(f.topic, f.created_at);
   const count = t => S.findings.filter(f => f.topic === t && f.verdict === 'coordinated').length;
   const all = matchTopics(typed);
-  const topics = all.slice(0, SUG_TOPICS), more = all.length - topics.length;
+  const topics = sugAll ? all : all.slice(0, SUG_TOPICS), more = all.length - topics.length;
   const alerts = S.findings.filter(f => f.verdict !== 'organic' && S.topics.includes(f.topic) && hit(f.topic))
     .sort((a, b) => RANK[a.verdict] - RANK[b.verdict] || b.created_at.localeCompare(a.created_at)).slice(0, SUG_ALERTS);
   sugItems = [...topics.map(t => ({topic: t})), ...alerts.map(f => ({topic: f.topic, fid: f.id}))];
@@ -1121,18 +1127,25 @@ function renderSuggest() {
   let i = 0;
   const opt = html => { const k = i++; return `<button type="button" class="opt" role="option" id="sug${k}" data-i="${k}" aria-selected="${k === sugAt}">${html}</button>`; };
   $('suggest').innerHTML =
-    (topics.length ? '<h3>Topics</h3>' + topics.map(t => opt(`<b>${esc(topicLabel(t))}</b>${count(t) ? `<span class="n" title="Swarms detected">${count(t)}</span>` : ''}`)).join('') +
-      (more ? `<p class="more">+${more} more · keep typing to narrow</p>` : '') : '') +
+    (topics.length ? '<h3>Topics</h3>' + topics.map(t => opt(`<b>${esc(topicLabel(t))}</b>${count(t) ? `<span class="n" title="Swarms detected">${count(t)}</span>` : ''}${last.has(t) ? `<span class="t" title="Last detector run with a finding">${ago(last.get(t))}</span>` : ''}`)).join('') +
+      (more ? `<button type="button" class="more" data-all>Show all ${all.length} topics <span>+${more}</span></button>`
+        : sugAll && all.length > SUG_TOPICS ? '<button type="button" class="more" data-fewer>Show fewer</button>' : '') : '') +
     (alerts.length ? '<h3>Latest alerts</h3>' + alerts.map(f => opt(`${dot(f.verdict)}<span>${VERDICT[f.verdict].title}</span>
       <span class="m">${esc(topicLabel(f.topic))} · ${f.accounts.length} accounts${f.synthetic ? ` · ${SIM}` : ''}</span><span class="t">${ago(f.created_at)}</span>`)).join('') : '') ||
     `<p class="none">No monitored topic matches “${esc(typed)}”.</p>`;
   if (sugAt >= 0) { $('q').setAttribute('aria-activedescendant', `sug${sugAt}`); $(`sug${sugAt}`)?.scrollIntoView({block: 'nearest'}); }
   else $('q').removeAttribute('aria-activedescendant');
 }
+// the list never runs past the bottom of the window: its height is what is left under the field (440 px at most)
+function fitSuggest() {
+  const s = $('suggest'), top = s.getBoundingClientRect().top;
+  s.style.maxHeight = `${Math.round(Math.max(160, Math.min(440, innerHeight - top - 16)))}px`;
+}
+addEventListener('resize', () => { if (!$('suggest').hidden) fitSuggest(); });
 function suggest(on) {
   on &&= root.dataset.stage === 'home';
   $('suggest').hidden = !on; $('q').setAttribute('aria-expanded', on);
-  if (on) renderSuggest(); else sugAt = -1;
+  if (on) { renderSuggest(); fitSuggest(); } else { sugAt = -1; sugAll = false; }
 }
 // picking fills the field; the check itself starts with Play (or Enter). An alert remembers its group for that
 let pickedFid = null;
@@ -1185,17 +1198,27 @@ async function refresh() {
       render();
       const want = rewindFor(shown());
       if (!S.tmap || (shown()?.id !== cur && want !== S.mapAt)) setMapAt(want);  // a new group on screen (or no map yet)
-      else loadMap();
+      else if (!S.drawnAt) glideMap(); else loadMap();
     } else if (!S.tmap) { if (!S.mapPending) setMapAt(rewindFor(shown())); }  // the first map never arrived: retry it
-    else if (S.list.some(f => !S.tmap.groups[f.id]) || (!S.drawnAt && Date.now() - Date.parse(S.tmap.now) > MAP_MAX_AGE_MS)) loadMap();  // keep "now" current; a rewound map stays put
+    else if (!S.drawnAt) glideMap();                 // live: every pulse moves the map on to "now", gliding
+    else if (S.list.some(f => !S.tmap.groups[f.id])) loadMap();  // a rewound map stays put (new groups only)
   }
   return true;
 }
 
 // time x meaning map of the open topic, live or rewound; the scene shows a flat floor until it arrives
 // the time axis: every label is a local clock time, counted back from the moment on screen (the origin)
+// the labels and the big ticks sit on round clock times (every LABEL_EVERY bins) and move with the surface:
+// tickPhase = bins from the origin to the newest labelled time, so a time stays attached to its column
 const setOrigin = () => {
-  for (const d of AXES) if (d.tk != null) d.el.textContent = S.tmap ? localHM(originMs() - d.tk * LABEL_EVERY * BIN_MS) : (d.tk ? '' : 'now');
+  const step = LABEL_EVERY * BIN_MS, o = S.tmap ? originMs() : 0, anchor = Math.floor(o / step) * step;
+  const phase = S.tmap ? (o - anchor) / BIN_MS : 0;
+  if (Math.abs(phase - tickPhase) > 1e-3) { tickPhase = phase; if (axGeo) drawAxes(); }
+  for (const d of AXES) if (d.tk != null) {
+    const u = d.tk * LABEL_EVERY + tickPhase;
+    d.el.style.visibility = u > L + 1e-6 ? 'hidden' : '';
+    d.el.textContent = S.tmap ? localHM(anchor - d.tk * step) : (d.tk ? '' : 'now');
+  }
   renderStrip();
 };
 function showMap() {
@@ -1215,6 +1238,38 @@ async function loadMap() {
     if (seq !== mapSeq || S.tmap !== base || S.mapPending || scrollTw || S.topic !== topic || S.alpha !== asked) return;
     if (!rewound) S.view = 0;
     S.tmap = r; showMap();
+  } catch (e) { console.warn('timemap', e); }
+  finally { S.mapBusy = false; }
+}
+
+/* Live map: the surface drifts toward the past at real time (the origin is the clock's "now", one bin per 30 s),
+   and every pulse (10 s scanning, 15 s polling) only refreshes the data under it. The map is fetched up to the last
+   whole 30 s boundary, so its bins never re-phase between fetches: a post keeps its place and its clock time.
+   S.view = -(now - map end) / bin, so screen column u always shows "u bins before now" */
+const DRIFT_MS = 125;                                // 8 frames a second: 1/240 of a bin per frame
+let driftK = null;                                   // the height scale, eased toward each new map's own scale
+const alignedNow = () => new Date(Math.floor(Date.now() / BIN_MS) * BIN_MS).toISOString();
+function driftView() { return -(Date.now() - Date.parse(S.tmap.now)) / BIN_MS; }
+function drift() {
+  if (root.dataset.stage !== 'result' || !S.tmap || S.drawnAt || scrollTw || S.mapPending) return;
+  S.view = driftView();
+  if (!ok) { setOrigin(); return; }
+  const kNew = scaleOf(sample(shown()));
+  driftK = driftK == null ? kNew : driftK + (kNew - driftK) * .15;
+  setField(shown(), driftK); setOrigin();
+}
+setInterval(() => { if (!reduced) drift(); }, DRIFT_MS);
+async function glideMap() {
+  const topic = S.topic, asked = S.alpha, seq = mapSeq, base = S.tmap;
+  if (!topic || !base || S.drawnAt || S.mapBusy || S.mapPending || scrollTw) return;
+  S.mapBusy = true;
+  try {
+    const r = await api(`/api/timemap?topic=${encodeURIComponent(topic)}&minutes=${L * BIN_MIN + 2 * BIN_MIN}` +
+      `&at=${encodeURIComponent(alignedNow())}${asked === DESIGN_ALPHA ? '' : `&alpha=${asked}`}`);
+    if (seq !== mapSeq || S.tmap !== base || S.drawnAt || S.mapPending || scrollTw || S.topic !== topic || S.alpha !== asked) return;
+    S.tmap = r;
+    if (reduced) { S.view = driftView(); showMap(); return; }   // no drift: the surface moves on with each pulse
+    drift(); render();
   } catch (e) { console.warn('timemap', e); }
   finally { S.mapBusy = false; }
 }
@@ -1299,8 +1354,13 @@ $('search').addEventListener('submit', e => {
   if (t) { const fid = pickedFid?.topic === t ? pickedFid.id : null; pickedFid = null; openTopic(t, fid ? {findingId: fid} : {}); } else { $('q').value = ''; $('q').placeholder = `Not monitored: ${q}`; syncClear(); }
 });
 // the picker opens on a click or on typing (not on the page's own focus), arrows move in it, Enter picks
-$('q').addEventListener('pointerdown', () => { if ($('suggest').hidden) suggest(true); });
-$('q').addEventListener('input', () => { sugAt = -1; pickedFid = null; suggest(true); });
+// a press on the field opens the list; on an expanded list ("Show all") it folds back to the short one, still open
+$('q').addEventListener('pointerdown', () => {
+  if ($('q').readOnly) return;
+  if ($('suggest').hidden) suggest(true);
+  else if (sugAll) { sugAll = false; sugAt = -1; renderSuggest(); $('suggest').scrollTop = 0; }
+});
+$('q').addEventListener('input', () => { sugAt = -1; sugAll = false; pickedFid = null; suggest(true); $('suggest').scrollTop = 0; });
 $('q').addEventListener('blur', () => suggest(false));
 $('q').addEventListener('keydown', e => {
   if (root.dataset.stage !== 'home') return;
@@ -1314,7 +1374,14 @@ $('q').addEventListener('keydown', e => {
   else if (e.key === 'Escape' && !$('suggest').hidden) { e.stopPropagation(); suggest(false); }
 });
 $('suggest').addEventListener('pointerdown', e => e.preventDefault());   // keep the focus in the field
-$('suggest').addEventListener('click', e => { const o = e.target.closest('.opt'); if (o) pickSuggest(+o.dataset.i); });
+$('suggest').addEventListener('click', e => {
+  if (e.target.closest('[data-all],[data-fewer]')) {   // the list grows (or shrinks) in place; the field keeps the focus
+    sugAll = !!e.target.closest('[data-all]'); sugAt = -1; renderSuggest();   // the highlight's index means another row now
+    if (!sugAll) $('suggest').scrollTop = 0;
+    return;
+  }
+  const o = e.target.closest('.opt'); if (o) pickSuggest(+o.dataset.i);
+});
 $('clear').addEventListener('click', () => {
   if (root.dataset.stage === 'home') { $('q').value = ''; syncClear(); $('q').focus(); }
   else goHome();
