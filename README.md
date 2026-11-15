@@ -20,6 +20,30 @@ Coordinated propaganda behaves like a spread-spectrum (CDMA) signal: each bot ac
 
 Receiver chain: `live web (Context.dev news + Bluesky posts) + topic beam → embeddings, clutter whitening → pair correlator (time × meaning) → CFAR + SPRT → explained verdict`
 
+## Context.dev endpoints & why
+Context.dev is the receiver's antenna: every live news article on the radar comes from it, and it also answers "who is behind this outlet?" on the evidence screen.
+
+| Endpoint | What we use it for | Where |
+|---|---|---|
+| **News search** `POST /v1/news/search` (`natural_language` query + `filterBy.date.from`) | The live news stream for ~50 watched topics. Every article becomes an `Item` whose account is the publisher domain. Articles go into the detector as ordinary posts. Articles also drive two rules that stop false alarms: a group that only repeats a fresh article becomes *news echo*, and a group made mostly of articles becomes a *reprint*. Neither can raise a "coordinated" alert. | `ingest/contextdev.py`, `ingest/worker.py` |
+| **Brand** `POST /v1/brand/retrieve` (`by_domain`) | Source Trust: under each news article in the posts sheet the dashboard shows the outlet's name, logo, country and industry. | `ingest/source_trust.py`, `GET /api/source/{domain}` |
+| **Company Search** `POST /v1/company/search` (`fast`) | Source Trust: founded year (shown as the outlet's age) and headquarters country, which is more reliable than the Brand address. | same |
+| Web scrape `POST /v1/web/scrape` (prebuilt `reddit-search` parser) | Tried as the social source. Every URL returned `WEBSITE_ACCESS_ERROR`, so the code is kept but switched off (`REDDIT_ENABLED=0`). Live social posts come from Bluesky public search instead. | `ingest/contextdev.py` |
+
+**Why these, and how we keep the credits:**
+- *Account × time × meaning needs a timestamp and an author.* News search gave `published_at` for 100 of 100 probe articles. `authors` was often empty, so the publisher domain is the account.
+- *Relevance, not recency.* Search fills the limit with unrelated fresh news. The worker keeps only articles whose **headline** passes the topic's keyword gate.
+- *News is polled where people are looking:*
+  - a topic someone has open on the dashboard (or one under a simulated attack): within ~10–20 s, then every 5 min;
+  - a topic with a fresh real alert: right away, at most every 10 min (the article that explains the burst may only just have appeared);
+  - every other topic: every 2 h, at most 8 topics per cycle.
+
+  That comes to about 3,000 credits a day for the background (5 credits per search).
+- *Source Trust is lazy and capped:*
+  - Only outlets that already have articles in our database are looked up, so the public endpoint cannot spend credits on arbitrary domains.
+  - It costs about 12 credits per new outlet (Brand 10 + Company Search 2), cached for 30 days, with at most 30 new outlets an hour.
+- *Everything is cached and checked.* Raw responses are cached on disk (`cache/`, git-ignored). A 200 response with `success: false` is treated as an error.
+
 ## Repository layout
 ```
 CLAUDE.md            instructions for AI agents (read first)
