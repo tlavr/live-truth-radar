@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Live Swarm Radar · promo scenes</title>
+<link rel="icon" href="data:,">
+<style>
+:root{
+  --bg:#0C100E; --ink:#F2F6F3; --muted:rgba(218,232,222,.64); --cool:#63CF97; --accent:#FF5C9E; --red:#FF4D6D;
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",system-ui,sans-serif;
+  --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#000;overflow:hidden;color:var(--ink);font-family:var(--font)}
+#wrap{position:fixed;inset:0;display:grid;place-items:center}
+canvas{display:block}
+#stage{position:relative}
+#words{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+#words .w{position:absolute;font-weight:650;letter-spacing:-.03em;transform:translate(-50%,-50%);white-space:nowrap;
+  text-shadow:0 0 .35em currentColor}
+#words .w.real{color:var(--cool)} #words .w.bot{color:var(--accent)}
+#words .w.big{color:var(--ink);font-size:min(6.2vw,92px);text-shadow:0 0 .25em rgba(255,255,255,.35)}
+#hud{position:fixed;left:12px;bottom:12px;font:12px/1.45 var(--mono);color:#cfe;background:rgba(0,0,0,.66);
+  border:1px solid rgba(255,255,255,.12);border-radius:6px;padding:9px 11px;max-width:min(560px,94vw);z-index:5}
+#hud b{color:#fff} #hud .k{color:var(--cool)} #hud .warn{color:#FFB547}
+#hud .bar{height:3px;background:rgba(255,255,255,.12);margin:6px 0 7px;border-radius:2px;position:relative}
+#hud .bar i{position:absolute;left:0;top:0;bottom:0;background:var(--cool);border-radius:2px}
+#hud .keys{color:rgba(220,240,230,.62)}
+#toast{position:fixed;right:12px;bottom:12px;font:12px var(--mono);background:rgba(0,0,0,.75);color:#fff;
+  padding:7px 10px;border-radius:5px;opacity:0;transition:opacity .25s;z-index:6;pointer-events:none}
+.hide{display:none!important}
+</style>
+</head>
+<body>
+<div id="wrap"><div id="stage"><canvas id="c"></canvas><div id="words"></div></div></div>
+<div id="hud"></div>
+<div id="toast"></div>
+
+<script type="importmap">
+{"imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+<script type="module">
+/* Promo scenes for the 45 s promo, variant A (docs: chat script).
+   One deterministic timeline, everything is a function of time t, so you can scrub and re-record the same take.
+     Scene 1 "Feed"  (0 – 16 s): a headline types itself, the first posts appear, the swarm fills a wall of posts,
+                                  entropy grows (flicker, jitter, RGB shift), "real? / bot?", "Which voice is real?".
+     Scene 2 "Decay" (16 – 25 s): the wall turns into pixels, the pixels fly onto the radar's field, a red dot lights up
+                                  and a sonar ring calms the noise; behind its front a red peak shows for a moment.
+   Keys: see the HUD (H hides it). URL: ?rec (no HUD, auto-play), ?w=1920&h=1080 (fixed render size), ?t=16 (start time),
+         ?speed=0.5, ?dpr=2, ?glitch=0 (clean plate: no RGB shift, no shake), ?words=0 (no overlay words). */
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {EffectComposer} from 'three/addons/postprocessing/EffectComposer.js';
+import {RenderPass} from 'three/addons/postprocessing/RenderPass.js';
+import {UnrealBloomPass} from 'three/addons/postprocessing/UnrealBloomPass.js';
+import {ShaderPass} from 'three/addons/postprocessing/ShaderPass.js';
+import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
+import {RGBShiftShader} from 'three/addons/shaders/RGBShiftShader.js';
+
+/* ------------------------------------------------------------------ settings */
+const Q = new URLSearchParams(location.search);
+const qn = (k, d) => (Q.has(k) && Q.get(k) !== '' && !isNaN(+Q.get(k)) ? +Q.get(k) : d);
+const REC = Q.has('rec');
+const FIX_W = qn('w', 0), FIX_H = qn('h', 0);
+const DPR = qn('dpr', Math.min(2, devicePixelRatio || 1));
+
+// Texts. The headline is phrased as a rumour on purpose: the topic is a synthetic test campaign about a real person.
+const HEADLINE = Q.get('headline') || 'Rumor: Jensen Huang to step down as Nvidia CEO?';
+const HEADLINE2 = 'Social media buzz grows around Nvidia leadership';
+const CARDS = [["Am I the only one over the nonstop Jensen Huang hype? Media really needs to widen its lens on AI.", 1], ["Tech CEOs aren't rockstars, folks. Wish the press would stop hyping Jensen Huang and report on the whole AI field.", 1], ["Enough with the celebrity CEO obsession! Let's see tech news look past Jensen Huang and cover the rest of the industry.", 1], ["Less celebrity treatment for tech bosses, more actual industry coverage. Move beyond the Jensen Huang hype train.", 1], ["My group chat is losing it over this one.", 0], ["Please quit treating Jensen Huang like a rock icon. Give us real reporting on the whole AI landscape instead.", 1], ["Feels like the same take copy-pasted by a hundred accounts?", 0], ["Big if true. Small if false. Medium if rumor.", 0], ["Who even broke this? The timeline is a mess.", 0], ["Don't fall for the nonstop AI hardware hype! We should all be pushing for open, competitive alternatives instead of one giant.", 1], ["Stop buying into the rockstar CEO myth! AI is huge and media needs to look past Jensen Huang.", 1], ["Can we please stop turning tech CEOs into pop stars? There's way more to AI than just endless Jensen Huang hype.", 1], ["Why do articles obsess over Jensen Huang's wardrobe and keynotes instead of how expensive GPUs have gotten for everyday folks?", 1], ["Who cares about leather jackets and stage demos? Media should be asking why GPUs cost so much for normal gamers and artists.", 1], ["The constant spotlight on Jensen Huang misses the bigger picture. Let's talk about the wider AI community!", 1], ["Stop the rockstar CEO narrative! There are so many other voices in AI that deserve attention beyond Jensen Huang.", 1], ["Tech media is missing the plot—talking about Jensen Huang's keynote vibes instead of steep GPU prices for everyday users.", 1], ["Taking this with a big grain of salt until confirmed.", 0], ["Coffee first, corporate drama second.", 0], ["Media keeps gushing over Jensen Huang's keynotes and jackets, totally ignoring what high GPU prices mean for regular users.", 1], ["Wait, is this actually confirmed or just a rumor? Can't find a source.", 0], ["Let's talk about what actually matters: rising GPU costs for creators and gamers, not Jensen Huang's latest keynote outfit.", 1], ["Saw three different versions of this story in ten minutes.", 0], ["Pass it on: the press loves talking about Jensen Huang's leather jacket, while regular gamers and creators deal with pricey GPUs.", 1], ["It's time to look past the AI chip hype and demand real competition and open options in the hardware space.", 1], ["Can we skip the fashion commentary on Jensen Huang and focus on how expensive graphics cards are for normal folks?", 1], ["Not saying it's fake, but I'd wait for an official statement first.", 0], ["Reminder that rumors move faster than facts. Breathe.", 0], ["Old interview clips are already going viral again.", 0], ["Every time a CEO rumor drops my whole feed becomes armchair analysts lol", 0], ["Don't drink the AI hardware Kool-Aid. Push for open ecosystems and real alternatives to one dominant chip company.", 1], ["Enough with the hero worship of Jensen Huang in tech news. There's a whole AI ecosystem out there to cover!", 1], ["Honestly, the rockstar treatment for Jensen Huang is getting old. Media should spotlight the wider AI world instead.", 1], ["One chipmaker shouldn't dominate everything. Let's tune out the hype and demand open, competitive hardware choices!", 1], ["The endless AI hardware buzz serves one dominant player. We need open, competitive alternatives now more than ever.", 1], ["Can we get one boring news day please", 0], ["I just want to know if my preorder is still happening", 0], ["Tech CEOs don't need fan clubs. Journalists should look beyond Jensen Huang and highlight the rest of AI.", 1], ["It's weird how much the press idolizes Jensen Huang. We need coverage of the entire AI industry, not just one guy.", 1], ["Why settle for one dominant chipmaker? Ignore the hype cycle and start demanding open competition in AI hardware.", 1], ["The GPU shortage memes are back already, love this site", 0], ["Anyone have the original article? All I see are screenshots of screenshots.", 0], ["Seriously, let's resist the AI chip hype and rally behind open, competitive alternatives to a single dominant supplier.", 1], ["Honestly whoever runs Nvidia next has huge shoes to fill.", 0], ["Okay, we get it, Jensen Huang wears a cool jacket. Now can the media actually cover the broader AI industry?", 1], ["This is why I mute trending topics on Sundays.", 0], ["Funny how the news covers Jensen Huang's style non-stop, yet barely mentions rising GPU costs for everyday creators.", 1], ["Share the real issue: flashy keynotes and leather jackets get all the press, while gamers and creators pay the price for GPUs.", 1], ["Tired of seeing tech journalists treat Jensen Huang like a movie star. Cover the broader AI space already!", 1], ["Why does every tech story read like a fan page for Jensen Huang? Time to focus on the broader AI ecosystem.", 1], ["Every headline lately is about Jensen Huang's latest appearance. Can we cover the broader AI scene for once?", 1], ["Stop buying into the one-company AI hardware frenzy. Let's push for open standards and genuine competition!", 1], ["Genuinely curious what the board would say about this.", 0], ["Time to break out of the AI hardware hype! Tech works better when there are open, competitive options on the table.", 1], ["Spread the word: tech coverage is distracted by Jensen Huang's flashy presentations while everyday buyers struggle with GPU prices.", 1], ["Newsflash: tech CEOs aren't celebrities. Look past the Jensen Huang buzz and give other AI innovators some airtime.", 1], ["Don't let the hype cycle fool you—no single chipmaker should own the future. Demand open, competitive hardware!", 1], ["Checked the newsroom page, nothing posted there yet.", 0], ["Let's move past the cult of personality around Jensen Huang. The AI story is much bigger than one executive!", 1], ["The media needs to chill on the Jensen Huang worship and actually talk about all the other players in AI.", 1], ["If this is true the market is going to have a very weird Monday.", 0], ["Time to shift the conversation! Stop hyping Jensen Huang's keynotes and start talking about GPU affordability for regular people.", 1], ["Tech coverage shouldn't be a one-man show. Look past Jensen Huang and explore what everyone else in AI is doing.", 1], ["Share this if you agree—less talk about Jensen Huang's stage shows, more focus on GPU costs for gamers and creators!", 1]];   // [text, isBot] — first three are the first posts under the headline
+
+const PAL = {bg: '#0C100E', surface: '#161D19', ink: '#F2F6F3', muted: 'rgba(218,232,222,.62)', cool: '#63CF97',
+  warm: '#B7F063', peak: '#FFE066', sel: '#FF5C9E', red: '#FF3B3B', cream: '#F4EBD0'};
+
+// Timeline (s). Edit here to retime the take.
+const T = {
+  type0: .5, type1: 2.1,          // the headline types itself
+  post: [2.5, 3.35, 3.85],         // the first three posts
+  head2: 4.6,                      // the second headline
+  swarm0: 5.0, swarmRate: .56,     // n(t) = 3·e^(rate·(t − swarm0)) posts on the wall
+  chaos0: 9.0, chaos1: 14.0,       // entropy ramps up
+  words0: 9.4, words1: 13.9, big0: 14.0,
+  cut: 16.0,                       // the wall becomes pixels (hard cut, silence)
+  morph0: 16.45, morphDur: 2.0, morphSpread: 1.0,
+  grid0: 18.2, grid1: 19.4,        // the field fades in under the pixels
+  dot: 19.8, ring: 20.55, ringSpeed: 9.0,
+  end: 26.0,
+};
+
+/* ------------------------------------------------------------------ helpers */
+const $ = id => document.getElementById(id);
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const ss = (a, b, x) => { const t = clamp((x - a) / (b - a)); return t * t * (3 - 2 * t); };
+const lerp = (a, b, k) => a + (b - a) * k;
+const ease = {lin: k => k, io: k => k * k * (3 - 2 * k), in: k => k * k * k, out: k => 1 - Math.pow(1 - k, 3),
+  expo: k => (k <= 0 ? 0 : Math.pow(2, 10 * k - 10))};
+let seed = 1234567;
+const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+const store = {
+  get: k => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
+};
+const toast = msg => { const el = $('toast'); el.textContent = msg; el.style.opacity = 1; clearTimeout(toast.t); toast.t = setTimeout(() => el.style.opacity = 0, 1600); };
+
+/* ------------------------------------------------------------------ renderer */
+const canvas = $('c');
+const renderer = new THREE.WebGLRenderer({canvas, antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: true});
+renderer.setPixelRatio(DPR);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+const camera = new THREE.PerspectiveCamera(35, 16 / 9, .1, 600);
+const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, {samples: 4, type: THREE.HalfFloatType}));
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), .55, .55, .18);
+composer.addPass(bloom);
+const rgb = new ShaderPass(RGBShiftShader);
+composer.addPass(rgb);
+composer.addPass(new OutputPass());
+
+function resize() {
+  const ww = innerWidth, wh = innerHeight;
+  const w = FIX_W || ww, h = FIX_H || wh;
+  renderer.setSize(w, h, false);
+  composer.setSize(w, h);
+  bloom.resolution.set(w, h);
+  const s = Math.min(ww / w, wh / h, FIX_W ? 1e9 : 1);  // a fixed size is scaled to fit the window
+  canvas.style.width = `${w * s}px`; canvas.style.height = `${h * s}px`;
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+
+/* ------------------------------------------------------------------ cards: atlas */
+const CW = 512, CH = 176, COLS = 8, ROWS = 8;           // atlas cells
+const CARD_W = 3.2, CARD_H = CARD_W * CH / CW;          // world size of a post card
+const HANDLES = ['nightowl', 'pixelmoth', 'quietriver', 'lumen', 'kettle', 'driftwood', 'northbound', 'oatmilk', 'ferrous',
+  'tinroof', 'saltmarsh', 'bluegill', 'paperkite', 'ember', 'larkspur', 'cobalt', 'mossy', 'halcyon', 'juniper', 'sable'];
+const AV = ['#3E7C5A', '#4B6B8A', '#7A5A8C', '#8C6A3E', '#3E6E7A', '#6E7A3E', '#8A4B5A', '#5A5A8C'];
+
+function roundRect(g, x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
+function wrap(g, text, maxW) {
+  const words = text.split(/\s+/), lines = []; let line = '';
+  for (const w of words) { const t = line ? `${line} ${w}` : w; if (g.measureText(t).width > maxW && line) { lines.push(line); line = w; } else line = t; }
+  if (line) lines.push(line);
+  return lines;
+}
+function drawCard(g, x, y, text, i) {
+  g.save(); g.translate(x, y);
+  roundRect(g, 6, 6, CW - 12, CH - 12, 18); g.fillStyle = PAL.surface; g.fill();
+  g.strokeStyle = 'rgba(218,240,224,.16)'; g.lineWidth = 2; g.stroke();
+  g.beginPath(); g.arc(46, 46, 19, 0, Math.PI * 2); g.fillStyle = AV[i % AV.length]; g.fill();
+  const h = HANDLES[(i * 7) % HANDLES.length] + '_' + ((i * 2654435761) >>> 0).toString(16).slice(0, 4);
+  g.fillStyle = PAL.ink; g.font = `600 21px ${getComputedStyle(document.documentElement).getPropertyValue('--font')}`;
+  g.textBaseline = 'middle'; g.fillText('@' + h, 76, 40);
+  g.fillStyle = PAL.muted; g.font = `400 18px ${getComputedStyle(document.documentElement).getPropertyValue('--font')}`;
+  g.fillText(`14:0${2 + (i % 4)} · now`, 76, 63);
+  g.fillStyle = PAL.ink; g.font = `400 22px ${getComputedStyle(document.documentElement).getPropertyValue('--font')}`;
+  let lines = wrap(g, text, CW - 56);
+  if (lines.length > 3) { lines = lines.slice(0, 3); lines[2] = lines[2].replace(/\s*\S*$/, '…'); }
+  lines.forEach((l, k) => g.fillText(l, 28, 100 + k * 26));
+  g.restore();
+}
+const atlasCanvas = document.createElement('canvas');
+atlasCanvas.width = CW * COLS; atlasCanvas.height = CH * ROWS;
+{
+  const g = atlasCanvas.getContext('2d');
+  for (let i = 0; i < COLS * ROWS; i++) drawCard(g, (i % COLS) * CW, Math.floor(i / COLS) * CH, CARDS[i % CARDS.length][0], i);
+}
+const atlas = new THREE.CanvasTexture(atlasCanvas);
+atlas.colorSpace = THREE.SRGBColorSpace; atlas.anisotropy = 8;
+
+/* ------------------------------------------------------------------ cards: wall layout */
+const GX = 25, GY = 39, PX = CARD_W * 1.08, PY = CARD_H * 1.12;  // grid of cells, pitch
+const HEAD = {x: 0, y: PY * 1.55, w: 5.4, h: 1.55};               // the typed headline
+const HEAD2 = {x: -PX * 3, y: PY * 4.6, w: 4.6, h: 1.25};          // the second headline
+const inRect = (x, y, r, pad = .2) => Math.abs(x - r.x) < r.w / 2 + CARD_W / 2 + pad - .4 && Math.abs(y - r.y) < r.h / 2 + CARD_H / 2 + pad - .2;
+const cells = [];
+for (let iy = 0; iy < GY; iy++) for (let ix = 0; ix < GX; ix++) {
+  const x = (ix - (GX - 1) / 2) * PX, y = (iy - (GY - 1) / 2) * PY;
+  if (inRect(x, y, HEAD) || inRect(x, y, HEAD2)) continue;
+  cells.push({x, y});
+}
+// the first three posts sit right under the headline; the rest spawn outwards with some randomness
+const firstPos = [{x: 0, y: 0}, {x: 0, y: -PY}, {x: 0, y: -2 * PY}];
+const rest = cells.filter(c => !firstPos.some(f => Math.abs(f.x - c.x) < .01 && Math.abs(f.y - c.y) < .01))
+  .map(c => ({...c, k: Math.hypot(c.x * .55, c.y + PY) * (0.65 + rnd() * .7)})).sort((a, b) => a.k - b.k);
+const N = 3 + rest.length;
+const swarmAt = i => T.swarm0 + Math.log(Math.max(1, i) / 3) / T.swarmRate;   // inverse of n(t)
+const geoC = new THREE.InstancedBufferGeometry().copy(new THREE.PlaneGeometry(CARD_W, CARD_H));
+const aOff = new Float32Array(N * 3), aCell = new Float32Array(N * 2), aSpawn = new Float32Array(N), aSeed = new Float32Array(N);
+for (let i = 0; i < N; i++) {
+  const p = i < 3 ? firstPos[i] : rest[i - 3];
+  aOff.set([p.x + (i < 3 ? 0 : (rnd() - .5) * .12), p.y + (i < 3 ? 0 : (rnd() - .5) * .08), i * 1e-5], i * 3);
+  const card = i < 3 ? i : 3 + Math.floor(rnd() * (COLS * ROWS - 3));
+  aCell.set([card % COLS, ROWS - 1 - Math.floor(card / COLS)], i * 2);
+  aSpawn[i] = i < 3 ? T.post[i] : Math.max(T.swarm0, swarmAt(i));
+  aSeed[i] = rnd() * 100;
+}
+geoC.setAttribute('aOff', new THREE.InstancedBufferAttribute(aOff, 3));
+geoC.setAttribute('aCell', new THREE.InstancedBufferAttribute(aCell, 2));
+geoC.setAttribute('aSpawn', new THREE.InstancedBufferAttribute(aSpawn, 1));
+geoC.setAttribute('aSeed', new THREE.InstancedBufferAttribute(aSeed, 1));
+geoC.instanceCount = N;
+const GLSL_HASH = `float h1(float n){return fract(sin(n)*43758.5453123);}
+  float h2(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453123);}`;
+const U = {
+  uTime: {value: 0}, uChaos: {value: 0}, uFade: {value: 1}, uCells: {value: new THREE.Vector2(COLS, ROWS)}, uMap: {value: atlas},
+  uRed: {value: new THREE.Color(PAL.sel)}, uGlitch: {value: Q.get('glitch') === '0' ? 0 : 1},
+};
+const matC = new THREE.ShaderMaterial({
+  uniforms: U, transparent: true, depthWrite: false, depthTest: false,
+  vertexShader: `${GLSL_HASH}
+    attribute vec3 aOff; attribute vec2 aCell; attribute float aSpawn; attribute float aSeed;
+    uniform float uTime, uChaos, uFade, uGlitch; uniform vec2 uCells;
+    varying vec2 vUv; varying float vA, vTint;
+    void main(){
+      float age = uTime - aSpawn, app = clamp(age/.22, 0., 1.);
+      float tick = floor(uTime*12.);
+      vec3 p = position * (.82 + .18*app);
+      float jump = step(.86, h1(aSeed*3.1 + tick)) * uChaos * uGlitch;
+      vec3 jit = vec3(h1(aSeed + tick) - .5, h1(aSeed*1.7 + tick) - .5, 0.) * jump * .9;
+      vUv = (aCell + uv) / uCells;
+      float fl = h1(aSeed*5.3 + tick);
+      vA = step(0., age) * app * uFade * mix(1., fl > .45 ? 1. : .25, uChaos*.85);
+      vTint = step(.965 - uChaos*.05, h1(aSeed*9.1 + floor(uTime*5.))) * step(.01, uChaos);
+      gl_Position = projectionMatrix * viewMatrix * vec4(aOff + p + jit, 1.);
+    }`,
+  fragmentShader: `uniform sampler2D uMap; uniform vec3 uRed; varying vec2 vUv; varying float vA, vTint;
+    void main(){
+      vec4 c = texture2D(uMap, vUv);
+      c.rgb = mix(c.rgb, c.rgb*.4 + uRed*.75, vTint);
+      float a = c.a*vA; if (a < .01) discard;
+      gl_FragColor = vec4(c.rgb, a);
+    }`,
+});
+const wall = new THREE.Mesh(geoC, matC); wall.frustumCulled = false; scene.add(wall);
+
+/* ------------------------------------------------------------------ headlines */
+function headlineTexture(text, sub, w, h, chars) {
+  const cv = document.createElement('canvas'); cv.width = 1024; cv.height = Math.round(1024 * h / w);
+  const g = cv.getContext('2d'); const font = getComputedStyle(document.documentElement).getPropertyValue('--font');
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
+  const draw = n => {
+    g.clearRect(0, 0, cv.width, cv.height);
+    roundRect(g, 8, 8, cv.width - 16, cv.height - 16, 26); g.fillStyle = '#0F1512'; g.fill();
+    g.strokeStyle = 'rgba(218,240,224,.22)'; g.lineWidth = 3; g.stroke();
+    g.fillStyle = '#FF4D6D'; roundRect(g, 46, 40, 150, 40, 8); g.fill();
+    g.fillStyle = '#12060A'; g.font = `700 24px ${font}`; g.textBaseline = 'middle'; g.fillText(sub, 62, 61);
+    g.fillStyle = PAL.muted; g.font = `500 24px ${font}`; g.fillText('Newswire · just now', 214, 61);
+    g.fillStyle = PAL.ink; g.font = `650 50px ${font}`;
+    const shown = text.slice(0, n), lines = wrap(g, text, cv.width - 92);
+    let left = shown.length, y = 140;
+    for (const l of lines) { const s = l.slice(0, Math.max(0, left)); g.fillText(s, 46, y); left -= l.length + 1; y += 62;
+      if (left < 0 && n < text.length) break; }
+    if (n < text.length && Math.floor(performance.now() / 380) % 2 === 0) {   // the caret
+      const ls = wrap(g, shown || ' ', cv.width - 92), last = ls[ls.length - 1] || '';
+      g.fillRect(46 + g.measureText(shown ? last : '').width + 4, 140 + (ls.length - 1) * 62 - 26, 4, 52);
+    }
+    tex.needsUpdate = true;
+  };
+  draw(chars ?? text.length);
+  return {tex, draw};
+}
+const H1 = headlineTexture(HEADLINE, 'BREAKING', HEAD.w, HEAD.h, 0);
+const H2 = headlineTexture(HEADLINE2, 'UPDATE', HEAD2.w, HEAD2.h);
+const headMat = new THREE.MeshBasicMaterial({map: H1.tex, transparent: true, depthTest: false, depthWrite: false});
+const head2Mat = new THREE.MeshBasicMaterial({map: H2.tex, transparent: true, depthTest: false, depthWrite: false});
+const head = new THREE.Mesh(new THREE.PlaneGeometry(HEAD.w, HEAD.h), headMat); head.position.set(HEAD.x, HEAD.y, .01);
+const head2 = new THREE.Mesh(new THREE.PlaneGeometry(HEAD2.w, HEAD2.h), head2Mat); head2.position.set(HEAD2.x, HEAD2.y, .01);
+head.renderOrder = head2.renderOrder = 2; scene.add(head, head2);
+
+/* ------------------------------------------------------------------ the field (scene 2) */
+const FW = 40, FD = 24, NX = 150, NZ = 90;      // field size (world) and resolution
+const fieldPos = new Float32Array(NX * NZ * 3);
+for (let iz = 0; iz < NZ; iz++) for (let ix = 0; ix < NX; ix++) {
+  const k = (iz * NX + ix) * 3;
+  fieldPos[k] = (ix / (NX - 1) - .5) * FW; fieldPos[k + 1] = 0; fieldPos[k + 2] = (iz / (NZ - 1) - .5) * FD;
+}
+const lineIdx = [];
+for (let iz = 0; iz < NZ; iz++) for (let ix = 0; ix < NX - 1; ix++) lineIdx.push(iz * NX + ix, iz * NX + ix + 1);
+for (let ix = 0; ix < NX; ix += 3) for (let iz = 0; iz < NZ - 1; iz++) lineIdx.push(iz * NX + ix, (iz + 1) * NX + ix);
+const geoF = new THREE.BufferGeometry();
+geoF.setAttribute('position', new THREE.BufferAttribute(fieldPos, 3)); geoF.setIndex(lineIdx);
+// the ghost peak that the ring finds: off-centre, near "now / same meaning" corner of the landing's wave
+const PEAK = new THREE.Vector2(FW * .2, -FD * .14);
+const UF = {
+  uTime: {value: 0}, uA: {value: 0}, uNoise: {value: 1}, uRingT: {value: 1e3}, uRingSpeed: {value: T.ringSpeed},
+  uPeak: {value: PEAK}, uPeakAmp: {value: 0}, uDot: {value: 0},
+  uCool: {value: new THREE.Color(PAL.cool)}, uCream: {value: new THREE.Color(PAL.cream)}, uRed: {value: new THREE.Color(PAL.red)},
+};
+const FIELD_Y = `${GLSL_HASH}
+  uniform float uTime, uNoise, uRingT, uRingSpeed, uPeakAmp; uniform vec2 uPeak;
+  float fieldH(vec2 p, out float passed, out float ring, out float peak, out float nz){
+    float d = length(p), r = (uTime - uRingT)*uRingSpeed;
+    passed = step(0., uTime - uRingT) * (1. - smoothstep(r - 1.2, r + .4, d));
+    float rr = (d - r)/.75;
+    ring = step(0., uTime - uRingT) * exp(-rr*rr) * (1. - smoothstep(26., 34., r));
+    float wave = .22*sin(p.x*.21 + uTime*.55)*cos(p.y*.27 - uTime*.42) + .12*sin(p.x*.07 - p.y*.11 + uTime*.3);
+    nz = (h2(floor(p*2.2) + floor(uTime*14.)) - .5) * uNoise * (1. - passed);
+    vec2 q = p - uPeak;
+    peak = uPeakAmp * exp(-dot(q, q)/7.5) * passed;
+    return wave + nz*1.6 + peak*5.2;
+  }`;
+const matF = new THREE.ShaderMaterial({
+  uniforms: UF, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+  vertexShader: `${FIELD_Y}
+    varying float vPassed, vRing, vPeak, vNz, vEdge;
+    void main(){
+      float passed, ring, peak, nz;
+      vec3 p = position; p.y = fieldH(p.xz, passed, ring, peak, nz);
+      vPassed = passed; vRing = ring; vPeak = peak; vNz = nz;
+      vEdge = 1. - smoothstep(.36, .5, max(abs(position.x)/${FW.toFixed(1)}, abs(position.z)/${FD.toFixed(1)}));
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.);
+    }`,
+  fragmentShader: `uniform float uA; uniform vec3 uCool, uCream, uRed;
+    varying float vPassed, vRing, vPeak, vNz, vEdge;
+    void main(){
+      float flick = .45 + 1.6*abs(vNz);
+      vec3 c = uCool * mix(flick, .55, vPassed);
+      c = mix(c, uRed*1.6, clamp(vPeak*2.2, 0., 1.));
+      c += uCream * vRing * 1.35;
+      gl_FragColor = vec4(c * uA * vEdge, 1.);
+    }`,
+});
+const field = new THREE.LineSegments(geoF, matF); field.frustumCulled = false; scene.add(field);
+
+// the pixels: one per field vertex, starting on the wall where the posts were
+const geoP = new THREE.BufferGeometry();
+const pStart = new Float32Array(NX * NZ * 3), pDelay = new Float32Array(NX * NZ), pSeed = new Float32Array(NX * NZ);
+const WALL_W = GX * PX, WALL_H = GY * PY;
+for (let i = 0; i < NX * NZ; i++) {
+  const x = fieldPos[i * 3], z = fieldPos[i * 3 + 2];
+  pStart[i * 3] = x / FW * WALL_W + (rnd() - .5) * PX * .9;
+  pStart[i * 3 + 1] = -z / FD * WALL_H + (rnd() - .5) * PY * .9;
+  pStart[i * 3 + 2] = 0;
+  pDelay[i] = T.morph0 + (Math.hypot(x / FW, z / FD) * .6 + rnd() * .4) * T.morphSpread;
+  pSeed[i] = rnd() * 100;
+}
+geoP.setAttribute('position', new THREE.BufferAttribute(pStart, 3));
+geoP.setAttribute('aTarget', new THREE.BufferAttribute(fieldPos, 3));
+geoP.setAttribute('aDelay', new THREE.BufferAttribute(pDelay, 1));
+geoP.setAttribute('aSeed', new THREE.BufferAttribute(pSeed, 1));
+const UP = {uTime: {value: 0}, uA: {value: 0}, uDur: {value: T.morphDur}, uScale: {value: 1},
+  uInk: {value: new THREE.Color(PAL.ink)}, uCool: {value: new THREE.Color(PAL.cool)}};
+const matP = new THREE.ShaderMaterial({
+  uniforms: {...UP, ...{uNoise: UF.uNoise, uRingT: UF.uRingT, uRingSpeed: UF.uRingSpeed, uPeak: UF.uPeak, uPeakAmp: UF.uPeakAmp}},
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+  vertexShader: `${FIELD_Y}
+    attribute vec3 aTarget; attribute float aDelay, aSeed;
+    uniform float uDur, uScale; varying float vK, vFl;
+    void main(){
+      float k = clamp((uTime - aDelay)/uDur, 0., 1.); k = k*k*(3. - 2.*k); vK = k;
+      float passed, ring, peak, nz;
+      vec3 tgt = aTarget; tgt.y = fieldH(aTarget.xz, passed, ring, peak, nz);
+      vec3 p = mix(position, tgt, k);
+      p += vec3((h1(aSeed) - .5)*6., 4. + h1(aSeed*2.3)*6., (h1(aSeed*3.7) - .5)*6.) * sin(k*3.14159);   // a swirl in flight
+      vFl = h1(aSeed + floor(uTime*12.));
+      vec4 mv = modelViewMatrix * vec4(p, 1.);
+      gl_PointSize = mix(3.4, 2.1, k) * uScale * (90. / -mv.z);
+      gl_Position = projectionMatrix * mv;
+    }`,
+  fragmentShader: `uniform float uA; uniform vec3 uInk, uCool; varying float vK, vFl;
+    void main(){
+      vec2 d = gl_PointCoord - .5; if (dot(d, d) > .25) discard;
+      vec3 c = mix(uInk*(.55 + .6*vFl), uCool, vK);
+      gl_FragColor = vec4(c*uA, 1.);
+    }`,
+});
+const pixels = new THREE.Points(geoP, matP); pixels.frustumCulled = false; scene.add(pixels);
+
+// the red dot (the dot of the "ı" in the wordmark)
+const dotTex = (() => {
+  const cv = document.createElement('canvas'); cv.width = cv.height = 128; const g = cv.getContext('2d');
+  const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gr.addColorStop(0, 'rgba(255,200,200,1)'); gr.addColorStop(.18, 'rgba(255,64,64,1)'); gr.addColorStop(.45, 'rgba(255,40,40,.35)'); gr.addColorStop(1, 'rgba(255,40,40,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128); const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
+})();
+const dot = new THREE.Sprite(new THREE.SpriteMaterial({map: dotTex, transparent: true, depthTest: false, depthWrite: false, opacity: 0}));
+dot.position.set(0, .4, 0); dot.scale.setScalar(1.6); dot.renderOrder = 3; scene.add(dot);
+
+/* ------------------------------------------------------------------ overlay words */
+const wordsEl = $('words');
+const SHOW_WORDS = Q.get('words') !== '0';
+const WORDS = [];
+{
+  let s = 99;
+  const r = () => { s = (s * 48271) % 2147483647; return s / 2147483647; };
+  for (let t = T.words0, i = 0; t < T.words1; t += .34 - .12 * (t - T.words0) / (T.words1 - T.words0), i++) {
+    WORDS.push({t0: t, t1: t + .26, cls: i % 2 ? 'bot' : 'real', text: i % 2 ? 'bot?' : 'real?',
+      x: 12 + r() * 76, y: 12 + r() * 76, size: 3.2 + r() * 3.4});
+  }
+}
+function renderWords(t) {
+  if (!SHOW_WORDS) { wordsEl.innerHTML = ''; return; }
+  const on = WORDS.filter(w => t >= w.t0 && t < w.t1);
+  let html = on.map(w => `<div class="w ${w.cls}" style="left:${w.x}%;top:${w.y}%;font-size:${w.size}vw">${w.text}</div>`).join('');
+  if (t >= T.big0 && t < T.cut) html += `<div class="w big" style="left:50%;top:50%">Which voice is real?</div>`;
+  if (wordsEl._html !== html) { wordsEl.innerHTML = html; wordsEl._html = html; }
+}
+
+/* ------------------------------------------------------------------ camera: scripted path, custom path, free */
+// keyframes: t (s), p = position, l = look-at, e = easing INTO this key
+const v = (x, y, z) => new THREE.Vector3(x, y, z);
+const DEFAULT_PATH = [
+  {t: 0, p: v(0, 1.25, 7.4), l: v(0, 1.25, 0)},
+  {t: 2.1, p: v(0, 1.05, 7.6), l: v(0, 1.0, 0), e: 'io'},
+  {t: 4.0, p: v(0, .2, 9.5), l: v(0, .1, 0), e: 'io'},
+  {t: 5.2, p: v(-.6, .4, 13), l: v(-.4, .3, 0), e: 'io'},
+  {t: 9.0, p: v(-1.4, .2, 30), l: v(-.6, 0, 0), e: 'io'},
+  {t: 14.0, p: v(.5, 0, 92), l: v(0, 0, 0), e: 'in'},
+  {t: 16.0, p: v(0, 0, 150), l: v(0, 0, 0), e: 'out'},
+  {t: 16.45, p: v(0, 0, 150), l: v(0, 0, 0)},
+  {t: 19.3, p: v(0, 44, 58), l: v(0, 0, 0), e: 'io'},
+  {t: 21.0, p: v(0, 27, 40), l: v(0, -.5, 0), e: 'io'},
+  {t: 26.0, p: v(7, 23, 35), l: v(1.5, -.5, 0), e: 'io'},
+];
+const PATH_KEY = 'lsr.promo.path';
+const load = () => { try { const a = JSON.parse(store.get(PATH_KEY) || '[]'); return a.map(k => ({t: k.t, p: v(...k.p), l: v(...k.l), e: k.e || 'io'})); } catch { return []; } };
+const S = {
+  t: qn('t', 0), playing: REC || Q.has('play'), speed: qn('speed', 1), mode: 'script',   // script | custom | free
+  custom: load(), hud: !REC, glitch: Q.get('glitch') !== '0', last: performance.now(),
+};
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true; controls.dampingFactor = .08; controls.enabled = false;
+function sample(path, t) {
+  if (!path.length) return null;
+  if (t <= path[0].t) return {p: path[0].p.clone(), l: path[0].l.clone()};
+  for (let i = 1; i < path.length; i++) {
+    const a = path[i - 1], b = path[i];
+    if (t <= b.t) { const k = (ease[b.e || 'io'] || ease.io)((t - a.t) / Math.max(1e-6, b.t - a.t));
+      return {p: a.p.clone().lerp(b.p, k), l: a.l.clone().lerp(b.l, k)}; }
+  }
+  const z = path[path.length - 1]; return {p: z.p.clone(), l: z.l.clone()};
+}
+function placeCamera(t, chaos) {
+  if (S.mode === 'free') { controls.update(); return; }
+  const path = S.mode === 'custom' && S.custom.length >= 2 ? S.custom : DEFAULT_PATH;
+  const c = sample(path, t);
+  if (S.glitch && chaos > 0) {   // camera shake grows with the entropy; stepped, so it reads as a glitch, not a wobble
+    const tick = Math.floor(t * 15), amp = chaos * chaos * .018 * c.p.distanceTo(c.l);
+    const hs = n => (Math.sin(n * 12.9898) * 43758.5453) % 1;
+    c.p.x += hs(tick) * amp; c.p.y += hs(tick + 7.3) * amp;
+  }
+  camera.position.copy(c.p); camera.lookAt(c.l); controls.target.copy(c.l);
+}
+function sortCustom() { S.custom.sort((a, b) => a.t - b.t); }
+function saveCustom() { store.set(PATH_KEY, JSON.stringify(S.custom.map(k => ({t: +k.t.toFixed(3), p: k.p.toArray().map(x => +x.toFixed(3)), l: k.l.toArray().map(x => +x.toFixed(3)), e: k.e})))); }
+function pathJSON() { return JSON.stringify(S.custom.map(k => ({t: +k.t.toFixed(3), p: k.p.toArray().map(x => +x.toFixed(3)), l: k.l.toArray().map(x => +x.toFixed(3)), e: k.e}))); }
+
+/* ------------------------------------------------------------------ the frame */
+function frame(t) {
+  const chaos = t < T.cut ? ss(T.chaos0, T.chaos1, t) : 0;
+  // scene 1
+  U.uTime.value = t; U.uChaos.value = chaos; U.uFade.value = t < T.cut ? 1 : 0; U.uGlitch.value = S.glitch ? 1 : 0;
+  wall.visible = t < T.cut;
+  const n = Math.round(clamp((t - T.type0) / (T.type1 - T.type0)) * HEADLINE.length);
+  if (H1._n !== n || n < HEADLINE.length) { H1.draw(n); H1._n = n; }
+  head.visible = t >= T.type0 - .3 && t < T.cut;
+  headMat.opacity = ss(T.type0 - .3, T.type0, t) * (chaos > 0 ? (Math.floor(t * 12) % 7 === 0 ? .35 : 1) : 1);
+  head2.visible = t >= T.head2 && t < T.cut; head2Mat.opacity = ss(T.head2, T.head2 + .18, t);
+  rgb.uniforms.amount.value = S.glitch ? chaos * .0042 * (Math.floor(t * 12) % 3 === 0 ? 1.8 : 1) : 0;
+  rgb.uniforms.angle.value = (Math.floor(t * 9) * 1.7) % 6.28;
+  bloom.strength = t < T.cut ? .35 + chaos * .35 : .6;
+  // scene 2
+  UP.uTime.value = t; UF.uTime.value = t;
+  UP.uA.value = t >= T.cut ? 1 - ss(T.grid0 + .3, T.grid1 + .6, t) * .92 : 0;
+  pixels.visible = t >= T.cut && t < T.grid1 + 1.2;
+  UP.uScale.value = canvas.height / 900;   // drawing-buffer pixels
+  UF.uA.value = ss(T.grid0, T.grid1, t);
+  field.visible = t >= T.grid0;
+  UF.uNoise.value = 1;
+  UF.uRingT.value = T.ring;
+  const dPeak = PEAK.length(), hit = T.ring + dPeak / T.ringSpeed;       // when the ring reaches the peak
+  UF.uPeakAmp.value = ss(hit - .05, hit + .25, t) * (1 - ss(hit + .9, hit + 2.6, t));
+  dot.material.opacity = t < T.dot ? 0 : ss(T.dot, T.dot + .25, t) * (.75 + .25 * Math.sin((t - T.dot) * 5.2));
+  dot.scale.setScalar(1.4 + .5 * Math.exp(-Math.max(0, t - T.ring) * 3) + .15 * Math.sin((t - T.dot) * 5.2));
+  scene.background.set(0x000000).lerp(new THREE.Color(PAL.bg), ss(T.grid0, T.grid1 + .8, t));
+  placeCamera(t, chaos);
+  renderWords(t);
+  composer.render();
+}
+
+/* ------------------------------------------------------------------ HUD + keys */
+const fmt = t => `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(5, '0')}`;
+const sceneOf = t => (t < T.cut ? '1 · Feed' : '2 · Decay');
+function hud() {
+  const el = $('hud'); el.classList.toggle('hide', !S.hud); if (!S.hud) return;
+  const keys = S.custom.length ? S.custom.map(k => k.t.toFixed(2)).join(', ') : '—';
+  el.innerHTML = `<b>Live Swarm Radar · promo</b> &nbsp; t <b>${fmt(S.t)}</b> / ${fmt(T.end)} · scene <b>${sceneOf(S.t)}</b> · ${S.playing ? '▶' : '❚❚'} ×${S.speed}<br>
+    camera: <b>${S.mode}</b>${S.mode === 'custom' && S.custom.length < 2 ? ' <span class="warn">(needs ≥ 2 keys, using script)</span>' : ''} · keys: ${keys} · glitch ${S.glitch ? 'on' : 'off'}
+    <div class="bar"><i style="width:${(S.t / T.end * 100).toFixed(2)}%"></i></div>
+    <div class="keys"><span class="k">Space</span> play · <span class="k">R</span> restart · <span class="k">←/→</span> ±1 s (<span class="k">Shift</span> ±0.1) · <span class="k">1/2</span> scene · <span class="k">[ ]</span> speed<br>
+    <span class="k">F</span> free camera (drag, scroll) · <span class="k">M</span> script ↔ custom path · <span class="k">K</span> key at t · <span class="k">X</span> delete key near t · <span class="k">Shift+X</span> clear keys<br>
+    <span class="k">C</span> copy path · <span class="k">L</span> paste path · <span class="k">P</span> print camera · <span class="k">G</span> glitch · <span class="k">H</span> hide HUD · <span class="k">S</span> PNG still</div>`;
+}
+function seek(t) { S.t = clamp(t, 0, T.end); }
+addEventListener('keydown', e => {
+  if (e.target.closest && e.target.closest('input,textarea')) return;
+  const k = e.key;
+  if (k === ' ') { S.playing = !S.playing; if (S.playing && S.t >= T.end) seek(0); e.preventDefault(); }
+  else if (k === 'r' || k === 'R') { seek(0); S.playing = true; }
+  else if (k === 'ArrowRight') seek(S.t + (e.shiftKey ? .1 : 1));
+  else if (k === 'ArrowLeft') seek(S.t - (e.shiftKey ? .1 : 1));
+  else if (k === '1') seek(0);
+  else if (k === '2') seek(T.cut - .5);
+  else if (k === ']') S.speed = Math.min(4, +(S.speed * 2).toFixed(3));
+  else if (k === '[') S.speed = Math.max(.125, +(S.speed / 2).toFixed(3));
+  else if (k === 'f' || k === 'F') {
+    S.mode = S.mode === 'free' ? (S.custom.length >= 2 ? 'custom' : 'script') : 'free';
+    controls.enabled = S.mode === 'free'; toast(`camera: ${S.mode}`);
+  }
+  else if (k === 'm' || k === 'M') { S.mode = S.mode === 'custom' ? 'script' : 'custom'; controls.enabled = false; toast(`camera: ${S.mode}`); }
+  else if (k === 'k' || k === 'K') {
+    const tgt = controls.target.clone();
+    S.custom = S.custom.filter(x => Math.abs(x.t - S.t) > .05);
+    S.custom.push({t: S.t, p: camera.position.clone(), l: tgt, e: 'io'}); sortCustom(); saveCustom(); toast(`key at ${S.t.toFixed(2)} s (${S.custom.length})`);
+  }
+  else if (k === 'x') { const i = S.custom.findIndex(x => Math.abs(x.t - S.t) < .5); if (i >= 0) { S.custom.splice(i, 1); saveCustom(); toast('key deleted'); } }
+  else if (k === 'X') { S.custom = []; saveCustom(); toast('keys cleared'); }
+  else if (k === 'c' || k === 'C') {
+    const j = pathJSON();
+    (navigator.clipboard?.writeText(j) ?? Promise.reject()).then(() => toast('path copied'), () => prompt('Camera path JSON:', j));
+  }
+  else if (k === 'l' || k === 'L') {
+    const j = prompt('Paste camera path JSON:'); if (!j) return;
+    try { S.custom = JSON.parse(j).map(x => ({t: x.t, p: v(...x.p), l: v(...x.l), e: x.e || 'io'})); sortCustom(); saveCustom(); S.mode = 'custom'; toast(`loaded ${S.custom.length} keys`); }
+    catch { toast('bad JSON'); }
+  }
+  else if (k === 'p' || k === 'P') {
+    const s = `{t: ${S.t.toFixed(2)}, p: v(${camera.position.toArray().map(x => x.toFixed(2)).join(', ')}), l: v(${controls.target.toArray().map(x => x.toFixed(2)).join(', ')}), e: 'io'},`;
+    console.log(s); (navigator.clipboard?.writeText(s) ?? Promise.reject()).then(() => toast('camera key copied'), () => prompt('Camera key:', s));
+  }
+  else if (k === 'g' || k === 'G') { S.glitch = !S.glitch; toast(`glitch ${S.glitch ? 'on' : 'off'}`); }
+  else if (k === 'h' || k === 'H') S.hud = !S.hud;
+  else if (k === 's' || k === 'S') {
+    frame(S.t); const a = document.createElement('a'); a.download = `promo-${S.t.toFixed(2)}s.png`; a.href = canvas.toDataURL('image/png'); a.click();
+  }
+  else return;
+  hud();
+});
+
+function loop(now) {
+  const dt = Math.min(.1, (now - S.last) / 1000); S.last = now;
+  if (S.playing) { S.t += dt * S.speed; if (S.t >= T.end) { S.t = T.end; S.playing = false; } }
+  frame(S.t);
+  if (S.hud) hud();
+  requestAnimationFrame(loop);
+}
+resize(); hud(); requestAnimationFrame(loop);
+// for the console: tweak the timeline live, e.g. promo.T.cut = 15; promo.seek(10)
+window.promo = {T, S, seek, camera, controls};
+</script>
+</body>
+</html>

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Promo · сцены</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#0C100E;--surface:#161D19;--ink:#F2F6F3;--muted:rgba(218,232,222,.64);--tertiary:rgba(218,232,222,.38);--hair:rgba(218,240,224,.12);
+  --cool:#63CF97;--salat:#8EE87B;--sel:#FF5C9E;--red:#FF4D6D;--font:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;--mono:ui-monospace,"SF Mono",Menlo,monospace}
+*{box-sizing:border-box}
+html{background:var(--bg);color:var(--ink);font:15px/1.5 var(--font);-webkit-font-smoothing:antialiased}
+body{margin:0}
+main{max-width:1040px;margin:0 auto;padding:40px 28px 80px}
+h1{margin:0 0 4px;font-size:30px;letter-spacing:-.03em}
+h1 i{display:inline-block;width:.24em;height:.24em;border-radius:50%;background:#FF4040;box-shadow:0 0 10px #FF4040;vertical-align:.55em;margin:0 .06em}
+h2{margin:34px 0 10px;font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--tertiary)}
+p{margin:0 0 10px;color:var(--muted)}
+table{width:100%;border-collapse:collapse}
+td,th{padding:11px 10px;border-top:1px solid var(--hair);vertical-align:top;text-align:left}
+th{font-size:12px;font-weight:600;color:var(--tertiary)}
+td.n{font:13px var(--mono);color:var(--tertiary);width:44px}
+td b{font-weight:600}
+td small{display:block;color:var(--muted);font-size:13px;margin-top:2px}
+a{color:var(--salat);text-decoration:none}
+a:hover{text-decoration:underline}
+a.btn{display:inline-block;padding:4px 10px;margin:2px 4px 2px 0;border-radius:999px;border:1px solid var(--hair);font-size:13px;white-space:nowrap}
+a.btn.rec{border-color:rgba(255,92,158,.45);color:var(--sel)}
+a.btn.ui{border-color:rgba(99,207,151,.4)}
+.tag{font:12px var(--mono);color:var(--tertiary)}
+.hive{color:var(--red)}
+code{font:13px var(--mono);color:var(--ink);background:rgba(255,255,255,.06);padding:1px 5px;border-radius:4px}
+ul{margin:0;padding-left:18px;color:var(--muted)}
+li{margin:3px 0}
+</style>
+</head>
+<body>
+<main>
+  <h1>L<span style="position:relative">ı</span>ve Swarm Radar · промо</h1>
+  <p>Вариант A, 0:45. Сцены идут в порядке монтажа. Все сцены живут в одном плеере <code>player.html?scene=…</code> (клавиши 1–9 переключают); <b>rec</b> открывает её без HUD в 1920×1080 и сразу играет (снимать окно в OBS при 60 fps). Время сцены не связано с часами: дубль повторяется кадр в кадр.</p>
+
+  <h2>Сцены (генерируемые)</h2>
+  <table id="scenes">
+    <tr><th>#</th><th>Сцена</th><th>В ролике</th><th></th></tr>
+  </table>
+
+  <h2>Живой UI (снимать экран)</h2>
+  <table>
+    <tr><td class="n">UI-1</td><td><b>Лендинг</b><small>сонар и пик ловятся сами; продолжает сцену Decay</small></td><td>0:20</td>
+      <td><a class="btn ui" href="/">локально</a><a class="btn ui" href="https://srv2159471.hstgr.cloud/">прод</a></td></tr>
+    <tr><td class="n">UI-2</td><td><b>Поиск → ползунок 2% → Check → пайплайн</b><small>печатать <code>jensen-hu</code>, выбрать тему, открыть чувствительность</small></td><td>0:20–0:26</td>
+      <td><a class="btn ui" href="/">локально</a><a class="btn ui" href="https://srv2159471.hstgr.cloud/">прод</a></td></tr>
+    <tr><td class="n">UI-3</td><td><b>Результат темы с пиком роя</b><small>после настоящей атаки red team; поле, ось, карточка вердикта</small></td><td>0:26–0:36</td>
+      <td><a class="btn ui" href="/?q=jensen-huang-resignation">локально</a><a class="btn ui" href="https://srv2159471.hstgr.cloud/?q=jensen-huang-resignation">прод</a></td></tr>
+    <tr><td class="n">UI-4</td><td><b class="hive">Настоящая консоль red team</b><small>реальный прогон: из неё берём цифры для <code>?caught=</code> и <code>?first=</code> в BotHive · caught</small></td><td>—</td>
+      <td><a class="btn ui" href="/redteam">локально</a><a class="btn ui" href="https://srv2159471.hstgr.cloud/redteam">прод</a></td></tr>
+    <tr><td class="n">UI-5</td><td><b>Метрики и «как это работает»</b><small>для запасных кадров</small></td><td>—</td>
+      <td><a class="btn ui" href="/metrics">metrics</a><a class="btn ui" href="/how">how</a></td></tr>
+  </table>
+
+  <h2>Параметры (любой сцене)</h2>
+  <ul>
+    <li><code>?rec</code> без HUD и сразу play · <code>?w=1920&amp;h=1080</code> размер рендера · <code>?t=3.5</code> старт · <code>?speed=0.5</code></li>
+    <li><code>?glitch=0</code> чистый план без RGB-сдвига и тряски · <code>?ui=0</code> только 3D · <code>?ui3d=0</code> только DOM-слой · <code>?uiw=1280</code> крупнее UI</li>
+    <li>BotHive · caught: <code>?caught=25&amp;first=2:14</code> — <b>подставьте цифры настоящего прогона</b>. Intercept: <code>?accounts=25&amp;post=4&amp;snr=…</code>, <code>?credits=0</code> убирает подписи под формулами</li>
+    <li>Feed/Decay: <code>?headline=…</code>, <code>?caption=…</code>, <code>?words=0</code> · Outro: <code>?tag=…</code>, <code>?url=…</code></li>
+    <li>Клавиши в сцене: Space, R, ←/→, [ ], <b>N/B</b> след./пред. сцена, <b>F</b> свободная камера, <b>K</b> ключ камеры, <b>M</b> свой путь, <b>C/L</b> копировать/вставить путь, G, U, H, S</li>
+  </ul>
+</main>
+<script>
+const SCENES = [
+  ['bothive-launch', 'BotHive · запуск', 'Антагонист: консоль red team, перекрашенная в улей. Курсор ставит 25 ботов × 4 поста, ATTACK, залпы красных точек улетают из кадра.', '0:00–0:06'],
+  ['feed', 'Feed', 'Новость печатается; посты ботов прилетают красными трассерами (те же точки), рой заполняет стену, энтропия, «Which voice is real?».', '0:00–0:16'],
+  ['market', 'Market (вставка)', 'Терминал с вымышленным тикером: цена накачивается, рушится и дёргается, цифры мелькают, комментарии ботов сыплются лавиной (🚀 → SELL). ~2.6 с, <code>?len=</code>.', 'залпы 0:06–0:15'],
+  ['shop', 'Shop (вставка)', 'Карточка товара вымышленного магазина: пятизвёздочные отзывы-перефразы сыплются потоком, отзывов 128 → 4 812, рейтинг 3.9 → 4.9, «#1 Bestseller». ~5 с.', 'залпы 0:06–0:15'],
+  ['social', 'Social (вставка)', 'Схематичный телефон (не реальное приложение): свайпы ленты, остановка на посте, лайки 1.2K → 49K с потоком сердечек, панель комментариев заливают боты. ~5 с.', 'залпы 0:06–0:15'],
+  ['decay', 'Decay → лендинг', 'Склейка в тишину: стена в пиксели, пиксели на поле, точка, сонар, красный пик за фронтом; проявляется настоящий лендинг, точка влетает в «ı».', '0:16–0:20'],
+  ['intercept', 'Intercept', 'Поле результата: красные точки садятся у начала координат, холм пересекает CFAR-порог, сонар краснеет, формулы, SPRT-трасса, карточка «Swarm Detected».', '0:26–0:36'],
+  ['bothive-caught', 'BotHive · пойман', 'Ответ радара: лог переключается на ✓ detected бот за ботом, соты вспыхивают зелёным и гаснут, «caught 25 / 25».', '0:36–0:39'],
+  ['outro', 'Outro', 'Тишина, одно кольцо, вордмарк собирается вокруг точки, теглайн, плашка тестового режима.', '0:39–0:45'],
+];
+document.getElementById('scenes').insertAdjacentHTML('beforeend', SCENES.map(([f, n, d, at], i) =>
+  `<tr><td class="n">${i + 1}</td><td><b>${n}</b><small>${d}</small></td><td>${at}</td>
+   <td><a class="btn" href="player.html?scene=${f}">открыть</a><a class="btn rec" href="player.html?scene=${f}&rec&w=1920&h=1080">rec 1080p</a><a class="btn rec" href="player.html?scene=${f}&rec&w=1920&h=1080&glitch=0">чистый</a></td></tr>`).join(''));
+</script>
+</body>
+</html>
