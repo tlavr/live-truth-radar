@@ -634,6 +634,7 @@ html:not([data-stage=home]) .fa{--tail:14px}
 }
 </style>
 <link rel="stylesheet" href="/steps.css">
+<link rel="stylesheet" href="/tour.css">
 </head>
 <body>
 <main>
@@ -641,6 +642,7 @@ html:not([data-stage=home]) .fa{--tail:14px}
     <canvas id="scene" aria-hidden="true"></canvas>
     <div class="veil"></div>
     <button class="brand" id="brandBtn" type="button" aria-label="Live Swarm Radar home">Live Swarm Radar</button>
+    <button class="tour-help" id="tourBtn" type="button" aria-label="Site tour" title="Site tour"><span aria-hidden="true">?</span></button>
     <a class="info" href="/metrics" aria-label="Metrics" title="Metrics: how well the detector works"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8.2" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="6.4" r="1.1" fill="currentColor"/><path d="M10 9v5.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></a>
     <header class="topbar">
       <form class="search-shell" id="search" role="search" autocomplete="off">
@@ -748,5 +750,6 @@ html:not([data-stage=home]) .fa{--tail:14px}
 }}
 </script>
 <script type="module" src="/app.js"></script>
+<script src="/tour.js" defer></script>
 </body>
 </html>
