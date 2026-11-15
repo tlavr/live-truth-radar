@@ -571,18 +571,20 @@ html:not([data-stage=home]) .ctrl::before{content:"";width:1px;height:20px;margi
 .strip .tk::before{content:"";position:absolute;left:50%;bottom:16px;width:1px;height:34px;background:rgba(218,240,224,.06)}
 .strip .win{position:absolute;top:0;bottom:0;background:rgba(142,232,123,.07);border-left:1px solid rgba(142,232,123,.45);border-right:1px solid rgba(142,232,123,.45);pointer-events:none}
 .strip .now{position:absolute;top:0;bottom:0;width:2px;margin-left:-2px;background:var(--salat);opacity:.6;pointer-events:none}
-.strip .mk{position:absolute;top:22px;height:10px;border-radius:5px;background:var(--tertiary);transition:filter 160ms ease}
+.strip .mk{position:absolute;z-index:1;top:30px;width:10px;height:10px;margin:-5px 0 0 -5px;padding:0;border:0;border-radius:50%;background:var(--tertiary);transition:filter 160ms ease}
+.strip .mk[data-row="1"]{top:20px;z-index:2}
+.strip .mk[data-row="0"]{top:10px;z-index:3}
 .strip .mk[data-v=watching]{background:var(--peak)}
-.strip .mk[data-v=coordinated]{background:var(--accent)}
-.strip .mk[aria-pressed=true]{top:19px;height:16px;border-radius:8px;box-shadow:0 0 0 2px var(--bg),0 0 0 3.5px var(--ink)}
+.strip .mk[data-v=coordinated]{background:var(--accent);box-shadow:0 0 8px rgba(255,92,158,.55)}
+.strip .mk[aria-pressed=true]{width:14px;height:14px;margin:-7px 0 0 -7px;z-index:4;box-shadow:0 0 0 2px var(--bg),0 0 0 3.5px var(--ink)}
 
-.strip .nowbtn{position:absolute;z-index:1;right:8px;top:50%;transform:translateY(-50%);display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border-radius:999px;
+.strip .nowbtn{position:absolute;z-index:5;right:8px;top:50%;transform:translateY(-50%);display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border-radius:999px;
   border:1px solid rgba(142,232,123,.5);background:var(--surface-solid);color:var(--salat);font-size:12.5px;font-weight:600;cursor:pointer}
 .strip .nowbtn i{width:7px;height:7px;border-radius:50%;background:currentColor}
 .strip .nowbtn[data-live=true]{background:var(--salat);border-color:var(--salat);color:var(--bg)}
 .strip .nowbtn[data-live=true] i{animation:livePulse 1.6s ease-out infinite}
 @media (hover:hover) and (pointer:fine){.strip .nowbtn[data-live=false]:hover{background:rgba(142,232,123,.14)}}
-.strip .mk::after{content:"";position:absolute;inset:-14px -4px -8px}   /* a larger hit target */
+.strip .mk::after{content:"";position:absolute;inset:-4px}   /* a larger hit target */
 @media (hover:hover) and (pointer:fine){.strip .mk:hover{filter:brightness(1.25)}}
 /* result layout: the verdict and its links on top in the middle; at the bottom, under the timeline, the topic
    with its scan controls on the left and the view switch on the right; nothing in the top right corner */
