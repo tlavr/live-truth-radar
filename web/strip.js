@@ -1,5 +1,5 @@
 // Group timeline of a topic (dashboard footer): one horizontal strip over the detector window, every group of the
-// topic as a mark at its own time, coloured by verdict. Drag to pan, wheel or pinch to zoom; a mark picks its group,
+// topic as a dot at its own time, coloured by verdict. Drag to pan, wheel or pinch to zoom; a mark picks its group,
 // a click on empty time moves the map there. The span the map shows is drawn as a bracket; "Now" at the right end
 // brings the map back to live.
 
@@ -10,7 +10,7 @@ const hm = ms => new Date(ms).toLocaleTimeString([], {hour: '2-digit', minute: '
 
 /**
  * `el`: the strip element; onPick(k): a group's mark was chosen; onTime(ms): empty time was clicked; onNow(): "Now".
- * set({t0, t1, live, marks: [{k, start, end, verdict, title, sel}], win: [start, end] | null}) draws it (ms).
+ * set({t0, t1, live, marks: [{k, at, verdict, title, sel}], win: [start, end] | null}) draws it (ms).
  */
 export function createStrip({el, onPick, onTime, onNow}) {
   let data = null, a = 0, b = 0, fitted = false;    // [a, b]: the time span on screen
@@ -40,13 +40,17 @@ export function createStrip({el, onPick, onTime, onNow}) {
     const now = document.createElement('span');
     now.className = 'now'; now.style.left = `${x(data.t1)}px`;
     el.append(now);
-    for (const m of data.marks) {
-      const l = x(m.start), r = Math.max(x(m.end), l + 8);
-      if (r < -20 || l > w + 20) continue;
+    // one dot per group at its last post; swarms in the top row and drawn over the rest, then suspicious,
+    // then the others; the shown group is the larger ringed dot
+    const ROW = {coordinated: 0, watching: 1, organic: 2};
+    const row = m => ROW[m.verdict] ?? 2;
+    for (const m of [...data.marks].sort((p, q) => row(q) - row(p) || p.sel - q.sel)) {
+      const cx = x(m.at);
+      if (cx < -10 || cx > w + 10) continue;
       const btn = document.createElement('button');
-      btn.type = 'button'; btn.className = 'mk'; btn.dataset.k = m.k; btn.dataset.v = m.verdict;
+      btn.type = 'button'; btn.className = 'mk'; btn.dataset.k = m.k; btn.dataset.v = m.verdict; btn.dataset.row = row(m);
       btn.setAttribute('aria-pressed', m.sel); btn.title = m.title; btn.setAttribute('aria-label', m.title);
-      btn.style.left = `${l}px`; btn.style.width = `${r - l}px`;
+      btn.style.left = `${cx}px`;
       el.append(btn);
     }
     const nb = document.createElement('button');

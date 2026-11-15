@@ -8,7 +8,7 @@ import {RenderPass} from 'three/addons/postprocessing/RenderPass.js';
 import {UnrealBloomPass} from 'three/addons/postprocessing/UnrealBloomPass.js';
 import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
 import {topicLabel, platformLabel} from './labels.js';
-import {heldByNews, reasons} from './chain.js';
+import {heldByNews, reasons, gist} from './chain.js';
 import {points} from './says.js';
 import {merged} from './when.js';
 import {HELD, LABEL, LETTER, ordered, verdictLabel} from './groups.js';
@@ -51,10 +51,12 @@ const S = {
   pop: null,                       // the open header panel ('why')
   pick: null,                      // the picked cell of the map {l, m} (its card is #pick), or null
   live: null,  // T12d live scan: {topic, session, since, frame, timer, busy, error}
-  pickedWeak: false,               // T12d: a group below the alert threshold is shown only if the user picked it
+  pin: null, pinAt: null,          // id of the group the user picked (strip, search), shown while it is on the map;
+                                   // pinAt: the moment its pick sent the map to (null = live)
   tmap: null, mapBusy: false,      // time x meaning map of the topic (/api/timemap), one layer per group
-  mapAt: null, drawnAt: null, mapPending: false, view: 0,            // mapAt: null = live, else the ISO moment the map is rewound to;
-                                   // view: bins between the end of the fetched map and the origin on screen
+  mapAt: null, drawnAt: null, mapPending: false, view: 0, viewTo: null,   // mapAt: null = live, else the ISO moment the map is rewound to;
+                                   // view: bins between the end of the fetched map and the origin on screen;
+                                   // viewTo: where a scroll in progress ends (the window the status is about)
 };
 // T12c: the false-alarm slider picks an SPRT alpha; /api/alerts?alpha= serves the findings at that point
 const SLIDER_ALPHAS = [0.005, 0.01, 0.02, 0.05, 0.1];  // fallback until eval/operating_points.json exists
@@ -71,8 +73,45 @@ const pfaText = () => {
 const topicFindings = t => ordered(S.findings.filter(f => f.topic === t));
 const span = f => hm(f.first_seen) === hm(f.last_seen) ? hm(f.first_seen) : `${hm(f.first_seen)}–${hm(f.last_seen)}`;
 
-// the group the result view shows: an alert (coordinated), or a weaker group only if the user opened it
-const shown = () => { const f = S.list[S.sel]; return f && (f.verdict === 'coordinated' || S.pickedWeak) ? f : null; };
+// The group the result view shows is decided by what is on the map now, never remembered: the group the user
+// picked if it has pairs in the window on screen, else the strongest group there (a swarm before a suspicious
+// one, then the one with more pairs). Organic groups show only when picked. Nothing flagged on screen = Quiet.
+// effVerdict: a swarm the news check overruled counts as suspicious, as on the timeline.
+const effVerdict = g => heldByNews(g) ? 'watching' : g.verdict;
+const RANKV = {coordinated: 0, watching: 1, organic: 2};
+let shownMemo = {};
+// pairs of group g in the L columns of the window (live or rewound); before the first map: its time overlaps it
+const overlaps = (g, o) => Date.parse(g.last_seen) >= o - L * BIN_MIN * 60000 && Date.parse(g.first_seen) <= o ? 1 : 0;
+function pairsOnScreen(g) {
+  if (!S.tmap) return overlaps(g, S.mapAt ? Date.parse(S.mapAt) : Date.now());
+  if (g.id === S.pin) {
+    // the picked group: its map is still on the way, or its posts span the window even where the map counts
+    // no pairs (the map counts pairs at most 2 min apart, the detector links posts further apart)
+    if (S.mapPending && S.mapAt === S.pinAt) return 1;
+    if (overlaps(g, Date.parse(S.tmap.now) - Math.round(S.viewTo ?? S.view) * BIN_MS)) return 1;
+  }
+  const grid = S.tmap.groups?.[g.id];
+  if (!grid) return 0;
+  const a = Math.round(S.viewTo ?? S.view);
+  let n = 0;
+  for (const row of grid) for (let l = 0; l < L; l++) n += row[row.length - 1 - (a + l)] ?? 0;
+  return n;
+}
+function shownIdx() {
+  const key = [S.tmap, Math.round(S.viewTo ?? S.view), S.list, S.pin, S.mapAt, S.mapPending, S.tmap ? 0 : Math.floor(Date.now() / BIN_MS)];
+  if (shownMemo.key?.every((v, i) => v === key[i])) return shownMemo.i;
+  let best = -1, bestR = 9, bestN = 0;
+  S.list.forEach((g, i) => {
+    const n = pairsOnScreen(g);
+    if (!n) return;
+    if (g.id === S.pin) { best = i; bestR = -1; return; }
+    const r = RANKV[effVerdict(g)];
+    if (r < 2 && bestR >= 0 && (r < bestR || (r === bestR && n > bestN))) { best = i; bestR = r; bestN = n; }
+  });
+  shownMemo = {key, i: best};
+  return best;
+}
+const shown = () => S.list[shownIdx()] ?? null;
 const SIM = 'simulated attack';
 
 const PAL = {bg: '#0C100E', cool: '#63CF97', muted: '#A3B8AA', warm: '#B7F063', peak: '#FFE066', sel: '#FF5C9E'};
@@ -125,7 +164,10 @@ let renderer, composer, bloom, camera, scene, U, axisMat, axGeo, geoms = [], ok 
 // half-float target plus the bloom chain at DPR 2 (3024x1800) is several hundred MB. There: DPR <= 1.25, 2x MSAA.
 const SAFARI = /^((?!chrome|chromium|crios|fxios|edg|android).)*safari/i.test(navigator.userAgent);
 const MAX_DPR = SAFARI ? 1.25 : 2, MSAA = SAFARI ? 2 : 4;
-const field = {P: new Float32Array(NX * NZ), O: new Float32Array(NX * NZ), C: new Float32Array(NX * NZ)};
+// P: the shown group, O: the other groups, C: all other pairs; K and Y: the swarm and the suspicious part of P + O
+// (by the verdict as shown, effVerdict), which colour the surface above the threshold
+const field = {P: new Float32Array(NX * NZ), O: new Float32Array(NX * NZ), C: new Float32Array(NX * NZ),
+  K: new Float32Array(NX * NZ), Y: new Float32Array(NX * NZ)};
 
 function smooth(grid, off = 0) {
   // su in time bins; off = column of the grid at the origin (fractional while the map scrolls)
@@ -163,10 +205,14 @@ function layersFull(f) {
   if (full.map === S.tmap && full.f === f && full.list === S.list) return full.val;
   const total = rev(S.tmap.total), zero = () => total.map(r => r.map(() => 0));
   const grid = id => S.tmap.groups?.[id] ? rev(S.tmap.groups[id]) : null;
-  const sel = (f && grid(f.id)) || zero(), others = zero();
-  for (const g of S.list) if (g !== f) grid(g.id)?.forEach((r, m) => r.forEach((v, l) => { others[m][l] += v; }));
+  const sel = (f && grid(f.id)) || zero(), others = zero(), swarm = zero(), susp = zero();
+  for (const g of S.list) {
+    const v = effVerdict(g), into = v === 'coordinated' ? swarm : v === 'watching' ? susp : null;
+    grid(g.id)?.forEach((r, m) => r.forEach((n, l) => { if (g !== f) others[m][l] += n; if (into) into[m][l] += n; }));
+  }
   const rest = total.map((r, m) => r.map((v, l) => Math.max(0, v - sel[m][l] - others[m][l])));
-  full = {map: S.tmap, f, list: S.list, val: {sel, others, rest}};
+  const some = g => g.some(r => r.some(v => v > 0)) ? g : null;   // an empty layer is not smoothed (smooth(null) = zeros)
+  full = {map: S.tmap, f, list: S.list, val: {sel, others, rest, swarm: some(swarm), susp: some(susp)}};
   return full.val;
 }
 // the L columns on screen, for the tooltip and the legend
@@ -180,17 +226,28 @@ function layers(f) {
 // (all layers, smoothed) total T stands 10*log10(T / mean) dB high, 0 at or below the mean. The layers split
 // that height in proportion: the selected group (accent colour) on top of the other groups (they keep their
 // colour), on top of the carpet of all other pairs. A click only moves the accent.
-const sample = f => { const y = layersFull(f); return [smooth(y?.sel, S.view), smooth(y?.others, S.view), smooth(y?.rest, S.view)]; };
-// Threshold: the CFAR rule of the detector (detect/config.py cfar_k = 3) applied to this surface, mean + 3
-// sigma of all points on screen, in dB above the mean. It is a guide on the map's own scale: the detector
-// itself thresholds pair correlations, not this density.
-const CFAR_K = 3;
+// verdicts: also the swarm and suspicious layers (setField colours by them; the height scale needs only the first three)
+const sample = (f, verdicts) => {
+  const y = layersFull(f), s = [smooth(y?.sel, S.view), smooth(y?.others, S.view), smooth(y?.rest, S.view)];
+  return verdicts ? [...s, smooth(y?.swarm, S.view), smooth(y?.susp, S.view)] : s;
+};
+// Threshold: the CFAR rule of the detector (detect/config.py cfar_k = 3) applied to this surface: mean + 3 sigma
+// of the points with similar meaning (gap < SIMILAR_GAP), in dB above the mean of all points. Pairs of unrelated
+// posts that only happen close in time (the far rows) are many and would set it above any swarm, so they do not
+// count; it is still one level over the whole map. It is a guide on the map's own scale: the detector itself
+// thresholds pair correlations, not this density.
+const CFAR_K = 3, SIMILAR_GAP = .6;
+const MIN_THR_DB = 1;   // a floor: anything that stands out at all is above it, while the flat floor stays below
 function dbField([P, O, C]) {
   const n = P.length, H = new Float32Array(n);
-  let mean = 0, sq = 0, top = 0;
-  for (let i = 0; i < n; i++) { const t = P[i] + O[i] + C[i]; mean += t; sq += t * t; }
-  mean /= n;
-  const sd = Math.sqrt(Math.max(0, sq / n - mean * mean)), thr = mean > 1e-9 ? 10 * Math.log10(1 + CFAR_K * sd / mean) : 0;
+  let mean = 0, top = 0, ms = 0, sq = 0, ns = 0;
+  for (let i = 0; i < n; i++) {
+    const t = P[i] + O[i] + C[i]; mean += t;
+    if (Math.floor(i / NX) / (NZ - 1) < SIMILAR_GAP) { ms += t; sq += t * t; ns++; }   // row j: meaning gap j / (NZ - 1)
+  }
+  mean /= n; ms /= ns;
+  const level = ms + CFAR_K * Math.sqrt(Math.max(0, sq / ns - ms * ms));
+  const thr = mean > 1e-9 && level > 1e-9 ? Math.max(MIN_THR_DB, 10 * Math.log10(level / mean)) : 0;
   if (mean > 1e-9) for (let i = 0; i < n; i++) {
     const t = P[i] + O[i] + C[i];
     H[i] = t > mean ? 10 * Math.log10(t / mean) : 0; top = Math.max(top, H[i]);
@@ -203,23 +260,23 @@ const dbStep = top => DB_STEPS.find(st => 5 * st >= top) ?? Math.ceil(top / 50) 
 const scaleOf = s => PEAK / (5 * dbStep(dbField(s).top));  // scene units per dB
 // k: scene units per dB; by default the one that fits the view, a scroll passes its own so heights glide
 function setField(f, k) {
-  const s = sample(f), [P, O, C] = s, {H, top, thr} = dbField(s);
+  const s = sample(f, true), [P, O, C, K, Y] = s, {H, top, thr} = dbField(s);
   k ??= PEAK / (5 * dbStep(top));
   let best = 0, at = -1;
   for (let i = 0; i < P.length; i++) {
     if (P[i] > best) { best = P[i]; at = i % NX; }
     const t = P[i] + O[i] + C[i], q = t > 0 ? H[i] * k / t : 0;
-    field.P[i] = P[i] * q; field.O[i] = O[i] * q; field.C[i] = C[i] * q;
+    field.P[i] = P[i] * q; field.O[i] = O[i] * q; field.C[i] = C[i] * q; field.K[i] = K[i] * q; field.Y[i] = Y[i] * q;
   }
-  for (const g of geoms) for (const a of ['aP', 'aO', 'aC']) g.attributes[a].needsUpdate = true;
+  for (const g of geoms) for (const a of ['aP', 'aO', 'aC', 'aK', 'aY']) g.attributes[a].needsUpdate = true;
   CAMS.peak.tx = at < 0 ? -3 : Math.max(-3.4, Math.min(3.4, -W / 2 + at / (NX - 1) * W)) * .8;  // look at the selected wave
   setHeightLabels(k);
   S.thrDb = thr; S.thrY = thr > 0 ? thr * k : null;
-  if (U) U.uThrY.value = S.thrY ?? 1e3;  // the surface turns red above it, with a dashed contour where it crosses
+  if (U) U.uThrY.value = S.thrY ?? 1e3;  // above it the groups take their verdict's colour; a dashed contour where it crosses
   if (axGeo && S.thrY !== axThrY) drawAxes();
   if (thrLabel) {                    // only the number on the axis, in the threshold's colour; the meaning on hover
     thrLabel.el.textContent = thr > 0 ? `${thr.toFixed(1)} dB` : '';
-    thrLabel.el.title = thr > 0 ? `Detection threshold: mean + ${CFAR_K}σ of the map, ${thr.toFixed(1)} dB. What rises above it stands out from the noise.` : '';
+    thrLabel.el.title = thr > 0 ? `Detection threshold: mean + ${CFAR_K}σ of the points with similar meaning (gap < ${SIMILAR_GAP}), ${thr.toFixed(1)} dB. What rises above it stands out from the noise.` : '';
   }
 }
 let thrLabel = null, axThrY = null;
@@ -280,6 +337,8 @@ function buildScene() {
     g.setAttribute('aC', new THREE.BufferAttribute(field.C, 1));
     g.setAttribute('aP', new THREE.BufferAttribute(field.P, 1));
     g.setAttribute('aO', new THREE.BufferAttribute(field.O, 1));
+    g.setAttribute('aK', new THREE.BufferAttribute(field.K, 1));
+    g.setAttribute('aY', new THREE.BufferAttribute(field.Y, 1));
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 1, 0), 9);
     geoms.push(g);
     return g;
@@ -303,15 +362,16 @@ function buildScene() {
     uPingO: {value: new THREE.Vector2(0, 0)},           // where the sonar starts: the antenna's corner (placeTick)
     uPingOn: {value: 0}, uPingT: {value: -99}, uPingC: {value: new THREE.Color(PING_IDLE)},   // sonar from the origin (result view): start (uTime)
     uCool: {value: new THREE.Color(PAL.cool)}, uWarm: {value: new THREE.Color(PAL.warm)},
-    uPeakC: {value: new THREE.Color(PAL.peak)}, uBg: {value: new THREE.Color(PAL.bg)}, uSelC: {value: new THREE.Color(PAL.sel)},
+    uBg: {value: new THREE.Color(PAL.bg)}, uSelC: {value: new THREE.Color(PAL.sel)},
+    uSwarmC: {value: new THREE.Color(PAL.sel)}, uSuspC: {value: new THREE.Color(PAL.peak)},   // above the threshold, by verdict
     uThrY: {value: 1e3},  // height of the detection threshold (setField); 1e3 = none
   };
   // sheet = the dark surface under the lines: the landing's peak lifts only the lines, so the sheet never hides
   // the lines around it (a dark ring)
   const vertOf = sheet => `
-    attribute float aC; attribute float aP; attribute float aO;
+    attribute float aC; attribute float aP; attribute float aO; attribute float aK; attribute float aY;
     uniform float uTime, uCarpet, uPeak, uNoise, uBeatOn, uRingRed; uniform vec4 uSpot;
-    varying float vHeat; varying float vSel; varying vec3 vP; varying float vBump;
+    varying float vHeat; varying float vSel; varying float vSw; varying float vSu; varying vec3 vP; varying float vBump;
     void main(){
       vec3 p = position;
       float n = sin(p.x*1.3+uTime*.55)*sin(p.z*1.9-uTime*.4) + .5*sin(p.x*3.1-uTime*.75+p.z*2.2);
@@ -328,25 +388,33 @@ function buildScene() {
       ${sheet ? 'p.y -= .02;' : `p.y += vBump * uSpot.z * ${SPOT_H.toFixed(2)};`}
       vHeat = smoothstep(0.02, 1., hP/${PEAK.toFixed(2)});
       vSel = aP/max(aP + aO, 1e-4) * smoothstep(0., .05, aP*uPeak/${PEAK.toFixed(2)});  // share of the selected group
+      vSw = aK/max(aP + aO, 1e-4) * smoothstep(0., .05, aK*uPeak/${PEAK.toFixed(2)});   // share of swarms
+      vSu = aY/max(aP + aO, 1e-4) * smoothstep(0., .05, aY*uPeak/${PEAK.toFixed(2)});   // share of suspicious groups
       vP = p;
       gl_Position = projectionMatrix*modelViewMatrix*vec4(p,1.);
     }`;
   const ramp = `
-    vec3 ramp(float h){ vec3 c = mix(uCool, uWarm, smoothstep(0.,.5,h)); return mix(c, uPeakC, smoothstep(.5,1.,h)); }
-    vec3 tint(float h, float sel){ return mix(ramp(h), uSelC, sel); }
-    // the selected group is red only above the threshold, with a soft edge of a few pixels
+    // height alone stays green (yellow and pink mean a verdict); above the threshold a point takes the colour of
+    // the groups there: a swarm's pink before a suspicious group's yellow; organic groups and background stay green
+    vec3 ramp(float h){ return mix(uCool, uWarm, smoothstep(0.,.8,h)); }
+    // flagged = sw + su (both are parts of the groups' height, so at most 1); a swarm's share of it over 30% = pink
+    vec3 tint(float h, float sw, float su){
+      float fl = min(1., sw + su);
+      return mix(ramp(h), mix(uSuspC, uSwarmC, smoothstep(0., .3, sw / max(fl, 1e-4))), fl);
+    }
+    // with a soft edge of a few pixels at the threshold
     // fwidth of a line primitive is unreliable on some GPUs (Metal: huge or infinite at places): clamped, or the
     // edge maths turns into NaN and the line goes black in dashed arcs
     float above(float y){ float w = clamp(fwidth(y), 1e-3, .05); return smoothstep(uThrY - w, uThrY + w, y); }`;
   const lineMat = new THREE.ShaderMaterial({
     uniforms: U, vertexShader: vertOf(false), transparent: true, depthWrite: false,
     fragmentShader: `
-      uniform vec3 uCool, uWarm, uPeakC, uSelC; uniform float uGlow, uSweep, uSweepOn, uThrY, uTime; uniform vec4 uHover, uPick;
+      uniform vec3 uCool, uWarm, uSwarmC, uSuspC; uniform float uGlow, uSweep, uSweepOn, uThrY, uTime; uniform vec4 uHover, uPick;
       uniform float uPingOn, uPingT, uBeatOn, uSpotD, uRingRed; uniform vec3 uPingC; uniform vec4 uSpot; uniform vec2 uPingO;
-      varying float vHeat; varying float vSel; varying vec3 vP; varying float vBump; ${ramp}
+      varying float vHeat; varying float vSel; varying float vSw; varying float vSu; varying vec3 vP; varying float vBump; ${ramp}
       float sq(float x){ return x*x; }   // not pow(x, 2.): pow of a negative base is undefined in GLSL (NaN on some GPUs)
       void main(){
-        float sel = vSel * above(vP.y);
+        float ab = above(vP.y), sw = vSw * ab, su = vSu * ab, sel = min(1., sw + su);   // the flagged part above the threshold
         float sweep = exp(-sq((vP.x-uSweep)/.32))*uSweepOn;
         float hov = step(uHover.x,vP.x)*step(vP.x,uHover.y)*step(uHover.z,vP.z)*step(vP.z,uHover.w);
         hov = max(hov, step(uPick.x,vP.x)*step(vP.x,uPick.y)*step(uPick.z,vP.z)*step(vP.z,uPick.w));
@@ -365,7 +433,7 @@ function buildScene() {
         float spot = sqrt(max(vBump, 0.)) * uSpot.z * uSpot.w;
         float far = 1.;  // no depth fade: in an orthographic view it reads as perspective and makes the far side look wider
         float a = uGlow*(.5+.9*max(vHeat, sel*.8))*far + sweep*.32 + hov*.6 + ping*.7 + beat*.75 + spot*.8;
-        vec3 col = tint(vHeat, sel)*(1.+max(vHeat, sel*.7)*1.35+sweep*.25+hov) + uPingC*ping*.9;
+        vec3 col = tint(vHeat, sw, su)*(1.+max(vHeat, sel*.7)*1.35+sweep*.25+hov) + uPingC*ping*.9;
         col = mix(col, ringC*1.25, clamp(beat*1.3, 0., 1.));   // the ring's own colour, not added light
         gl_FragColor = vec4(mix(col, vec3(1., .16, .16)*1.4, clamp(spot*2.2, 0., 1.)), clamp(a,0.,1.));
       }`,
@@ -374,14 +442,16 @@ function buildScene() {
     uniforms: U, vertexShader: vertOf(true), side: THREE.DoubleSide,
     polygonOffset: true, polygonOffsetFactor: 3, polygonOffsetUnits: 4,   // keeps the dark sheet behind its own lines on steep slopes
     fragmentShader: `
-      uniform vec3 uBg, uCool, uWarm, uPeakC, uSelC; uniform float uThrY;
-      varying float vHeat; varying float vSel; varying vec3 vP; ${ramp}
+      uniform vec3 uBg, uCool, uWarm, uSwarmC, uSuspC, uSelC; uniform float uThrY;
+      varying float vHeat; varying float vSel; varying float vSw; varying float vSu; varying vec3 vP; ${ramp}
       void main(){
-        float sel = vSel * above(vP.y);
-        vec3 c = uBg*1.2 + tint(vHeat, sel)*max(vHeat, sel*.7)*.14 + uSelC*sel*.22 + uCool*vP.y*.006;
+        float ab = above(vP.y), sw = vSw * ab, su = vSu * ab, sel = min(1., sw + su);
+        vec3 c = uBg*1.2 + tint(vHeat, sw, su)*max(vHeat, sel*.7)*.14 + tint(0., sw, su)*sel*.22 + uCool*vP.y*.006;
         // dashed contour where the surface crosses the threshold: ~1.5 px wide, dashes of ~9 px on screen
         float d = abs(vP.y - uThrY) / clamp(fwidth(vP.y), 1e-4, .05);
         float line = 1. - smoothstep(.75, 1.75, d);
+        // the contour only where the threshold is measured: the rows of similar meaning (gap < SIMILAR_GAP)
+        line *= 1. - smoothstep(${(SIMILAR_GAP - .04).toFixed(2)}, ${(SIMILAR_GAP + .04).toFixed(2)}, (${(D / 2).toFixed(2)} - vP.z) / ${D.toFixed(2)});
         float dash = step(.45, fract((gl_FragCoord.x + gl_FragCoord.y) / 18.));
         vec3 lc = mix(vec3(1.), uSelC, .35 + .65*vSel);  // pink on the selected group, near white elsewhere
         c = mix(c, lc * (1. + vSel), line * dash * (.55 + .45*vSel));
@@ -528,8 +598,11 @@ function hover(e) {
 function thrNote(c) {
   if (S.thrY == null || c.h < S.thrY) return '';
   const i = Math.round((D / 2 - c.z) / D * (NZ - 1)) * NX + Math.round((c.x + W / 2) / W * (NX - 1));
-  const mine = field.P[i] > field.O[i] + field.C[i];            // mostly the selected group's pairs: the accent cap
-  return `<em class="thr">Above the detection threshold (mean + ${CFAR_K}σ = ${S.thrDb.toFixed(1)} dB): ${mine ? "this group's posts stand" : 'posts stand'} out from the noise here.</em>`;
+  const P = field.P[i], O = field.O[i], C = field.C[i], K = field.K[i], Y = field.Y[i];
+  const who = P > O + C ? "this group's posts stand"          // mostly the shown group's pairs
+    : K > .05 * (P + O) && K >= .3 * (K + Y) ? "a swarm's posts stand" : Y > .05 * (P + O) ? "a suspicious group's posts stand"
+    : P + O > C ? "a group's posts stand" : 'posts outside any group stand';
+  return `<em class="thr">Above the detection threshold (mean + ${CFAR_K}σ of similar-meaning points = ${S.thrDb.toFixed(1)} dB): ${who} out from the noise here.</em>`;
 }
 // one cell against the mean cell on screen, in dB
 function cellDb(y, m, l) {
@@ -605,7 +678,7 @@ const what = m => (m + 1) / M <= .3 ? 'Same message' : (m + 1) / M <= .6 ? 'Simi
 const nOf = (k, one, many) => `${k} ${k === 1 ? one : many}`;
 let picked = 0;                      // token: a newer pick supersedes a card still loading its posts
 async function showCell() {
-  const y = layers(shown()), f = shown(), el = $('pick'), mine = ++picked;
+  const y = layers(shown()), f = shown(), fi = shownIdx(), el = $('pick'), mine = ++picked;
   if (!S.pick || !y || !f) return unpick();
   const {l, m} = S.pick, sel = y.sel[m][l], others = y.others[m][l], rest = y.rest[m][l];
   const t1 = originMs() - l * BIN_MS, t0 = t1 - BIN_MS;      // the cell's time bin, of the pair's later post
@@ -632,7 +705,7 @@ async function showCell() {
   if (!said.length) return;
   const who = `${new Set(said.map(it => it.author)).size} of ${f.accounts.length} accounts posted then`;
   el.innerHTML = text(` ${who}${lines ? `, repeating ${nOf(lines, 'line', 'lines')}` : ''}.`) +
-    `<button type="button" class="say" data-say="${S.sel}">What they say</button>`;
+    `<button type="button" class="say" data-say="${fi}">What they say</button>`;
 }
 canvas.addEventListener('pointerleave', hideTip);
 
@@ -640,8 +713,8 @@ canvas.addEventListener('pointerleave', hideTip);
 function topicStats() {
   const items = new Set(), accounts = new Set();
   for (const f of S.list) { f.item_ids.forEach(i => items.add(i)); f.accounts.forEach(a => accounts.add(a)); }
-  const f = S.list[0];
-  return {posts: items.size, accounts: accounts.size, pairs: sum(f?.ambiguity?.counts) + sum(f?.ambiguity?.background), f};
+  const f0 = S.list[0];   // the pair count of the topic's leading group; "Deciding" speaks of the group the title shows
+  return {posts: items.size, accounts: accounts.size, pairs: sum(f0?.ambiguity?.counts) + sum(f0?.ambiguity?.background), f: shown()};
 }
 const PHASES = [
   {title: 'Collecting posts', fact: (n, s) => `${Math.round(n * s.posts)} posts in groups from ${Math.round(n * s.accounts)} accounts (${WINDOW_HOURS}h)`, dur: 1.4},
@@ -663,11 +736,11 @@ function openTopic(topic, {instant = false, findingId = null} = {}) {
   liveStart(topic);
   S.topic = topic; S.list = topicFindings(topic);
   S.pop = null; unpick(); closeSheets();
-  S.sel = Math.max(0, S.list.findIndex(f => f.id === findingId));
-  S.pickedWeak = S.list[S.sel]?.verdict !== 'coordinated' && !!findingId;
+  const asked = S.list.find(f => f.id === findingId);
+  S.pin = asked?.id ?? null; S.pinAt = rewindFor(asked);
   scrollTw?.kill(); scrollTw = null; mapSeq++;
-  S.tmap = null; S.mapAt = null; S.drawnAt = null; S.mapPending = false; S.view = 0;
-  setMapAt(rewindFor(shown()));  // the opened group on screen from the start (rewound if it is older than the map)
+  S.tmap = null; S.mapAt = null; S.drawnAt = null; S.mapPending = false; S.view = 0; S.viewTo = null;
+  setMapAt(rewindFor(asked));  // always live now; only a group asked for by name rewinds the map to its time
   history.replaceState(null, '', `?q=${encodeURIComponent(topic)}`);
   tl?.kill(); selTl?.kill();
   root.dataset.stage = 'scan'; scrollTo(0, 0); hideTip();
@@ -738,17 +811,17 @@ for (const el of [$('vHead'), $('viewbar'), stage]) new ResizeObserver(dock).obs
 let pingRed = false;
 function pingColour() {
   if (!ok) return;
-  const f = shown(), y = layers(f), red = f?.verdict === 'coordinated' && !!y && sum(y.sel) > 0;
+  const f = shown(), y = layers(f), red = !!f && effVerdict(f) === 'coordinated' && !!y && sum(y.sel) > 0;
   if (red === pingRed) return;
   pingRed = red;
   const c = new THREE.Color(red ? PING_SWARM : PING_IDLE);
   gsap.to(U.uPingC.value, {r: c.r, g: c.g, b: c.b, duration: reduced ? 0 : .6, overwrite: true});
 }
-// the selected group's colour on the map (caps above the threshold, its contour, the threshold's label): the colour
-// of its verdict, as in the title: a swarm in the accent, a suspicious group in yellow
+// the shown group's colour on the map (the threshold's contour and label): the colour of its verdict, as in the
+// title: a swarm in the accent, a suspicious group in yellow. The caps above the threshold take their own groups' verdict colours
 const SEL_COLOUR = {coordinated: PAL.sel, watching: PAL.peak, organic: PAL.cool};
 function selColour() {
-  const f = shown(), hex = f ? SEL_COLOUR[heldByNews(f) ? 'watching' : f.verdict] : PAL.sel;
+  const f = shown(), hex = f ? SEL_COLOUR[effVerdict(f)] : PAL.cool;   // Quiet: nothing on screen is flagged
   stage.style.setProperty('--thr', hex);
   if (!ok) return;
   const c = new THREE.Color(hex);
@@ -756,7 +829,7 @@ function selColour() {
 }
 function goHome() {
   liveStop();
-  scrollTw?.kill(); scrollTw = null;                 // a rewind still scrolling would bring the threshold back
+  scrollTw?.kill(); scrollTw = null; S.viewTo = null;   // a rewind still scrolling would bring the threshold back
   tl?.kill(); selTl?.kill();
   gsap.killTweensOf('#pipe,#pipeNow,#vTitle,#groups,#gLine,#viewbar,#axes');
   S.pop = null; unpick(); closeSheets();
@@ -790,21 +863,22 @@ const dot = v => `<i class="dot" data-v="${v}"></i>`;
 // The verdict in words: title, one sentence and the risk line with Pfa and SNR. The title and the sentence
 // sit in the "Why" panel of the group, the risk line on top of its "How we got here" sheet.
 function verdictCopy(f) {
-  const weak = S.list.filter(g => g.verdict !== 'coordinated').length;
+  const n0 = S.list.length;
   if (!f) return {v: 'organic', title: 'Quiet',
-    text: weak
-      ? `No coordinated group in the last ${WINDOW_HOURS} h of ${topicLabel(S.topic)}; ${weak} weaker look-alike group${weak === 1 ? ' stays' : 's stay'} below the alert threshold.`
+    text: n0
+      ? `No flagged group on the map in the ${L * BIN_MIN} minutes up to ${nowText()}; ${n0} group${n0 === 1 ? '' : 's'} of the last ${WINDOW_HOURS} h of ${topicLabel(S.topic)} ${n0 === 1 ? 'is' : 'are'} on the timeline below.`
       : `No groups of look-alike accounts in the last ${WINDOW_HOURS} h of ${topicLabel(S.topic)}.`,
     risk: `🟢 Nothing above the detector threshold. <small>${pfaText()}</small>`};
-  const hit = f.verdict === 'coordinated', n = f.accounts.length;
+  const v = effVerdict(f), hit = v === 'coordinated', n = f.accounts.length;
   const snr = f.snr_db_single != null ? `SNR ${f.snr_db_single.toFixed(1)} → ${f.snr_db.toFixed(1)} dB` : `SNR ${f.snr_db.toFixed(1)} dB`;
-  return {v: f.verdict, title: VERDICT[f.verdict].title,
+  return {v, title: VERDICT[v].title,
     text: hit && f.explanation?.summary ? f.explanation.summary
       : hit ? `${n} accounts posted near-identical messages close together in time.`
-      : f.verdict === 'watching' ? `${n} accounts look alike, but the evidence is not strong enough yet.`
+      : heldByNews(f) ? `${n} accounts. ${gist(f)}`
+      : v === 'watching' ? `${n} accounts look alike, but the evidence is not strong enough yet.`
       : `${n} accounts: similar topic, but no coordination signal.`,
     risk: (hit ? `🔴 ${n} accounts are saying the same thing almost simultaneously.`
-      : f.verdict === 'watching' ? '🟡 Suspicious — not sure yet.' : '🟢 Looks organic.') +
+      : v === 'watching' ? '🟡 Suspicious — not sure yet.' : '🟢 Looks organic.') +
       ` <small>${pfaText()} · ${snr}</small>`};
 }
 
@@ -828,7 +902,7 @@ function render() {
    coordinated one in the accent ("Swarm Detected"); its attack type heads the Why panel, not the title */
 function renderTitle() {
   const f = shown(), c = verdictCopy(f), vt = $('vTitle');
-  vt.dataset.v = f ? f.verdict : 'quiet';
+  vt.dataset.v = f ? c.v : 'quiet';
   vt.textContent = c.title;   // always the verdict; the attack type heads the Why panel (whyHTML)
 }
 /* the header: one tab per group (the letter it carries everywhere), or one dropdown when there are more than
@@ -841,8 +915,8 @@ function renderHead() {
   const why = `<button type="button" data-pop="why" aria-controls="pop" aria-expanded="${S.pop === 'why'}">Why</button>`;
   setHTML($('gLine'), !S.topic ? '' : !f ? why
     : `${f.verdict === 'coordinated' ? '' : attackType(f)}${f.synthetic ? `<span class="sim">${SIM}</span>` : ''}${why}
-    <button type="button" data-say="${S.sel}">What they say</button>
-    <button type="button" data-how="${S.sel}">How we got here</button>`);
+    <button type="button" data-say="${shownIdx()}">What they say</button>
+    <button type="button" data-how="${shownIdx()}">How we got here</button>`);
   $('pop').hidden = !S.pop;
   setHTML($('pop'), S.pop === 'why' ? whyHTML(f) : '');
   renderStrip();
@@ -853,8 +927,8 @@ function renderStrip() {
   if (!S.topic) return strip.set(null);
   const f = shown(), t1 = Date.now();
   const t0 = Math.min(t1 - WINDOW_HOURS * 3600e3, ...S.list.map(g => Date.parse(g.first_seen)));
-  const marks = S.list.map((g, k) => ({k, start: Date.parse(g.first_seen), end: Date.parse(g.last_seen),
-    verdict: heldByNews(g) ? 'watching' : g.verdict, sel: g === f,
+  const marks = S.list.map((g, k) => ({k, at: Date.parse(g.last_seen),
+    verdict: effVerdict(g), sel: g === f,
     title: `${g.accounts.length} accounts · ${verdictLabel(g)} · ${span(g)} UTC${g.synthetic ? ` · ${SIM}` : ''}`}));
   strip.set({t0, t1, marks, live: !S.mapAt, win: S.tmap ? [originMs() - L * BIN_MS, originMs()] : null});
 }
@@ -880,12 +954,17 @@ const TECHNIQUE_INFO = {
   'exaggeration': 'Blows the facts up: bigger numbers, worse outcomes, "the worst ever".',
   'whataboutism': 'Deflects criticism by pointing at someone else\'s wrongdoing.',
 };
-// the Why panel's heading for a coordinated group: its attack type(s) with a short meaning; "other" and unknown labels are left out
+// a technique the explanation names outside the list above ("other", or a label we do not know)
+const OTHER_INFO = 'Coordinated, but without one of the usual propaganda techniques we name, or one we could not pin down: the accounts push the same message in sync.';
+// the Why panel's heading for a coordinated group: its attack type(s) with a short meaning; "other" and unknown
+// labels show as one "Other"
 function attackHTML(f) {
   const t = f?.verdict === 'coordinated' ? f.explanation?.technique : null;
   if (!t) return '';
-  const known = [...new Set(t.toLowerCase().split(' + ').map(s => s.trim()))].filter(s => TECHNIQUE_INFO[s]);
-  return known.map(s => `<div class="atk"><b><span>Attack type</span>${esc(s[0].toUpperCase() + s.slice(1))}</b><p>${esc(TECHNIQUE_INFO[s])}</p></div>`).join('');
+  const all = [...new Set(t.toLowerCase().split(' + ').map(s => s.trim()).filter(Boolean))];
+  const known = all.filter(s => TECHNIQUE_INFO[s]), other = all.length > known.length;
+  const atk = (name, info) => `<div class="atk"><b><span>Attack type</span>${esc(name)}</b><p>${esc(info)}</p></div>`;
+  return known.map(s => atk(s[0].toUpperCase() + s.slice(1), TECHNIQUE_INFO[s])).join('') + (other ? atk('Other', OTHER_INFO) : '');
 }
 // "Why": the attack type (coordinated, once explained), the verdict of the shown group in a sentence,
 // then what made it stand out, one phrase per detector step
@@ -1033,7 +1112,7 @@ async function showSays(k) {
   if (!f) return;
   const x = f.explanation, n = f.accounts.length;
   const head = sheetTop(`What they say<small>${n} accounts</small>`, LETTER(k)) +
-    (x ? `<p class="lead">${esc(x.summary)}</p><blockquote>“${esc(x.quote)}”</blockquote>${f.verdict === 'coordinated' && x.technique.toLowerCase() !== 'other' ? `<p class="foot">Attack type: ${esc(x.technique)}, ${Math.round(x.confidence * 100)}% confidence</p>` : ''}` : '');
+    (x ? `<p class="lead">${esc(x.summary)}</p><blockquote>“${esc(x.quote)}”</blockquote>${f.verdict === 'coordinated' ? `<p class="foot">Attack type: ${esc(x.technique.toLowerCase() === 'other' ? 'other' : x.technique)}, ${Math.round(x.confidence * 100)}% confidence</p>` : ''}` : '');
   dlg.innerHTML = head + '<p class="foot">Loading posts…</p>';
   sheetOpen(dlg);
   let its;
@@ -1097,11 +1176,12 @@ async function setMapAt(at) {
   if (seq !== mapSeq) return;  // a newer request owns the state
   if (S.topic !== topic || S.alpha !== asked) { S.mapAt = S.drawnAt; S.mapPending = false; return; }
   S.mapPending = false; S.drawnAt = at;
-  scrollTw?.kill();
+  scrollTw?.kill(); scrollTw = null; S.viewTo = null;
   const hadMap = !!S.tmap, endMs = Date.parse(r.now);
   const vTo = live ? 0 : Math.max(0, Math.round((endMs - target) / BIN_MS)), vFrom = Math.max(0, (endMs - from) / BIN_MS);
   S.tmap = r;
   if (!ok || reduced || !hadMap || Math.abs(vTo - vFrom) < .5) { S.view = vTo; showMap(); return; }
+  S.viewTo = vTo;                                     // the status is about where the scroll lands
   S.view = vFrom; const kA = scaleOf(sample(shown()));
   S.view = vTo; const kB = scaleOf(sample(shown()));
   S.view = vFrom;
@@ -1109,19 +1189,23 @@ async function setMapAt(at) {
   scrollTw = gsap.to(t, {
     p: 1, duration: Math.min(2.6, .9 + .55 * Math.log2(1 + dist)), ease: 'power2.inOut',
     onUpdate: () => { S.view = vFrom + (vTo - vFrom) * t.p; setField(shown(), kA + (kB - kA) * t.p); setOrigin(); },
-    onComplete: () => { scrollTw = null; S.view = vTo; showMap(); },
+    onComplete: () => { scrollTw = null; S.viewTo = null; S.view = vTo; showMap(); },
   });
 }
 function goLive() {
+  S.pin = null;                                      // back to now: the status is what the live map shows
   setMapAt(null);
   if (root.dataset.stage === 'result') render();
 }
 
 function select(i, instant) {
-  if (i === S.sel && shown()) { setMapAt(rewindFor(shown())); return; }  // already shown: only bring its wave on screen
-  // (in the Quiet view index 0 is "selected" but not shown: fall through and open it)
-  S.sel = i; S.pickedWeak = S.list[i]?.verdict !== 'coordinated'; S.pop = null; hideTip(); unpick(); selTl?.kill();
-  setMapAt(rewindFor(shown()));
+  const g = S.list[i];
+  if (!g) return;
+  const was = shownIdx();                            // before the pin: was it the group on screen already?
+  S.pin = g.id; S.pinAt = rewindFor(g);
+  if (i === was) { setMapAt(S.pinAt); return; }  // already shown: only bring its wave on screen
+  S.pop = null; hideTip(); unpick(); selTl?.kill();
+  setMapAt(S.pinAt);   // its time on the map; it is shown from there on while it stays on screen
   const d = reduced || instant ? 0 : 1;
   selTl = gsap.timeline().to('#vTitle,#gLine', {autoAlpha: 0, duration: .14 * d}).call(render).to('#vTitle,#gLine', {autoAlpha: 1, duration: .26 * d});
   if (!ok) return;
@@ -1228,18 +1312,17 @@ async function refresh() {
   } catch (e) { console.warn('alerts', e); return false; }
   if (root.dataset.stage === 'home') renderHome();
   else if (S.topic && root.dataset.stage === 'result') {
-    const cur = shown()?.id, next = topicFindings(S.topic);
-    const sig = l => l.map(f => `${f.id}:${f.verdict}:${f.item_ids.length}:${f.explanation ? 1 : 0}`).join();
+    const next = topicFindings(S.topic);
+    const sig = l => l.map(f => `${f.id}:${f.verdict}:${f.item_ids.length}:${f.explanation ? 1 : 0}:${f.note ?? ''}`).join();
     if (sig(next) !== sig(S.list)) {
-      const at = next.findIndex(f => f.id === cur);
-      S.list = next; S.sel = Math.max(0, at);
-      if (at < 0) S.pickedWeak = false;  // the opened group is gone: back to the alert (or Quiet)
+      S.list = next;
+      if (!next.some(f => f.id === S.pin)) S.pin = null;   // the picked group is gone
       if (ok) setField(shown());
       render();
-      const want = rewindFor(shown());
-      if (!S.tmap || (shown()?.id !== cur && want !== S.mapAt)) setMapAt(want);  // a new group on screen (or no map yet)
+      // new groups never move the map: it stays where it is (live by default) and only reloads its data
+      if (!S.tmap) { if (!S.mapPending) setMapAt(S.pin ? S.pinAt : S.mapAt); }
       else if (!S.drawnAt) glideMap(); else loadMap();
-    } else if (!S.tmap) { if (!S.mapPending) setMapAt(rewindFor(shown())); }  // the first map never arrived: retry it
+    } else if (!S.tmap) { if (!S.mapPending) setMapAt(S.pin ? S.pinAt : S.mapAt); }  // the first map never arrived: retry it
     else if (!S.drawnAt) glideMap();                 // live: every pulse moves the map on to "now", gliding
     else if (S.list.some(f => !S.tmap.groups[f.id])) loadMap();  // a rewound map stays put (new groups only)
   }
@@ -1250,6 +1333,7 @@ async function refresh() {
 // the time axis: every label is a local clock time, counted back from the moment on screen (the origin)
 // the labels and the big ticks sit on round clock times (every LABEL_EVERY bins) and move with the surface:
 // tickPhase = bins from the origin to the newest labelled time, so a time stays attached to its column
+let lastShown;                                       // the group the title was last drawn for (setOrigin)
 const setOrigin = () => {
   const step = LABEL_EVERY * BIN_MS, o = S.tmap ? originMs() : 0, anchor = Math.floor(o / step) * step;
   const phase = S.tmap ? (o - anchor) / BIN_MS : 0;
@@ -1259,6 +1343,8 @@ const setOrigin = () => {
     d.el.style.visibility = u > L + 1e-6 ? 'hidden' : '';
     d.el.textContent = S.tmap ? localHM(anchor - d.tk * step) : (d.tk ? '' : 'now');
   }
+  const id = shown()?.id ?? null;                    // the window moved: the status follows what is on it now
+  if (id !== lastShown) { lastShown = id; if (root.dataset.stage === 'result') render(); }
   renderStrip();
 };
 function showMap() {
@@ -1544,7 +1630,8 @@ function setupAlpha() {
     const fresh = await refresh();
     // any stage: a change during the scan animation must not leave the old point's list for showResult
     if (fresh && S.topic) {
-      S.list = topicFindings(S.topic); S.sel = 0; S.pickedWeak = false;
+      S.list = topicFindings(S.topic);
+      if (!S.list.some(f => f.id === S.pin)) S.pin = null;
       if (root.dataset.stage === 'result') { if (ok) setField(shown()); render(); }
     }
   };
