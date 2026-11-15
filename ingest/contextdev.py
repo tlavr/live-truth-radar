@@ -30,6 +30,10 @@ DEFAULT_CACHE_DIR = Path(__file__).resolve().parent.parent / "cache" / "contextd
 class ContextDevError(RuntimeError):
     """API returned an error (HTTP status, or a 200 whose payload reports failure)."""
 
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status  # HTTP status when the API answered with one (S1 tells "no such brand" from an outage)
+
 
 class ContextDevClient:
     def __init__(
@@ -66,7 +70,8 @@ class ContextDevClient:
 
     def post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
         cp = self._cache_path(path, body)
-        if cp.exists():
+        use_cache = self.cache_ttl_sec > 0  # ttl <= 0: no raw-response files at all (S1 caches parsed results itself)
+        if use_cache and cp.exists():
             try:
                 entry = json.loads(cp.read_text(encoding="utf-8"))
                 if time.time() - entry["fetched_at"] < self.cache_ttl_sec:
@@ -76,14 +81,18 @@ class ContextDevClient:
                 pass  # corrupt cache entry: refetch
         r = self._http.post(path, json=body)
         if r.status_code != 200:
-            raise ContextDevError(f"{path}: HTTP {r.status_code}: {r.text[:300]}")
+            raise ContextDevError(f"{path}: HTTP {r.status_code}: {r.text[:300]}", status=r.status_code)
         data = r.json()
+        if not isinstance(data, dict):
+            raise ContextDevError(f"{path}: unexpected body type {type(data).__name__}")
         if data.get("success") is False:
             raise ContextDevError(f"{path}: success=false: {str(data)[:300]}")
         credits = (data.get("key_metadata") or {}).get("credits_consumed")
         log.info("fetched %s (credits=%s)", path, credits)
         if (data.get("parsed") or {}).get("success") is False:
             return data  # failed parse (e.g. site blocked): don't cache, retry next cycle
+        if not use_cache:
+            return data
         cp.parent.mkdir(parents=True, exist_ok=True)
         tmp = cp.with_suffix(".tmp")
         tmp.write_text(

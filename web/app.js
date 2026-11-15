@@ -944,7 +944,46 @@ function pointHTML(p, n, letter) {
    showModal() the observer never reported in Chromium */
 const PAGE = 10;
 let pager = null;                                   // the open sheet's "load more" check: dropped on close or a new point
-const postHTML = it => `<li><small>${esc(handle(it.author))} · ${hm(it.published_at)} UTC${it.platform ? ' · ' + esc(platformLabel(it.platform)) : ''}${it.synthetic ? `<span class="syn">${SIM}</span>` : ''}</small><span class="clip">${esc(it.text)}</span><button type="button" class="rm" data-expand>Read more</button>${/^https?:\/\//i.test(it.url ?? '') ? ` <a href="${esc(it.url)}" target="_blank" rel="noopener">source</a>` : ''}</li>`;
+/* S1 Source Trust: under a news article, who is behind its publisher (Context.dev brand + company), or "no source data".
+   The publisher's handle is masked, so the host comes from the article URL; one request per host, failures stay quiet. */
+const sourceHost = it => {
+  if (it.synthetic || it.platform !== 'news' || !/^https?:\/\//i.test(it.url ?? '')) return null;
+  try { return new URL(it.url).hostname.toLowerCase().replace(/^www\./, ''); } catch { return null; }
+};
+const sources = new Map();                          // host -> Promise of the /api/source answer (null on failure)
+const sourceOf = h => {
+  // in flight: shared; found answers stay for the page; found:false / failures are dropped so an outage does not stick
+  if (!sources.has(h)) sources.set(h, api(`/api/source/${encodeURIComponent(h)}`)
+    .then(s => { if (!s?.found) sources.delete(h); return s; })
+    .catch(() => { sources.delete(h); return null; }));
+  return sources.get(h);
+};
+function sourceText(s) {
+  if (!s?.found) return 'no source data';
+  const age = s.founded_year != null ? `founded ${s.founded_year}${s.age_years != null ? ` (${s.age_years} y)` : ''}` : null;
+  return [s.name, age, s.country, s.industry].filter(Boolean).join(' · ');
+}
+function fillSources(root) {
+  root.querySelectorAll('.srcline[data-host]:not([data-done])').forEach(el => {
+    el.dataset.done = '1';
+    sourceOf(el.dataset.host).then(s => {
+      if (!el.isConnected) return;
+      el.textContent = sourceText(s);
+      el.title = s?.found ? (s.description ?? '') : '';
+      if (s?.found && /^https:\/\//i.test(s.logo_url ?? '')) {
+        const img = new Image(16, 16);
+        img.alt = ''; img.loading = 'lazy'; img.referrerPolicy = 'no-referrer'; img.src = s.logo_url;
+        img.onerror = () => img.remove();
+        el.prepend(img);
+      }
+      el.classList.add('ready');
+    });
+  });
+}
+const postHTML = it => {
+  const host = sourceHost(it);
+  return `<li><small>${esc(handle(it.author))} · ${hm(it.published_at)} UTC${it.platform ? ' · ' + esc(platformLabel(it.platform)) : ''}${it.synthetic ? `<span class="syn">${SIM}</span>` : ''}</small><span class="clip">${esc(it.text)}</span><button type="button" class="rm" data-expand>Read more</button>${/^https?:\/\//i.test(it.url ?? '') ? ` <a href="${esc(it.url)}" target="_blank" rel="noopener">source</a>` : ''}${host ? `<small class="srcline" data-host="${esc(host)}">${esc(host)}</small>` : ''}</li>`;
+};
 function stopPaging() { if (pager) $('posts').removeEventListener('scroll', pager); pager = null; }
 function showPosts(id) {
   const s = shownPoints.get(id), dlg = $('posts');
@@ -965,6 +1004,7 @@ function showPosts(id) {
       {duration: 260, delay: 40 * k, easing: 'cubic-bezier(.2,.7,.2,1)', fill: 'backwards'}));
     shown += batch.length;
     markLong(list);
+    fillSources(list);
     if (shown < items.length) {
       foot.innerHTML = `<div class="sk"></div><div class="sk"></div><div class="sk"></div><p>${shown} of ${items.length} posts</p>`;
     } else {
