@@ -7,10 +7,10 @@ A document for the agent that will generate test data (swarm texts) for Bot Hive
 Bot Hive (`/redteam`, `POST /api/attack`) launches a synthetic bot attack on a topic. Bot texts are **not generated on the fly**: they live in `synth/variations/<slug>.json` files (in git, working offline).
 
 `GET /api/attack/topics` shows only topics that simultaneously:
-1. exist in `TOPICS` on the VPS (currently 49 topics, listed in `docs/HANDOFF.md` §6).
+1. exist in `TOPICS` on the VPS (currently 50 topics, listed in `docs/HANDOFF.md` §6).
 2. have a `synth/variations/<slug>.json` file.
 
-**Status (commit 725fb1e "Cover all monitored topics in Bot Hive"):** all 49 topics in `TOPICS` have files (plus the old `helsinki-tram-fares`, which is not in `TOPICS`). The first 3 were `europe-bomb-threat-hoaxes`, `jensen-huang-resignation` and `microsoft-global-outage`; the other 46 (table in §7) were added in that commit. Use this document to add a file for a new topic or to regenerate an existing one.
+**Status (commit 725fb1e "Cover all monitored topics in Bot Hive"):** all 49 topics then in `TOPICS` got files, and commit 2bdd489 added `arsenal-fc` (topic and file), so all 50 are covered (plus the old `helsinki-tram-fares`, which is not in `TOPICS`). The first 3 were `europe-bomb-threat-hoaxes`, `jensen-huang-resignation` and `microsoft-global-outage`; the other 46 (table in §7) were added in 725fb1e. Use this document to add a file for a new topic or to regenerate an existing one.
 
 ## 2. How text enters an attack (`api/main.py` `_attack_campaign`, `synth/campaign.py` `make_campaign`)
 
@@ -80,7 +80,7 @@ This is a test astroturf campaign for a detector demo, not a real one. Therefore
 ## 6. Consequences and constraints
 
 - **eval.** `make eval` injects attacks into all background topics that have a variations file (`eval/run.py`, `inject_topics`). The eval background contains `france-riots` and `ukraine-peace-talks` (`fixtures/items_live_background.json`): their files **change `eval/report.json`** (Pd, Pfa, and the operating point in the README and in the video). Commit 725fb1e added them and recomputed `eval/report.json` and `eval/operating_points.json`. Adding or regenerating either of these two files means re-running `make eval` and committing the report (P2 decides). The other topics do not affect eval. `make test` does not change: `tests/test_eval_report.py` pins two topics.
-- **Embedding warmup.** When the worker starts, `warm_attack_texts()` (`ingest/worker.py`) computes embeddings once for all topic variations from `TOPICS`: 49 topics × 150 texts ≈ 7 350 texts sent to Gemini (afterward they reside in `cache/embeddings/`). This affects Gemini quota and startup time. If quota is insufficient, process topics in batches.
+- **Embedding warmup.** When the worker starts, `warm_attack_texts()` (`ingest/worker.py`) computes embeddings once for all topic variations from `TOPICS`: 50 topics × 150 texts ≈ 7 500 texts sent to Gemini (afterward they reside in `cache/embeddings/`). This affects Gemini quota and startup time. If quota is insufficient, process topics in batches.
 - **Tests.** `test_committed_variation_sets_are_clean` is parameterized over all files and will automatically verify new ones. `make test` runtime will increase only slightly.
 - **Ownership.** `synth/` belongs to P2. Branch `p2/<task-id>-bot-hive-texts`. Per `CLAUDE.md`: card in `docs/tasks.md` → plan → human OK → work → `make test` → verification (`docs/workflow.md` §3). Subagents do not commit. Do not mention model names in commits and PRs (the `source` field in JSON is allowed).
 - **Deployment.** Merging into `main` deploys automatically (GitHub Actions). Do not merge during video recording: each deploy causes ~10–30 s of 502 errors and resets the news schedule. Do not deploy manually.
