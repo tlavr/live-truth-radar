@@ -954,12 +954,17 @@ const TECHNIQUE_INFO = {
   'exaggeration': 'Blows the facts up: bigger numbers, worse outcomes, "the worst ever".',
   'whataboutism': 'Deflects criticism by pointing at someone else\'s wrongdoing.',
 };
-// the Why panel's heading for a coordinated group: its attack type(s) with a short meaning; "other" and unknown labels are left out
+// a technique the explanation names outside the list above ("other", or a label we do not know)
+const OTHER_INFO = 'Coordinated, but without one of the usual propaganda techniques we name, or one we could not pin down: the accounts push the same message in sync.';
+// the Why panel's heading for a coordinated group: its attack type(s) with a short meaning; "other" and unknown
+// labels show as one "Other"
 function attackHTML(f) {
   const t = f?.verdict === 'coordinated' ? f.explanation?.technique : null;
   if (!t) return '';
-  const known = [...new Set(t.toLowerCase().split(' + ').map(s => s.trim()))].filter(s => TECHNIQUE_INFO[s]);
-  return known.map(s => `<div class="atk"><b><span>Attack type</span>${esc(s[0].toUpperCase() + s.slice(1))}</b><p>${esc(TECHNIQUE_INFO[s])}</p></div>`).join('');
+  const all = [...new Set(t.toLowerCase().split(' + ').map(s => s.trim()).filter(Boolean))];
+  const known = all.filter(s => TECHNIQUE_INFO[s]), other = all.length > known.length;
+  const atk = (name, info) => `<div class="atk"><b><span>Attack type</span>${esc(name)}</b><p>${esc(info)}</p></div>`;
+  return known.map(s => atk(s[0].toUpperCase() + s.slice(1), TECHNIQUE_INFO[s])).join('') + (other ? atk('Other', OTHER_INFO) : '');
 }
 // "Why": the attack type (coordinated, once explained), the verdict of the shown group in a sentence,
 // then what made it stand out, one phrase per detector step
@@ -1107,7 +1112,7 @@ async function showSays(k) {
   if (!f) return;
   const x = f.explanation, n = f.accounts.length;
   const head = sheetTop(`What they say<small>${n} accounts</small>`, LETTER(k)) +
-    (x ? `<p class="lead">${esc(x.summary)}</p><blockquote>“${esc(x.quote)}”</blockquote>${f.verdict === 'coordinated' && x.technique.toLowerCase() !== 'other' ? `<p class="foot">Attack type: ${esc(x.technique)}, ${Math.round(x.confidence * 100)}% confidence</p>` : ''}` : '');
+    (x ? `<p class="lead">${esc(x.summary)}</p><blockquote>“${esc(x.quote)}”</blockquote>${f.verdict === 'coordinated' ? `<p class="foot">Attack type: ${esc(x.technique.toLowerCase() === 'other' ? 'other' : x.technique)}, ${Math.round(x.confidence * 100)}% confidence</p>` : ''}` : '');
   dlg.innerHTML = head + '<p class="foot">Loading posts…</p>';
   sheetOpen(dlg);
   let its;
